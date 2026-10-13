@@ -28,6 +28,10 @@ import { BASE_CURRENCY, ENROLMENT_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type S
  * each payment in rupees, or cash taken in AED with its rate — 1 AED = so many
  * INR. The money already on the lead is in AED, so there it is always that:
  * its AED fixed, its rate asked, the rupees it comes to worked out.
+ *
+ * Rupees on a Dubai close (the user, 2026-10-13) take their rate the way it is
+ * quoted — 1 AED = so many INR — and "INR Transfer" as the method picks INR;
+ * the rate kept and sent stays 1 INR = so many AED, like every other currency's.
  */
 
 export interface PaymentRow {
@@ -80,6 +84,17 @@ export const isForeign = (r: PaymentRow, base: PaymentBase = BASE_CURRENCY) =>
   r.currency !== base && (!r.collectedBefore || base !== BASE_CURRENCY);
 
 const num = (s: string) => Math.max(0, Number(s) || 0);
+
+/** Rupees on a Dubai close: their rate is typed as 1 AED = so many INR, the inverse of the one kept. */
+const quotedPerAed = (r: Pick<PaymentRow, "currency">, base: PaymentBase) => base === BASE_CURRENCY && r.currency === "INR";
+/** How much of the academy's currency one unit of the row's bought, from the rate as typed. */
+const perUnit = (r: PaymentRow, base: PaymentBase, rateInput = r.rateInput) => {
+  const rate = num(rateInput);
+  return quotedPerAed(r, base) ? (rate > 0 ? 1 / rate : 0) : rate;
+};
+/** A Dubai INR row's rate as it is typed (1 AED = INR) from the one kept (1 INR = AED). */
+export const rateInputFor = (currency: string, exchangeRate: number, base: PaymentBase = BASE_CURRENCY) =>
+  quotedPerAed({ currency }, base) ? String(Number((1 / exchangeRate).toPrecision(8))) : String(exchangeRate);
 /** Whole fils, as a plain number string. */
 const toAedInput = (n: number) => String(Math.round(n * 100) / 100);
 /** A rate worked out from two amounts, to ten significant figures. */
@@ -91,7 +106,7 @@ export const rowAmount = (r: PaymentRow, base: PaymentBase = BASE_CURRENCY) => (
 /** For the close: what was handed over in another currency, and its rate — nothing when paid in the academy's. */
 export function rowForeignFields(r: PaymentRow, base: PaymentBase = BASE_CURRENCY): { currency?: string; amountInCurrency?: number; exchangeRate?: number } {
   if (!isForeign(r, base)) return {};
-  return { currency: r.currency, amountInCurrency: num(r.amountInput), exchangeRate: num(r.rateInput) };
+  return { currency: r.currency, amountInCurrency: num(r.amountInput), exchangeRate: Number(perUnit(r, base).toPrecision(12)) };
 }
 
 /** "INR 50,000 at 1 INR = 0.044 AED" (or, on a Bangalore close, "AED 1,000 at 1 AED = 22.5 INR") — for the lead's payment note. */
@@ -99,7 +114,7 @@ export function describeForeign(r: PaymentRow, base: PaymentBase = BASE_CURRENCY
   if (!isForeign(r, base)) return "";
   const paid = num(r.amountInput).toLocaleString("en-US", { maximumFractionDigits: 2 });
   const rate = Number(num(r.rateInput).toPrecision(6)).toLocaleString("en-US", { maximumFractionDigits: 10 });
-  return `${r.currency} ${paid} at 1 ${r.currency} = ${rate} ${base}`;
+  return quotedPerAed(r, base) ? `${r.currency} ${paid} at 1 ${base} = ${rate} ${r.currency}` : `${r.currency} ${paid} at 1 ${r.currency} = ${rate} ${base}`;
 }
 
 /**
@@ -151,25 +166,32 @@ export function PaymentRowsEditor({ leadId, rows, onChange, base = BASE_CURRENCY
 
   // Another currency: the rate and the AED figure follow each other — whichever
   // was typed last works out the other; a new amount keeps the rate.
+  // Rupees on a Dubai close: the typed rate is INR for 1 AED, so the AED is rupees ÷ rate.
+  const rateFrom = (r: PaymentRow, paid: number, converted: number) => (quotedPerAed(r, base) ? paid / converted : converted / paid);
   function setAmount(r: PaymentRow, amountInput: string) {
     const paid = num(amountInput);
     if (!isForeign(r, base)) return update(r.id, { amountInput });
-    if (num(r.rateInput) > 0) return update(r.id, { amountInput, convertedInput: paid > 0 ? toAedInput(paid * num(r.rateInput)) : "" });
-    if (num(r.convertedInput) > 0 && paid > 0) return update(r.id, { amountInput, rateInput: toRateInput(num(r.convertedInput) / paid) });
+    if (num(r.rateInput) > 0) return update(r.id, { amountInput, convertedInput: paid > 0 ? toAedInput(paid * perUnit(r, base)) : "" });
+    if (num(r.convertedInput) > 0 && paid > 0) return update(r.id, { amountInput, rateInput: toRateInput(rateFrom(r, paid, num(r.convertedInput))) });
     update(r.id, { amountInput });
   }
   function setRate(r: PaymentRow, rateInput: string) {
     const paid = num(r.amountInput);
-    const rate = num(rateInput);
-    update(r.id, { rateInput, convertedInput: paid > 0 && rate > 0 ? toAedInput(paid * rate) : "" });
+    const unit = perUnit(r, base, rateInput);
+    update(r.id, { rateInput, convertedInput: paid > 0 && unit > 0 ? toAedInput(paid * unit) : "" });
   }
   function setConverted(r: PaymentRow, convertedInput: string) {
     const paid = num(r.amountInput);
     const aed = num(convertedInput);
-    update(r.id, { convertedInput, rateInput: paid > 0 && aed > 0 ? toRateInput(aed / paid) : "" });
+    update(r.id, { convertedInput, rateInput: paid > 0 && aed > 0 ? toRateInput(rateFrom(r, paid, aed)) : "" });
   }
   // A new currency starts its rate afresh: no feed is trusted for it, the seller enters it.
   const setCurrency = (r: PaymentRow, currency: string) => update(r.id, { currency, rateInput: "", convertedInput: "" });
+  // "INR Transfer" is rupees: it picks INR for the row (on a Bangalore close, its own currency).
+  function setMethod(r: PaymentRow, method: string) {
+    if (method !== "inr_bank_account" || r.collectedBefore || r.currency === "INR") return update(r.id, { method });
+    update(r.id, { method, currency: "INR", rateInput: "", convertedInput: "" });
+  }
 
   async function attach(id: string, file: File) {
     update(id, { uploading: true, uploadError: "" });
@@ -196,7 +218,7 @@ export function PaymentRowsEditor({ leadId, rows, onChange, base = BASE_CURRENCY
           >
             <div className="flex items-center gap-2">
               <span className="w-5 shrink-0 text-[10px] font-semibold text-muted-foreground">{i + 1}.</span>
-              <Select value={r.method} onValueChange={(v) => update(r.id, { method: v })}>
+              <Select value={r.method} onValueChange={(v) => setMethod(r, v)}>
                 <SelectTrigger className="h-8 w-[130px] shrink-0 text-xs" aria-label={`Payment ${i + 1} method`}>
                   <SelectValue placeholder="Paid by…" />
                 </SelectTrigger>
@@ -254,14 +276,15 @@ export function PaymentRowsEditor({ leadId, rows, onChange, base = BASE_CURRENCY
                   exit="hidden"
                   className="flex flex-wrap items-center gap-1.5 pl-7 text-[11px] text-muted-foreground"
                 >
-                  <span>1 {r.currency} =</span>
+                  {/* Rupees on a Dubai close are quoted the other way round: 1 AED = so many INR. */}
+                  <span>1 {quotedPerAed(r, base) ? base : r.currency} =</span>
                   <Input
                     type="number" min="0" step="any" value={r.rateInput}
                     onChange={(e) => setRate(r, e.target.value)}
                     placeholder="rate" className="h-7 w-24 text-xs"
-                    aria-label={`Payment ${i + 1}: 1 ${r.currency} in ${base}`}
+                    aria-label={quotedPerAed(r, base) ? `Payment ${i + 1}: 1 ${base} in ${r.currency}` : `Payment ${i + 1}: 1 ${r.currency} in ${base}`}
                   />
-                  <span>{base} →</span>
+                  <span>{quotedPerAed(r, base) ? r.currency : base} →</span>
                   <Input
                     type="number" min="0" step="0.01" value={r.convertedInput}
                     onChange={(e) => setConverted(r, e.target.value)}

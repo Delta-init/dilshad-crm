@@ -17,8 +17,7 @@ import { useAllCourses } from "@/hooks/useCourses";
 import { useCorrectEnrolment, useEnrolmentCorrection, type EnrolmentCorrectionStart } from "@/hooks/useEnrolments";
 import { useEmailCheck } from "@/hooks/useStudents";
 import {
-  PaymentRowsEditor, missingInRows, newPaymentRow, rowAmount, rowForeignFields, type PaymentBase, type PaymentRow,
-} from "@/components/students/PaymentRowsEditor";
+  PaymentRowsEditor, missingInRows, newPaymentRow, rowAmount, rowForeignFields, type PaymentBase, type PaymentRow, rateInputFor } from "@/components/students/PaymentRowsEditor";
 import { AcademyBadge } from "@/components/students/AcademyBadge";
 import { bangalorePriceOf, feeFor, type Course } from "@/types/course";
 import type { FeeStatus, Student } from "@/types/student";
@@ -71,7 +70,7 @@ function startingRows(s: Student, ownOnLead: number, base: PaymentBase = BASE_CU
       p.currency && p.currency !== base && p.amountInCurrency && p.exchangeRate
         ? newPaymentRow({
             method: p.method, currency: p.currency, amountInput: String(p.amountInCurrency),
-            rateInput: String(p.exchangeRate), convertedInput: String(p.amount), receipt: p.receipt ?? null,
+            rateInput: rateInputFor(p.currency, p.exchangeRate, base), convertedInput: String(p.amount), receipt: p.receipt ?? null,
           })
         : newPaymentRow({ method: p.method, currency: base, amountInput: String(p.amount), receipt: p.receipt ?? null }),
     ));

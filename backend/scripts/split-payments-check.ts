@@ -290,6 +290,19 @@ const before5 = await studentOf(r);
 const edit = await call("PUT", `/students/${String(before5!._id)}`, "Theertha", { academy: "bangalore", notes: "moved?" });
 check("an edit can't move an enrolment to the other academy", edit.status === 200 && (await studentOf(r))?.academy === "dubai", `${edit.status}`);
 
+section("Case 5b — INR Transfer (2026-10-13): the method, rupees at 1 AED = 22.75 INR, sent as finance's INR Bank Account");
+{
+  const perInr = Number((1 / 22.75).toPrecision(12));
+  r = await close({ course: String(courseBoth._id), totalFee: 2250, paidAmount: 2250, payments: [pay("inr_bank_account", 2250, "inr-transfer", { currency: "INR", amountInCurrency: 51187.5, exchangeRate: perInr })] });
+  s = await studentOf(r);
+  check("closed (201) with the INR Transfer method, its rupees and rate kept", r.status === 201 && s?.payments?.[0]?.method === "inr_bank_account" && s?.payments?.[0]?.amountInCurrency === 51187.5, `${r.status} ${r.body.message}`);
+  payload = await service.buildHandoverPayload(String(s!._id)) as Record<string, any>;
+  check("…finance is told: AED 2,250 by inr_bank_account, original ₹51,187.50 at 1 INR = 1/22.75 AED",
+    payload?.payments?.[0]?.method === "inr_bank_account" && payload?.payments?.[0]?.amountMinor === 225_000 && payload?.payments?.[0]?.original?.currency === "INR"
+      && payload?.payments?.[0]?.original?.amountMinor === 5_118_750 && Math.abs(payload?.payments?.[0]?.original?.rate - 1 / 22.75) < 1e-9,
+    JSON.stringify(payload?.payments));
+}
+
 section("Case 6 — the client's email at the close (2026-10-10): finance refuses an enrolment without one");
 {
   const { Lead } = await import("../src/models/Lead.js");
