@@ -51,6 +51,12 @@ export const CRM_MODULES = [
   "inactive-leads",
   // My Pay: the salary slabs (salaryService) — open to everyone, as in the Sales CRM.
   "pay",
+  /*
+   * Balance payments (2026-10-13): part-paid closes, each person's own, a team
+   * leader's teams', everyone's for a Super Admin or the Sales Manager. View sees
+   * the page, create records a payment for finance. Open by default.
+   */
+  "balancePayments",
 ] as const;
 
 export type CrmModule = (typeof CRM_MODULES)[number];
@@ -67,6 +73,7 @@ export const OPEN_BY_DEFAULT: Partial<Record<CrmModule, Partial<ModulePermission
   leaderboard: { view: true },
   calendar: { view: true },
   pay: { view: true },
+  balancePayments: { view: true, create: true },
 };
 
 export type PermissionsMap = {

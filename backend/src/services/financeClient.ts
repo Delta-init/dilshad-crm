@@ -257,3 +257,82 @@ export async function fetchEnrolmentStatuses(studentIds: string[], orgId: string
     clearTimeout(timer);
   }
 }
+
+/** What finance adds to an enrolment's status for the Balance payments page (2026-10-13). */
+export interface BalanceFields {
+  course?: string;
+  nextDueOn?: string;
+  payments?: { amountMinor: number; paidOn: string; method: string; receiptNumber?: string }[];
+  balancePayments?: FinanceBalancePayment[];
+}
+
+/** A balance payment this CRM sent, as finance answers for it. */
+export interface FinanceBalancePayment {
+  externalId: string;
+  amountMinor: number;
+  currency: string;
+  method: string;
+  paidOn: string;
+  status: "pending" | "approved" | "rejected";
+  reason?: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  receiptNumber?: string;
+}
+
+/** Finance refused a balance payment, or could not be reached: `status` is its HTTP answer (0 when unreachable). */
+export class FinanceRefusal extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+/**
+ * Hand finance the next payment of a part-paid enrolment (the user,
+ * 2026-10-13), with its receipt: it waits there for accounts to approve it.
+ * Idempotent on `externalId`, so a retry after a timeout is the same payment.
+ * Throws FinanceRefusal with finance's own reason ("more than the AED 600.00
+ * left on invoice IN-00041", "not approved yet") for the screen to show.
+ */
+export async function sendBalancePayment(payload: {
+  enrolmentExternalId: string;
+  externalId: string;
+  amountMinor: number;
+  method: string;
+  paidOn: string;
+  receipt: { name: string; url: string; key: string; size?: number; mimeType?: string };
+  note?: string;
+  recordedBy: { name: string; email: string };
+}, orgId: string): Promise<FinanceBalancePayment & { id: string }> {
+  if (!financeConfigured() || !orgId) throw new FinanceRefusal("The finance connection is not set up", 503);
+
+  const path = "/api/v1/integrations/enrolments/balance-payments";
+  const raw = JSON.stringify({ source: "crm", ...payload });
+  const timestamp = String(Date.now());
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const signature = signRequest(env.FINANCE_INTEGRATION_SECRET, "POST", path, timestamp, nonce, raw);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${baseUrl()}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-delta-client": env.FINANCE_CLIENT_ID,
+        "x-delta-timestamp": timestamp,
+        "x-delta-nonce": nonce,
+        "x-delta-signature": signature,
+        "x-delta-org": orgId,
+      },
+      body: raw,
+      signal: controller.signal,
+    });
+    const body = (await res.json().catch(() => ({}))) as { data?: FinanceBalancePayment & { id: string }; error?: { message?: string } };
+    if (!res.ok || !body.data) throw new FinanceRefusal(body.error?.message ?? `Finance returned ${res.status}`, res.status);
+    return body.data;
+  } catch (err) {
+    if (err instanceof FinanceRefusal) throw err;
+    throw new FinanceRefusal("Finance could not be reached — try again in a minute", 0);
+  } finally {
+    clearTimeout(timer);
+  }
+}
