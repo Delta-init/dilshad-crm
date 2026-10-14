@@ -370,11 +370,19 @@ No `min` attribute on `datetime-local` input, and no frontend validation.
 
 ---
 
+## [2026-10-14] Pages not named after a permission sent everyone but Super Admin away
+
+**Bug:** The dashboard layout's guard read the first path segment as the permission module — `hasPermission(pathname.split("/")[1], "view")`. There is no "my-tracker" or "calls" permission, so every role but Super Admin was redirected off My Tracker and Calls although the sidebar showed them the link — the BDE even with Tracker ticked.
+**Fix:** `canOpen()` in `app/(dashboard)/layout.tsx`: a path named after a module in `CRM_MODULES` needs that module; any other sidebar page needs its item's `permModule` (`null` = every role). The same fix as Draw (2026-10-03).
+**Rule:** A page whose path is not a permission module goes in `navItems` with the right `permModule` — the guard goes by that, not by the path.
+
+---
+
 ## ➕ Adding a New Mistake
 
 Copy the template at the top and place it at the **top** of the correct category section.
 
-**Entry count**: 11
+**Entry count**: 12
 *(Increment every time you add a mistake)*
 
 ---

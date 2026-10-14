@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { useAuthStore } from "@/lib/store/authStore";
 import { navItems } from "@/components/layout/Sidebar";
+import { CRM_MODULES } from "@/types";
 import { useReminderNotifications } from "@/hooks/useReminderNotifications";
 import { useActivityHeartbeat } from "@/hooks/useActivityHeartbeat";
 import { RecentPageTracker } from "@/components/shared/CommandPalette";
@@ -38,11 +39,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const pathname = usePathname();
 
+  // Whether this role may open a page. A path named after a permission module
+  // needs that module's "view" (/leads/…, /settings, /mentors). Any other
+  // sidebar page needs what its sidebar item names — /my-tracker is Tracker,
+  // /calls its module — or nothing. Reading the path alone sent everyone but
+  // Super Admin away from My Tracker and Calls (2026-10-14): there is no
+  // "my-tracker" permission to have, even with Tracker ticked.
+  const canOpen = (path: string) => {
+    const segment = path.split("/")[1] ?? "";
+    if ((CRM_MODULES as readonly string[]).includes(segment)) return hasPermission(segment, "view");
+    const item = navItems.find((n) => n.href === `/${segment}`);
+    if (item) return item.permModule === null || hasPermission(item.permModule, "view");
+    return hasPermission(segment, "view");
+  };
+
   const redirectPermisionPage = useCallback(() => {
     if (typeof window == "undefined") return;
     for (let i = 0; i < navItems.length; i++) {
       const item = navItems[i];
-      if (hasPermission(item.href.split("/")[1], "view")) {
+      if (canOpen(item.href)) {
         router.push(item.href);
         break;
       }
@@ -50,7 +65,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [hasPermission]);
   useEffect(() => {
     if (OPEN_TO_EVERYONE.has(pathname)) return;
-    if (!hasPermission(pathname.split("/")[1], "view")) {
+    if (!canOpen(pathname)) {
       redirectPermisionPage();
     }
   }, [pathname]);
