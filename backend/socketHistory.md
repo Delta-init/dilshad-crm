@@ -218,6 +218,36 @@ Events the server emits TO clients. Frontend hooks that listen to each event are
 
 ---
 
+### `sale:closed`
+
+| Property | Value |
+|----------|-------|
+| **Emitted by** | `services/saleAnnouncement.ts` → `announceSaleClosed()`, called by `studentService.createStudent()` once the close is saved (2026-10-15), via `emitToAll()`. Not awaited; never throws |
+| **When** | Every close (a lead becomes a student) |
+| **Room** | Everybody connected (`io.emit`): every signed-in screen |
+| **Frontend listener** | `SaleCelebration.tsx` (dashboard layout), on the shared connection (`useSocket`). It shows a centred pop-up with glitter, a WebAudio sparkle and the browser's own voice (`lib/saleAnnouncement.ts`) |
+
+**Payload shape**:
+```typescript
+{
+  id: string,          // the student's id: one announcement per close, however many tabs hear it
+  closer: string,      // the lead's salesperson (assignedTo), else whoever pressed close, else ""
+  student: string,
+  courses: string[],   // the course's name, when the close has one
+  amount: number,      // totalFee, in the academy's currency (INR for Bangalore)
+  academy: "dubai" | "bangalore",
+  at: string           // ISO time
+}
+```
+
+**Frontend behavior**:
+- One at a time, for about 8 s: until the voice has finished, and 15 s at most.
+- Sound and voice can be muted per device from the bell; the pop-up still shows.
+- With several tabs open, only one speaks.
+- Not stored or pushed: only whoever is signed in at that moment sees it.
+
+---
+
 ## Helper Functions
 
 All exported from `src/socket.ts`:
@@ -242,6 +272,10 @@ All exported from `src/socket.ts`:
 - Emits `team:update` event to `team:{teamId}` room
 - Payload: `{ teamId, item }`
 - Used by: `teamService.postTeamMessage()`
+
+### `emitToAll(event: string, payload: object): void`
+- `io.emit(event, payload)`: everybody connected. Every connection passed the JWT check, so only signed-in users hear it
+- Used by: `saleAnnouncement.ts` (`sale:closed`)
 
 ---
 

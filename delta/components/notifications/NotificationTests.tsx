@@ -6,6 +6,7 @@ import { Bell, ChevronDown, Loader2, Monitor, Smartphone } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { sendTestPush, showLocalTestNotification } from "@/hooks/usePushNotification";
+import { SaleAnnouncementControls } from "@/components/notifications/SaleAnnouncementControls";
 
 /*
  * Testing notifications from the bell (the user, 2026-10-05, as in the Sales
@@ -87,6 +88,8 @@ export function NotificationTests({ isSubscribed, permission, pushLoading, reque
                 </motion.button>
               )}
             </div>
+
+            <SaleAnnouncementControls />
 
             {/* Browser and devices */}
             <div className="space-y-1">

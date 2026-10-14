@@ -92,3 +92,13 @@ export function emitToUser(
   console.log(`📤 emitToUser → room=${room} sockets=${sockets?.size ?? 0} event=${event}`);
   io.to(room).emit(event, payload);
 }
+
+/**
+ * Emit to everybody signed in to this CRM right now. Every connection has
+ * passed the token check in initSocket, so nobody signed out hears it.
+ * Used for a closed sale (sale:closed), which every screen celebrates.
+ */
+export function emitToAll(event: string, payload: object): void {
+  if (!io) return;
+  io.emit(event, payload);
+}
