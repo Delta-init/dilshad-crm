@@ -34,7 +34,7 @@ import { listContainerVariants, listItemVariants, pageVariants } from "@/lib/ani
 import { useAuthStore } from "@/lib/store/authStore";
 import { useTeams } from "@/hooks/useTeams";
 import { useActivityPeople, useIdleStretches, useLoginEvents } from "@/hooks/useActivity";
-import type { LoginEventEntry, LoginEventKind, PersonActivity, PresenceStatus } from "@/types/activity";
+import type { IdleStretchEntry, LoginEventEntry, LoginEventKind, PersonActivity, PresenceStatus } from "@/types/activity";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Tab = "people" | "logins" | "idle";
@@ -91,7 +91,8 @@ function statusBadge(p: PersonActivity, timeZone: string): { label: string; vari
     signed_out: { label: p.lastLogoutAt ? `Signed out ${clock(p.lastLogoutAt, timeZone)}` : "Signed out", variant: "outline" },
     offline: { label: "Not seen today", variant: "outline" },
   };
-  return map[p.status];
+  // A status this page doesn't know yet (a newer server) shows as itself rather than breaking the list.
+  return map[p.status] ?? { label: String(p.status || "unknown"), variant: "outline" };
 }
 
 function DeviceIcon({ device }: { device: string }) {
@@ -104,6 +105,9 @@ function DeviceIcon({ device }: { device: string }) {
  * The super admin's view of who is here: everyone's status right now and
  * their day so far, the sign-in history (including refused sign-ins), and the
  * idle alerts that went out.
+ *
+ * Below a desktop's width each list is a column of cards instead of a table:
+ * five columns do not fit a phone, nor a tablet beside the sidebar.
  */
 export default function ActivityPage() {
   const user = useAuthStore((s) => s.user);
@@ -149,7 +153,7 @@ export default function ActivityPage() {
 
   if (!mounted) {
     return (
-      <div className="space-y-6 p-4 sm:p-6">
+      <div className="space-y-6">
         <Skeleton className="h-9 w-56" />
         <TableSkeleton />
       </div>
@@ -158,7 +162,7 @@ export default function ActivityPage() {
 
   if (!isSuperAdmin) {
     return (
-      <motion.div variants={pageVariants} initial="hidden" animate="visible" className="p-4 sm:p-6">
+      <motion.div variants={pageVariants} initial="hidden" animate="visible">
         <Card className="border-border/50">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <Activity className="h-8 w-8 text-muted-foreground/60" />
@@ -173,12 +177,12 @@ export default function ActivityPage() {
   const fetching = tab === "people" ? people.isFetching : tab === "logins" ? logins.isFetching : idle.isFetching;
 
   return (
-    <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6 p-4 sm:p-6">
+    <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6">
       {/* ── Header ── */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-xl font-bold">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
               <Activity className="h-5 w-5 text-primary" />
             </span>
             Activity
@@ -228,7 +232,7 @@ export default function ActivityPage() {
 
       {/* ── Tabs + filters ── */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="inline-flex w-fit shrink-0 rounded-xl border border-border/60 bg-muted/40 p-1">
+        <div className="inline-flex w-fit max-w-full shrink-0 overflow-x-auto rounded-xl border border-border/60 bg-muted/40 p-1">
           {TABS.map((t) => (
             <motion.button
               key={t.key}
@@ -254,21 +258,22 @@ export default function ActivityPage() {
           ))}
         </div>
 
+        {/* On a phone the search takes its own line and the pickers share the next. */}
         <div className="flex flex-wrap items-center gap-2">
           {tab === "people" && (
             <>
-              <div className="relative">
+              <div className="relative w-full sm:w-52">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search people"
-                  className="h-9 w-52 pl-8"
+                  className="h-9 w-full pl-8"
                   aria-label="Search people"
                 />
               </div>
               <Select value={teamId} onValueChange={setTeamId}>
-                <SelectTrigger className="h-9 w-44" aria-label="Team">
+                <SelectTrigger className="h-9 min-w-0 flex-1 sm:w-44 sm:flex-none" aria-label="Team">
                   <SelectValue placeholder="All teams" />
                 </SelectTrigger>
                 <SelectContent>
@@ -284,7 +289,7 @@ export default function ActivityPage() {
           )}
           {tab === "logins" && (
             <Select value={kind} onValueChange={setKind}>
-              <SelectTrigger className="h-9 w-44" aria-label="Event">
+              <SelectTrigger className="h-9 min-w-0 flex-1 sm:w-44 sm:flex-none" aria-label="Event">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -295,7 +300,7 @@ export default function ActivityPage() {
               </SelectContent>
             </Select>
           )}
-          <motion.div whileTap={{ scale: 0.97 }}>
+          <motion.div whileTap={{ scale: 0.97 }} className="shrink-0">
             <Button variant="ghost" size="icon" className="h-9 w-9" onClick={refetch} aria-label="Refresh">
               <RefreshCw className={cn("h-4 w-4", fetching && "animate-spin")} />
             </Button>
@@ -306,9 +311,9 @@ export default function ActivityPage() {
       <AnimatePresence>
         {person && tab !== "people" && (
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-            <Badge variant="outline" className="gap-1.5 py-1">
-              {person.name}
-              <button type="button" onClick={() => setPerson(null)} aria-label="Show everyone" className="rounded-full hover:text-destructive">
+            <Badge variant="outline" className="max-w-full gap-1.5 py-1">
+              <span className="truncate">{person.name}</span>
+              <button type="button" onClick={() => setPerson(null)} aria-label="Show everyone" className="shrink-0 rounded-full hover:text-destructive">
                 <X className="h-3 w-3" />
               </button>
             </Badge>
@@ -336,7 +341,16 @@ export default function ActivityPage() {
                 }
               />
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* ── Phones and tablets ── */}
+              <motion.ul key={`cards-${query}-${teamId}`} variants={listContainerVariants} initial="hidden" animate="visible" className="divide-y divide-border/30 lg:hidden">
+                {(people.data?.items ?? []).map((p) => (
+                  <PersonCard key={p.id} person={p} timeZone={tz} onHistory={showHistory} />
+                ))}
+              </motion.ul>
+
+              {/* ── Desktop ── */}
+              <div className="hidden overflow-x-auto lg:block">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/50 bg-muted/30 text-left text-xs text-muted-foreground">
@@ -413,6 +427,7 @@ export default function ActivityPage() {
                   </motion.tbody>
                 </table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -438,7 +453,16 @@ export default function ActivityPage() {
                 }
               />
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* ── Phones and tablets ── */}
+              <motion.ul key={`cards-${loginsPage}-${kind}-${person?.id ?? ""}`} variants={listContainerVariants} initial="hidden" animate="visible" className="divide-y divide-border/30 lg:hidden">
+                {(logins.data?.items ?? []).map((e) => (
+                  <LoginCard key={e.id} event={e} timeZone={tz} />
+                ))}
+              </motion.ul>
+
+              {/* ── Desktop ── */}
+              <div className="hidden overflow-x-auto lg:block">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/50 bg-muted/30 text-left text-xs text-muted-foreground">
@@ -474,6 +498,7 @@ export default function ActivityPage() {
                   </motion.tbody>
                 </table>
               </div>
+              </>
             )}
           </CardContent>
           {logins.data?.pagination && logins.data.pagination.total > 0 && (
@@ -510,7 +535,16 @@ export default function ActivityPage() {
                 }
               />
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* ── Phones and tablets ── */}
+              <motion.ul key={`cards-${idlePage}-${person?.id ?? ""}`} variants={listContainerVariants} initial="hidden" animate="visible" className="divide-y divide-border/30 lg:hidden">
+                {(idle.data?.items ?? []).map((s) => (
+                  <IdleCard key={s.id} stretch={s} timeZone={tz} />
+                ))}
+              </motion.ul>
+
+              {/* ── Desktop ── */}
+              <div className="hidden overflow-x-auto lg:block">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/50 bg-muted/30 text-left text-xs text-muted-foreground">
@@ -542,6 +576,7 @@ export default function ActivityPage() {
                   </motion.tbody>
                 </table>
               </div>
+              </>
             )}
           </CardContent>
           {idle.data?.pagination && idle.data.pagination.total > 0 && (
@@ -571,5 +606,118 @@ function EventBadge({ event }: { event: LoginEventEntry }) {
         <Icon className="h-3 w-3" /> {cfg.label}
       </Badge>
     </motion.span>
+  );
+}
+
+/** A person on a phone or tablet: the row's facts stacked. Tap the name for their sign-ins. */
+function PersonCard({
+  person: p,
+  timeZone,
+  onHistory,
+}: {
+  person: PersonActivity;
+  timeZone: string;
+  onHistory: (p: { id: string; name: string }, to: Tab) => void;
+}) {
+  const badge = statusBadge(p, timeZone);
+  return (
+    <motion.li variants={listItemVariants} className="space-y-2 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={() => onHistory({ id: p.id, name: p.name }, "logins")}
+            className="block max-w-full truncate text-left font-medium hover:text-primary"
+          >
+            {p.name}
+          </button>
+          <div className="truncate text-xs text-muted-foreground">
+            {[p.role, p.teams.join(", ")].filter(Boolean).join(" · ") || p.email}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="font-mono text-sm font-semibold">{p.activeMinutesToday ? fmtMinutes(p.activeMinutesToday) : "—"}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {p.firstActiveToday ? `active today from ${clock(p.firstActiveToday, timeZone)}` : "active today"}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant={badge.variant} className="whitespace-nowrap text-[11px]">
+          {badge.label}
+        </Badge>
+        {p.alerted && (
+          <button type="button" onClick={() => onHistory({ id: p.id, name: p.name }, "idle")}>
+            <Badge variant="destructive" className="whitespace-nowrap text-[11px]">
+              Alerted
+            </Badge>
+          </button>
+        )}
+        {p.superAdmin && <span className="text-[11px] text-muted-foreground">not tracked</span>}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+        <span>Last seen {p.lastSeenAt ? timeAgo(p.lastSeenAt) : "never"}</span>
+        {p.lastLogin && (
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <DeviceIcon device={p.lastLogin.device} />
+            <span className="truncate">
+              Signed in {stamp(p.lastLogin.at, timeZone)}
+              {p.lastLogin.device ? ` · ${p.lastLogin.device}` : ""}
+              {p.lastLogin.ip ? ` · ${p.lastLogin.ip}` : ""}
+            </span>
+          </span>
+        )}
+      </div>
+    </motion.li>
+  );
+}
+
+/** A sign-in, refused sign-in or sign-out on a phone or tablet. */
+function LoginCard({ event: e, timeZone }: { event: LoginEventEntry; timeZone: string }) {
+  return (
+    <motion.li variants={listItemVariants} className="space-y-1.5 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium">{e.user?.name ?? "No account"}</div>
+          <div className="truncate text-xs text-muted-foreground">{e.email}</div>
+        </div>
+        <span className="shrink-0">
+          <EventBadge event={e} />
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+        <span>
+          {stamp(e.createdAt, timeZone)} · {timeAgo(e.createdAt)}
+        </span>
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <DeviceIcon device={e.device} />
+          <span className="truncate">{e.device || "—"}</span>
+        </span>
+        {e.ip && <span className="font-mono">{e.ip}</span>}
+      </div>
+    </motion.li>
+  );
+}
+
+/** An idle alert on a phone or tablet. */
+function IdleCard({ stretch: s, timeZone }: { stretch: IdleStretchEntry; timeZone: string }) {
+  return (
+    <motion.li variants={listItemVariants} className="space-y-1.5 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 truncate font-medium">{s.user?.name ?? "—"}</div>
+        <div className="shrink-0 font-mono text-sm font-semibold">{fmtMinutes(s.minutes)}</div>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <span>Quiet since {stamp(s.since, timeZone)}</span>
+        <span>Alerted {clock(s.alertedAt, timeZone)}</span>
+        {s.endedAt ? (
+          <span>Back {stamp(s.endedAt, timeZone)}</span>
+        ) : (
+          <Badge variant="warning" className="text-[11px]">
+            Not back yet
+          </Badge>
+        )}
+      </div>
+    </motion.li>
   );
 }

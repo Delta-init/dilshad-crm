@@ -897,3 +897,13 @@ back) and the added email.
   asks for it (Follow Up: what happened, next follow-up optional; Meeting Scheduled: when; Call Back: optional reminder;
   Lost: a reason from the list and notes; Closed: the enrolment form), notes. "Later" keeps it for 30 minutes.
 - **Counts**: calls / connected / not connected come from 3CX and are read-only (the + / − counters are gone)
+
+## Activity and Inactive Leads on phones and tablets (2026-10-15)
+
+- **Activity** (People, Sign-ins, Idle alerts) and **Inactive Leads** (Inactive now, Moves log): below 1024 px each
+  list is a column of cards instead of a table — the table only from a desktop's width, where it has the room beside
+  the sidebar. The cards carry the same facts; on Inactive Leads, why a lead won't move on its own (by hand only, nobody
+  left, no team) and who lost it before are written out on them, since a touch screen has no hover.
+- On a phone the search takes its own line and the pickers share the next; long names, devices and the person filter
+  shorten instead of pushing the page sideways; the pages no longer add padding of their own on top of the layout's.
+- Stat cards in a row are one height.

@@ -36,7 +36,7 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { useTeams } from "@/hooks/useTeams";
 import { INACTIVE_LEADS_KEY, useInactiveLeads, useLeadMoves } from "@/hooks/useInactiveLeads";
 import { MoveLeadsDialog } from "@/components/inactive-leads/MoveLeadsDialog";
-import type { AutoMoveState, InactiveLead, InactiveRule } from "@/types/inactiveLeads";
+import type { AutoMoveState, InactiveLead, InactiveRule, LeadMoveEntry } from "@/types/inactiveLeads";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Tab = "inactive" | "moves";
@@ -46,6 +46,7 @@ type BadgeVariant = "default" | "secondary" | "warning" | "success" | "destructi
 const PAGE_SIZE = 20;
 const ALL = "all";
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DEFAULT_ZONE = "Asia/Dubai";
 
 const AUTO_MOVE: Record<AutoMoveState, { label: string; hint: string; variant: BadgeVariant }> = {
   due: {
@@ -128,19 +129,37 @@ function ruleSentence(rule: InactiveRule): string {
   return `${limitWords(rule.limitMinutes)} of working time (${daysLabel(wh.days)}, ${wh.start}–${wh.end} ${zoneLabel(wh.timezone)})`;
 }
 
+/** What the automatic mover will do with a lead, as a row and a card both show it. */
+function autoMoveOf(lead: InactiveLead, rule?: InactiveRule) {
+  // A state this page doesn't know yet (a newer server) shows as itself rather than breaking the list.
+  const auto = AUTO_MOVE[lead.autoMove] ?? { label: String(lead.autoMove || "unknown"), hint: "", variant: "outline" as BadgeVariant };
+  const label = lead.autoMove === "due" && rule && !rule.inWorkingHours ? "Moves when work starts" : auto.label;
+  const late = lead.waitingMinutes >= (rule?.limitMinutes ?? 45) * 2;
+  return { auto, label, late };
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 /**
  * The super admin's view of leads nobody acted on in time: who has them, how
  * long they have waited, what the automatic mover will do — and moving them
  * on by hand. The Moves log lists every lead moved for inactivity.
+ *
+ * Below a desktop's width a card per lead takes the place of the tables: eight
+ * columns do not fit a phone, nor a tablet beside the sidebar, and the tables'
+ * tooltips need a hover a touch screen hasn't got, so the cards write those
+ * words out.
  */
 export default function InactiveLeadsPage() {
   const user = useAuthStore((s) => s.user);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const qc = useQueryClient();
   // The signed-in user comes from localStorage: decide only once in the browser, so the server's HTML matches.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const isSuperAdmin = mounted && Boolean(user?.role?.isSystemRole && user.role.roleName === "Super Admin");
+  // Only the super admin, who may also move them.
+  const canView = isSuperAdmin;
+  const canMove = isSuperAdmin;
 
   const [tab, setTab] = useState<Tab>("inactive");
   const [page, setPage] = useState(1);
@@ -170,7 +189,7 @@ export default function InactiveLeadsPage() {
     teamId: teamId === ALL ? undefined : teamId,
     ownerId: owner?.id,
   };
-  const { data, isLoading, isFetching, error, refetch } = useInactiveLeads(filters, isSuperAdmin);
+  const { data, isLoading, isFetching, error, refetch } = useInactiveLeads(filters, canView);
   const moves = useLeadMoves(
     {
       page: movesPage,
@@ -178,14 +197,14 @@ export default function InactiveLeadsPage() {
       kind: kind === ALL ? undefined : (kind as "automatic" | "manual"),
       teamId: teamId === ALL ? undefined : teamId,
     },
-    isSuperAdmin && tab === "moves"
+    canView && tab === "moves"
   );
-  const { data: teamsData } = useTeams({ status: "active", limit: 100 }, { enabled: isSuperAdmin });
+  const { data: teamsData } = useTeams({ status: "active", limit: 100 }, { enabled: canView });
   const teams = teamsData?.data ?? [];
 
   // Live: when the mover acts, or a lead is moved elsewhere, the list is stale.
   useEffect(() => {
-    if (!isSuperAdmin) return;
+    if (!canView) return;
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
     const socket = getSocket(token);
@@ -199,14 +218,17 @@ export default function InactiveLeadsPage() {
     return () => {
       socket.off("notification", handler);
     };
-  }, [isSuperAdmin, qc]);
+  }, [canView, qc]);
 
   const items = useMemo(() => data?.items ?? [], [data]);
+  const moveItems = moves.data?.items ?? [];
   const rule = data?.rule;
   const summary = data?.summary;
+  const timeZone = rule?.workingHours.timezone ?? DEFAULT_ZONE;
   const allTicked = items.length > 0 && items.every((l) => selected.has(l.id));
   const someTicked = items.some((l) => selected.has(l.id));
   const tickedLeads = items.filter((l) => selected.has(l.id));
+  const filtered = Boolean(query || owner || teamId !== ALL);
 
   const toggle = (id: string) =>
     setSelected((s) => {
@@ -219,16 +241,16 @@ export default function InactiveLeadsPage() {
 
   if (!mounted) {
     return (
-      <div className="space-y-6 p-4 sm:p-6">
+      <div className="space-y-6">
         <Skeleton className="h-9 w-56" />
         <TableSkeleton />
       </div>
     );
   }
 
-  if (!isSuperAdmin) {
+  if (!canView) {
     return (
-      <motion.div variants={pageVariants} initial="hidden" animate="visible" className="p-4 sm:p-6">
+      <motion.div variants={pageVariants} initial="hidden" animate="visible">
         <Card className="border-border/50">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <TimerOff className="h-8 w-8 text-muted-foreground/60" />
@@ -241,12 +263,12 @@ export default function InactiveLeadsPage() {
 
   return (
     <TooltipProvider delayDuration={150}>
-      <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6 p-4 sm:p-6">
+      <motion.div variants={pageVariants} initial="hidden" animate="visible" className="space-y-6">
         {/* ── Header ── */}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 text-xl font-bold">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                 <TimerOff className="h-5 w-5 text-primary" />
               </span>
               Inactive Leads
@@ -262,18 +284,20 @@ export default function InactiveLeadsPage() {
                 <Badge variant={rule.autoReassign ? "success" : "secondary"} className="gap-1.5 py-1">
                   <Bot className="h-3.5 w-3.5" />
                   {rule.autoReassign
-                    ? `Automatic moves on${rule.enabledAt ? ` since ${fmtDate(rule.enabledAt, rule.workingHours.timezone)}` : ""}`
+                    ? `Automatic moves on${rule.enabledAt ? ` since ${fmtDate(rule.enabledAt, timeZone)}` : ""}`
                     : "Automatic moves off"}
                 </Badge>
               </motion.span>
             )}
-            <motion.div whileTap={{ scale: 0.97 }}>
-              <Button asChild variant="outline" size="sm" className="gap-1.5">
-                <Link href="/settings">
-                  <Settings2 className="h-3.5 w-3.5" /> Settings
-                </Link>
-              </Button>
-            </motion.div>
+            {hasPermission("settings", "view") && (
+              <motion.div whileTap={{ scale: 0.97 }}>
+                <Button asChild variant="outline" size="sm" className="gap-1.5">
+                  <Link href="/settings">
+                    <Settings2 className="h-3.5 w-3.5" /> Settings
+                  </Link>
+                </Button>
+              </motion.div>
+            )}
           </div>
         </div>
 
@@ -286,7 +310,7 @@ export default function InactiveLeadsPage() {
 
         {/* ── Tabs + filters ── */}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="inline-flex w-fit shrink-0 rounded-xl border border-border/60 bg-muted/40 p-1">
+          <div className="inline-flex w-fit max-w-full shrink-0 overflow-x-auto rounded-xl border border-border/60 bg-muted/40 p-1">
             {([
               { key: "inactive", label: "Inactive now", icon: Hourglass },
               { key: "moves", label: "Moves log", icon: History },
@@ -315,21 +339,22 @@ export default function InactiveLeadsPage() {
             ))}
           </div>
 
+          {/* On a phone the search takes its own line and the pickers share the next. */}
           <div className="flex flex-wrap items-center gap-2">
             {tab === "inactive" && (
-              <div className="relative">
+              <div className="relative w-full sm:w-56">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search name or phone"
-                  className="h-9 w-56 pl-8"
+                  className="h-9 w-full pl-8"
                   aria-label="Search inactive leads"
                 />
               </div>
             )}
             <Select value={teamId} onValueChange={setTeamId}>
-              <SelectTrigger className="h-9 w-44" aria-label="Team">
+              <SelectTrigger className="h-9 min-w-0 flex-1 sm:w-44 sm:flex-none" aria-label="Team">
                 <SelectValue placeholder="All teams" />
               </SelectTrigger>
               <SelectContent>
@@ -343,7 +368,7 @@ export default function InactiveLeadsPage() {
             </Select>
             {tab === "moves" && (
               <Select value={kind} onValueChange={setKind}>
-                <SelectTrigger className="h-9 w-40" aria-label="How it moved">
+                <SelectTrigger className="h-9 min-w-0 flex-1 sm:w-40 sm:flex-none" aria-label="How it moved">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -353,7 +378,7 @@ export default function InactiveLeadsPage() {
                 </SelectContent>
               </Select>
             )}
-            <motion.div whileTap={{ scale: 0.97 }}>
+            <motion.div whileTap={{ scale: 0.97 }} className="shrink-0">
               <Button
                 variant="ghost"
                 size="icon"
@@ -370,9 +395,9 @@ export default function InactiveLeadsPage() {
         <AnimatePresence>
           {owner && tab === "inactive" && (
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-              <Badge variant="outline" className="gap-1.5 py-1">
-                Owner: {owner.name}
-                <button type="button" onClick={() => setOwner(null)} aria-label="Clear owner filter" className="rounded-full hover:text-destructive">
+              <Badge variant="outline" className="max-w-full gap-1.5 py-1">
+                <span className="truncate">Owner: {owner.name}</span>
+                <button type="button" onClick={() => setOwner(null)} aria-label="Clear owner filter" className="shrink-0 rounded-full hover:text-destructive">
                   <X className="h-3 w-3" />
                 </button>
               </Badge>
@@ -384,7 +409,7 @@ export default function InactiveLeadsPage() {
         {tab === "inactive" && (
           <Card className="overflow-hidden border-border/50">
             <AnimatePresence>
-              {someTicked && (
+              {canMove && someTicked && (
                 <motion.div
                   initial={{ opacity: 0, y: -6 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -416,61 +441,99 @@ export default function InactiveLeadsPage() {
               ) : items.length === 0 ? (
                 <EmptyState
                   icon={Hourglass}
-                  title={query || owner || teamId !== ALL ? "No inactive leads match" : "No inactive leads"}
-                  text={
-                    query || owner || teamId !== ALL
-                      ? "Try clearing the filters."
-                      : "Every lead has been acted on by its owner within the limit."
-                  }
+                  title={filtered ? "No inactive leads match" : "No inactive leads"}
+                  text={filtered ? "Try clearing the filters." : "Every lead has been acted on by its owner within the limit."}
                   action={
-                    <Button asChild size="sm" variant="outline" className="gap-1.5">
-                      <Link href="/settings">
-                        <Settings2 className="h-3.5 w-3.5" /> Adjust the limit
-                      </Link>
-                    </Button>
+                    hasPermission("settings", "view") ? (
+                      <Button asChild size="sm" variant="outline" className="gap-1.5">
+                        <Link href="/settings">
+                          <Settings2 className="h-3.5 w-3.5" /> Adjust the limit
+                        </Link>
+                      </Button>
+                    ) : undefined
                   }
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border/50 bg-muted/30 text-left text-xs text-muted-foreground">
-                        <th className="w-10 px-4 py-2.5">
-                          <Checkbox
-                            checked={allTicked ? true : someTicked ? "indeterminate" : false}
-                            onCheckedChange={toggleAll}
-                            aria-label="Select all on this page"
-                          />
-                        </th>
-                        <th className="px-3 py-2.5 font-medium">Lead</th>
-                        <th className="px-3 py-2.5 font-medium">Owner</th>
-                        <th className="px-3 py-2.5 font-medium">Team</th>
-                        <th className="px-3 py-2.5 font-medium">Waiting</th>
-                        <th className="px-3 py-2.5 font-medium">Automatic</th>
-                        <th className="px-3 py-2.5 font-medium">Before</th>
-                        <th className="px-3 py-2.5" />
-                      </tr>
-                    </thead>
-                    <motion.tbody
+                <>
+                  {/* ── Phones and tablets ── */}
+                  <div className="lg:hidden">
+                    {canMove && (
+                      <label className="flex items-center gap-3 border-b border-border/50 bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+                        <Checkbox
+                          checked={allTicked ? true : someTicked ? "indeterminate" : false}
+                          onCheckedChange={toggleAll}
+                          aria-label="Select all on this page"
+                        />
+                        Select all on this page
+                      </label>
+                    )}
+                    <motion.ul
                       key={`${page}-${query}-${teamId}-${owner?.id ?? ""}`}
                       variants={listContainerVariants}
                       initial="hidden"
                       animate="visible"
+                      className="divide-y divide-border/30"
                     >
                       {items.map((lead) => (
-                        <LeadRow
+                        <LeadCard
                           key={lead.id}
                           lead={lead}
                           rule={rule}
+                          canMove={canMove}
                           ticked={selected.has(lead.id)}
                           onTick={() => toggle(lead.id)}
                           onOwner={() => lead.owner && setOwner({ id: lead.owner.id, name: lead.owner.name })}
                           onMove={() => setDialogLeads([lead])}
                         />
                       ))}
-                    </motion.tbody>
-                  </table>
-                </div>
+                    </motion.ul>
+                  </div>
+
+                  {/* ── Desktop ── */}
+                  <div className="hidden overflow-x-auto lg:block">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border/50 bg-muted/30 text-left text-xs text-muted-foreground">
+                          {canMove && (
+                            <th className="w-10 px-4 py-2.5">
+                              <Checkbox
+                                checked={allTicked ? true : someTicked ? "indeterminate" : false}
+                                onCheckedChange={toggleAll}
+                                aria-label="Select all on this page"
+                              />
+                            </th>
+                          )}
+                          <th className={cn("py-2.5 font-medium", canMove ? "px-3" : "px-4")}>Lead</th>
+                          <th className="px-3 py-2.5 font-medium">Owner</th>
+                          <th className="px-3 py-2.5 font-medium">Team</th>
+                          <th className="px-3 py-2.5 font-medium">Waiting</th>
+                          <th className="px-3 py-2.5 font-medium">Automatic</th>
+                          <th className="px-3 py-2.5 font-medium">Before</th>
+                          {canMove && <th className="px-3 py-2.5" />}
+                        </tr>
+                      </thead>
+                      <motion.tbody
+                        key={`${page}-${query}-${teamId}-${owner?.id ?? ""}`}
+                        variants={listContainerVariants}
+                        initial="hidden"
+                        animate="visible"
+                      >
+                        {items.map((lead) => (
+                          <LeadRow
+                            key={lead.id}
+                            lead={lead}
+                            rule={rule}
+                            canMove={canMove}
+                            ticked={selected.has(lead.id)}
+                            onTick={() => toggle(lead.id)}
+                            onOwner={() => lead.owner && setOwner({ id: lead.owner.id, name: lead.owner.name })}
+                            onMove={() => setDialogLeads([lead])}
+                          />
+                        ))}
+                      </motion.tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
             {data && data.pagination && data.pagination.total > 0 && (
@@ -492,7 +555,7 @@ export default function InactiveLeadsPage() {
                 <TableSkeleton />
               ) : moves.error ? (
                 <ErrorState onRetry={() => moves.refetch()} />
-              ) : (moves.data?.items ?? []).length === 0 ? (
+              ) : moveItems.length === 0 ? (
                 <EmptyState
                   icon={History}
                   title="No moves yet"
@@ -504,55 +567,67 @@ export default function InactiveLeadsPage() {
                   }
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border/50 bg-muted/30 text-left text-xs text-muted-foreground">
-                        <th className="px-4 py-2.5 font-medium">When</th>
-                        <th className="px-3 py-2.5 font-medium">Lead</th>
-                        <th className="px-3 py-2.5 font-medium">From → To</th>
-                        <th className="px-3 py-2.5 font-medium">Team</th>
-                        <th className="px-3 py-2.5 font-medium">Waited</th>
-                        <th className="px-3 py-2.5 font-medium">How</th>
-                      </tr>
-                    </thead>
-                    <motion.tbody key={`${movesPage}-${kind}-${teamId}`} variants={listContainerVariants} initial="hidden" animate="visible">
-                      {(moves.data?.items ?? []).map((m) => (
-                        <motion.tr key={m.id} variants={listItemVariants} className="border-b border-border/30 transition-colors hover:bg-muted/20">
-                          <td className="whitespace-nowrap px-4 py-2.5">
-                            <div className="text-xs">{fmtDate(m.createdAt, rule?.workingHours.timezone ?? "Asia/Dubai")}</div>
-                            <div className="text-[11px] text-muted-foreground">{timeAgo(m.createdAt)}</div>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <Link href={`/leads/${m.lead.id}`} className="font-medium hover:text-primary hover:underline">
-                              {m.lead.name || "Unnamed lead"}
-                            </Link>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2.5 text-xs">
-                            <span className="text-muted-foreground">{m.from?.name ?? "—"}</span>
-                            <MoveRight className="mx-1.5 inline h-3 w-3 text-muted-foreground" />
-                            <span className="font-medium">{m.to?.name ?? "—"}</span>
-                          </td>
-                          <td className="px-3 py-2.5 text-xs text-muted-foreground">{m.team?.name ?? "—"}</td>
-                          <td className="px-3 py-2.5 font-mono text-xs">{fmtMinutes(m.inactiveMinutes)}</td>
-                          <td className="px-3 py-2.5">
-                            <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} className="inline-block">
-                              {m.kind === "automatic" ? (
-                                <Badge variant="secondary" className="gap-1 whitespace-nowrap text-[11px]">
-                                  <Bot className="h-3 w-3" /> Automatic
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="gap-1 whitespace-nowrap text-[11px]">
-                                  <UserRound className="h-3 w-3" /> {m.by?.name ?? "By hand"}
-                                </Badge>
-                              )}
-                            </motion.span>
-                          </td>
-                        </motion.tr>
-                      ))}
-                    </motion.tbody>
-                  </table>
-                </div>
+                <>
+                  {/* ── Phones and tablets ── */}
+                  <motion.ul
+                    key={`${movesPage}-${kind}-${teamId}`}
+                    variants={listContainerVariants}
+                    initial="hidden"
+                    animate="visible"
+                    className="divide-y divide-border/30 lg:hidden"
+                  >
+                    {moveItems.map((m) => (
+                      <MoveCard key={m.id} move={m} timeZone={timeZone} />
+                    ))}
+                  </motion.ul>
+
+                  {/* ── Desktop ── */}
+                  <div className="hidden overflow-x-auto lg:block">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border/50 bg-muted/30 text-left text-xs text-muted-foreground">
+                          <th className="px-4 py-2.5 font-medium">When</th>
+                          <th className="px-3 py-2.5 font-medium">Lead</th>
+                          <th className="px-3 py-2.5 font-medium">From → To</th>
+                          <th className="px-3 py-2.5 font-medium">Team</th>
+                          <th className="px-3 py-2.5 font-medium">Waited</th>
+                          <th className="px-3 py-2.5 font-medium">How</th>
+                        </tr>
+                      </thead>
+                      <motion.tbody key={`${movesPage}-${kind}-${teamId}`} variants={listContainerVariants} initial="hidden" animate="visible">
+                        {moveItems.map((m) => (
+                          <motion.tr key={m.id} variants={listItemVariants} className="border-b border-border/30 transition-colors hover:bg-muted/20">
+                            <td className="whitespace-nowrap px-4 py-2.5">
+                              <div className="text-xs">{fmtDate(m.createdAt, timeZone)}</div>
+                              <div className="text-[11px] text-muted-foreground">{timeAgo(m.createdAt)}</div>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <Link
+                                href={`/leads/${m.lead.id}`}
+                                title={m.lead.name || undefined}
+                                className="line-clamp-2 max-w-[18rem] font-medium hover:text-primary hover:underline"
+                              >
+                                {m.lead.name || "Unnamed lead"}
+                              </Link>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-xs">
+                              <span className="text-muted-foreground">{m.from?.name ?? "—"}</span>
+                              <MoveRight className="mx-1.5 inline h-3 w-3 text-muted-foreground" />
+                              <span className="font-medium">{m.to?.name ?? "—"}</span>
+                            </td>
+                            <td className="px-3 py-2.5 text-xs text-muted-foreground">{m.team?.name ?? "—"}</td>
+                            <td className="px-3 py-2.5 font-mono text-xs">{fmtMinutes(m.inactiveMinutes)}</td>
+                            <td className="px-3 py-2.5">
+                              <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} className="inline-block">
+                                <HowBadge move={m} />
+                              </motion.span>
+                            </td>
+                          </motion.tr>
+                        ))}
+                      </motion.tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
             {moves.data?.pagination && moves.data.pagination.total > 0 && (
@@ -583,28 +658,33 @@ export default function InactiveLeadsPage() {
 interface LeadRowProps {
   lead: InactiveLead;
   rule?: InactiveRule;
+  /** May tick and move leads — the super admin. */
+  canMove: boolean;
   ticked: boolean;
   onTick: () => void;
   onOwner: () => void;
   onMove: () => void;
 }
 
-function LeadRow({ lead, rule, ticked, onTick, onOwner, onMove }: LeadRowProps) {
-  const limit = rule?.limitMinutes ?? 45;
-  const auto = AUTO_MOVE[lead.autoMove];
-  const dueLabel = lead.autoMove === "due" && rule && !rule.inWorkingHours ? "Moves when work starts" : auto.label;
-  const late = lead.waitingMinutes >= limit * 2;
+function LeadRow({ lead, rule, canMove, ticked, onTick, onOwner, onMove }: LeadRowProps) {
+  const { auto, label, late } = autoMoveOf(lead, rule);
 
   return (
     <motion.tr
       variants={listItemVariants}
       className={cn("border-b border-border/30 transition-colors hover:bg-muted/20", ticked && "bg-primary/5")}
     >
-      <td className="px-4 py-2.5">
-        <Checkbox checked={ticked} onCheckedChange={onTick} aria-label={`Select ${lead.name || lead.phone}`} />
-      </td>
-      <td className="px-3 py-2.5">
-        <Link href={`/leads/${lead.id}`} className="font-medium hover:text-primary hover:underline">
+      {canMove && (
+        <td className="px-4 py-2.5">
+          <Checkbox checked={ticked} onCheckedChange={onTick} aria-label={`Select ${lead.name || lead.phone}`} />
+        </td>
+      )}
+      <td className={cn("py-2.5", canMove ? "px-3" : "px-4")}>
+        <Link
+          href={`/leads/${lead.id}`}
+          title={lead.name || undefined}
+          className="line-clamp-2 max-w-[18rem] font-medium hover:text-primary hover:underline"
+        >
           {lead.name || "Unnamed lead"}
         </Link>
         <div className="font-mono text-xs text-muted-foreground">{lead.phone}</div>
@@ -631,11 +711,11 @@ function LeadRow({ lead, rule, ticked, onTick, onOwner, onMove }: LeadRowProps) 
           <TooltipTrigger asChild>
             <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} className="inline-block cursor-default">
               <Badge variant={auto.variant} className="whitespace-nowrap text-[11px]">
-                {dueLabel}
+                {label}
               </Badge>
             </motion.span>
           </TooltipTrigger>
-          <TooltipContent className="max-w-xs text-xs">{auto.hint}</TooltipContent>
+          {auto.hint && <TooltipContent className="max-w-xs text-xs">{auto.hint}</TooltipContent>}
         </Tooltip>
       </td>
       <td className="px-3 py-2.5 text-xs">
@@ -654,13 +734,136 @@ function LeadRow({ lead, rule, ticked, onTick, onOwner, onMove }: LeadRowProps) 
           <span className="text-muted-foreground">—</span>
         )}
       </td>
-      <td className="px-3 py-2.5 text-right">
-        <motion.div whileTap={{ scale: 0.97 }} className="inline-block">
-          <Button size="sm" variant="ghost" className="gap-1 text-primary hover:bg-primary/10 hover:text-primary" onClick={onMove}>
-            <MoveRight className="h-3.5 w-3.5" /> Move
-          </Button>
-        </motion.div>
-      </td>
+      {canMove && (
+        <td className="px-3 py-2.5 text-right">
+          <motion.div whileTap={{ scale: 0.97 }} className="inline-block">
+            <Button size="sm" variant="ghost" className="gap-1 text-primary hover:bg-primary/10 hover:text-primary" onClick={onMove}>
+              <MoveRight className="h-3.5 w-3.5" /> Move
+            </Button>
+          </motion.div>
+        </td>
+      )}
     </motion.tr>
+  );
+}
+
+/** A lead on a phone: the row's facts stacked, with the tooltips' words written out. */
+function LeadCard({ lead, rule, canMove, ticked, onTick, onOwner, onMove }: LeadRowProps) {
+  const { auto, label, late } = autoMoveOf(lead, rule);
+  // Why it won't move on its own, written out — a touch screen has no hover for the tooltip.
+  const explain = lead.autoMove === "before_switch" || lead.autoMove === "stuck" || lead.autoMove === "no_team";
+
+  return (
+    <motion.li variants={listItemVariants} className={cn("flex gap-3 px-4 py-3", ticked && "bg-primary/5")}>
+      {canMove && (
+        <Checkbox className="mt-1" checked={ticked} onCheckedChange={onTick} aria-label={`Select ${lead.name || lead.phone}`} />
+      )}
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <Link href={`/leads/${lead.id}`} className="block truncate font-medium hover:text-primary hover:underline">
+              {lead.name || "Unnamed lead"}
+            </Link>
+            <div className="font-mono text-xs text-muted-foreground">{lead.phone}</div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className={cn("font-mono text-sm font-semibold", late ? "text-red-500" : "text-amber-500")}>
+              {fmtMinutes(lead.waitingMinutes)}
+            </div>
+            <div className="text-[11px] text-muted-foreground">assigned {timeAgo(lead.assignedAt)}</div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          {lead.owner ? (
+            <button type="button" onClick={onOwner} className="font-medium text-foreground hover:text-primary">
+              {lead.owner.name}
+            </button>
+          ) : (
+            <span>No owner</span>
+          )}
+          {lead.owner && !lead.owner.active && <span className="text-destructive">Deactivated</span>}
+          {/* "No team" once: the badge below says it when automatic moves are on. */}
+          {(lead.team || lead.autoMove !== "no_team") && (
+            <>
+              <span aria-hidden>·</span>
+              <span>{lead.team?.name ?? "No team"}</span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Badge variant={auto.variant} className="whitespace-nowrap text-[11px]">
+              {label}
+            </Badge>
+            {lead.moves > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <CircleAlert className="h-3 w-3" /> Moved {lead.moves}×
+              </span>
+            )}
+          </div>
+          {canMove && (
+            <motion.div whileTap={{ scale: 0.97 }} className="shrink-0">
+              <Button size="sm" variant="outline" className="h-8 gap-1 text-primary" onClick={onMove}>
+                <MoveRight className="h-3.5 w-3.5" /> Move
+              </Button>
+            </motion.div>
+          )}
+        </div>
+
+        {explain && auto.hint && <p className="text-[11px] text-muted-foreground">{auto.hint}</p>}
+        {lead.moves > 0 && lead.lostBy.length > 0 && (
+          <p className="text-[11px] text-muted-foreground">
+            Lost before by {lead.lostBy.map((p) => p.name).join(", ")} — never moved back to them automatically.
+          </p>
+        )}
+      </div>
+    </motion.li>
+  );
+}
+
+/** How a lead moved: automatically, or by whom. `compact` (cards) shortens a long name; the table shows it whole. */
+function HowBadge({ move, compact = false }: { move: LeadMoveEntry; compact?: boolean }) {
+  return move.kind === "automatic" ? (
+    <Badge variant="secondary" className="gap-1 whitespace-nowrap text-[11px]">
+      <Bot className="h-3 w-3" /> Automatic
+    </Badge>
+  ) : (
+    <Badge
+      variant="outline"
+      title={move.by?.name ?? undefined}
+      className={cn("gap-1 text-[11px]", compact ? "max-w-[10rem]" : "whitespace-nowrap")}
+    >
+      <UserRound className="h-3 w-3 shrink-0" /> <span className={cn(compact && "truncate")}>{move.by?.name ?? "By hand"}</span>
+    </Badge>
+  );
+}
+
+/** A move on a phone. */
+function MoveCard({ move, timeZone }: { move: LeadMoveEntry; timeZone: string }) {
+  return (
+    <motion.li variants={listItemVariants} className="space-y-1.5 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <Link href={`/leads/${move.lead.id}`} className="min-w-0 truncate font-medium hover:text-primary hover:underline">
+          {move.lead.name || "Unnamed lead"}
+        </Link>
+        <span className="shrink-0">
+          <HowBadge move={move} compact />
+        </span>
+      </div>
+      <div className="flex min-w-0 items-center text-xs">
+        <span className="truncate text-muted-foreground">{move.from?.name ?? "—"}</span>
+        <MoveRight className="mx-1.5 h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{move.to?.name ?? "—"}</span>
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+        <span>
+          {fmtDate(move.createdAt, timeZone)} · {timeAgo(move.createdAt)}
+        </span>
+        <span>{move.team?.name ?? "No team"}</span>
+        <span>waited {fmtMinutes(move.inactiveMinutes)}</span>
+      </div>
+    </motion.li>
   );
 }

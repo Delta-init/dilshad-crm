@@ -1258,3 +1258,13 @@ A new close starts "Bonus given?" at yes with the course's bonus, marked "From t
   Calls (3CX) column. Kanban: card and preview show the three counts.
 - Leaderboard page + `DashboardLeaderboardCard`: Calls, Connected, Talk time; Revenue / Calls / Talk time switch.
 - `lib/dubaiDates.ts` (new) — `DUBAI_TZ`, `dubaiDate()`. Sidebar Calls → module `calls`.
+
+### Change log — 2026-10-15 (Activity and Inactive Leads on phones and tablets)
+- `app/(dashboard)/activity/page.tsx` — `PersonCard` (with the last sign-in's device and IP), `LoginCard`, `IdleCard`
+  below `lg`, the tables from `lg`; filters full-width / shared on phones; no page padding of its own (the layout's
+  `<main>` has it); an unknown status shows as itself.
+- `app/(dashboard)/inactive-leads/page.tsx` — `LeadCard`, `MoveCard` below `lg` (why it won't move on its own and who
+  lost it before written out), tables from `lg` with long names clamped to two lines (full name on hover); `HowBadge`
+  (`compact` on cards); filters as above; an unknown state from the server shows as itself; still the Super Admin only.
+- Both pages: the tab bar scrolls inside itself rather than widening the page on the narrowest phones.
+- `components/shared/StatCard.tsx` — fills its grid cell, so a row of them is one height.

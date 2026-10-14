@@ -17,8 +17,8 @@ interface StatCardProps {
 /** A number with an icon and a line of context — put several in a grid with listContainerVariants. */
 export function StatCard({ icon: Icon, label, value, hint, tone }: StatCardProps) {
   return (
-    <motion.div variants={listItemVariants} whileHover={{ y: -2 }}>
-      <Card className="border-border/50">
+    <motion.div variants={listItemVariants} whileHover={{ y: -2 }} className="h-full">
+      <Card className="h-full border-border/50">
         <CardContent className="flex items-start gap-3 p-4">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
             <Icon className={cn("h-4 w-4", tone)} />

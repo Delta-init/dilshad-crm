@@ -427,3 +427,12 @@ also refused outright (the follow-up history keeps 1,000) with only "Validation 
 **Rule:** a multi-request save names each request and remembers which went through (`sent` ref in
 `AfterCallDialog`), judging paths by the state when Save was first pressed; cut a field to the model's limit, not the
 route's; show a refused form's first reason (`errText`).
+
+## [2026-10-15] Activity and Inactive Leads: tables on phones, doubled padding
+
+- **What happened**: both pages showed 5–8 column tables at every width (only a sideways scroll on a phone, names
+  wrapping onto four lines on a tablet beside the sidebar) and padded themselves (`p-4 sm:p-6`) inside a `<main>` that
+  already has `p-6` — 40 px gutters on a phone.
+- **Fix**: cards below `lg`, tables from `lg`; no outer padding on the pages.
+- **Rule**: pick a table's breakpoint by the width it gets beside the sidebar (6+ columns → cards below `lg`), and pages
+  in `(dashboard)` add no outer padding.
