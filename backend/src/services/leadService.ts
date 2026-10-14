@@ -1496,9 +1496,11 @@ export class LeadService {
 
     await lead.save();
 
-    const saved = lead.followUps[lead.followUps.length - 1];
-    await saved.populate("followedUpBy", "name email");
-    return saved;
+    // The entry just added, with who logged it — populated through the lead: populate() on the array entry itself
+    // throws in Mongoose 8, after the save, so the follow-up was kept but the answer was a 500 (fixed 2026-10-14).
+    const at = lead.followUps.length - 1;
+    await lead.populate({ path: `followUps.${at}.followedUpBy`, select: "name email" });
+    return lead.followUps[at];
   }
 
   async getFollowUps(leadId: string) {
