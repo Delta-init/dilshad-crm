@@ -9,6 +9,7 @@ import {
   setUserRoleFromPortal,
   provisionFromPortal,
 } from "../services/portalService.js";
+import { enrolmentFlowForPortal } from "../services/portalEnrolmentFlow.js";
 
 const router = Router();
 
@@ -99,6 +100,18 @@ router.post(
   wrap(async (req, res) => {
     const { emails } = (req.body ?? {}) as { emails?: unknown };
     sendSuccess(res, "Accounts", await describeManyForPortal(emails));
+  }),
+);
+
+/**
+ * The enrolment workflow, for Root's Pending page (2026-10-14): every close
+ * handed to finance — its steps as My Enrolments shows them, where it stands
+ * and whom that waits on. Read only.
+ */
+router.get(
+  "/enrolment-flow",
+  wrap(async (_req, res) => {
+    sendSuccess(res, "Enrolment flow", await enrolmentFlowForPortal());
   }),
 );
 

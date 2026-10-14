@@ -170,7 +170,7 @@ function payloadEmail(h: HandoverForEmail): string {
  * email it was sent no email. The screens offer "Add the client's email and
  * send again" for exactly these — not for one held up by anything else.
  */
-function refusedForEmail(h: HandoverForEmail): boolean {
+export function refusedForEmail(h: HandoverForEmail): boolean {
   if (!h || h.status === "sent") return false;
   return FINANCE_REFUSED_RE.test(h.lastError ?? "") && !isFinanceEmail(payloadEmail(h));
 }
