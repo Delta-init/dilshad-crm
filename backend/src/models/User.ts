@@ -40,6 +40,13 @@ const userSchema = new Schema<IUser>(
       maxlength: [20, "Extension cannot exceed 20 characters"],
       default: null,
     },
+    /* "manual": typed on the Users screen — the 3CX call sync never overwrites it.
+       "3cx": filled from 3CX's users by email (services/callSyncService.ts). */
+    extensionSource: {
+      type: String,
+      enum: ["manual", "3cx", null],
+      default: null,
+    },
     status: {
       type: String,
       enum: ["active", "inactive"],

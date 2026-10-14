@@ -616,3 +616,22 @@ stop route uses it. Ordinary tokens take exactly the old path.
 ## Commission routes (2026-10-04)
 
 Not a permission module: `authenticate` only, like Mentors — a module would start every role but Super Admin with no access to their own pay. The service narrows what each person sees (own / team / all). Changing the plan or its settings is `requireSuperAdmin` (in `commissionController`): `role.isSystemRole && roleName === "Super Admin"`, else 403.
+
+---
+
+## Calls routes (2026-10-14)
+
+| Method | Route | Chain |
+|--------|-------|-------|
+| GET | `/api/v1/calls/log` | `authenticate` → `checkPermission("calls", "view")` (`export=1` also needs `calls.export`, in the controller) |
+| GET | `/api/v1/calls/log/lead/:leadId` | `authenticate` → `checkPermission("leads", "view")` (the service narrows to what the viewer may see) |
+| GET | `/api/v1/calls/log/:id/recording-link` | `authenticate` (the call must be one the viewer may see) |
+| GET | `/api/v1/calls/log/recording` | none — the signed 10-minute link is the permission (an `<audio>` sends no header) |
+| POST | `/api/v1/calls/log/sync`, `/api/v1/calls/log/test` | `authenticate` → `requireSuperAdmin` |
+| GET | `/api/v1/calls/click-to-call` | `authenticate` |
+| POST | `/api/v1/calls/3cx/call` | `authenticate` → `checkPermission("leads", "edit")` (the lead must be in the caller's lead list) |
+| GET / POST | `/api/v1/calls/3cx/state`, `/api/v1/calls/3cx/hang-up` | `authenticate` (the caller's own extension only) |
+| GET | `/api/v1/service/calls`, `/api/v1/service/calls/:id/recording-link` | `portalOnly` (`x-portal-secret`) |
+
+`calls` is a new permission module, open by default (view, export) — a role saved before it gets it from the schema
+default; unticked on the Roles screen, 403. All `/calls/log*` and `/calls/3cx/*` routes sit before `/calls/:callId`.

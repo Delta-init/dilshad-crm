@@ -1563,90 +1563,31 @@ export const updatePayment = async (
   }
 };
 
-// ─── Call Not Connected ───────────────────────────────────────────────────────
+// ─── Call counts ──────────────────────────────────────────────────────────────
+//
+// Since 2026-10-14 a lead's call counts come from 3CX (callSyncService.recountLeadCalls) and are not changed by
+// hand: these two routes stay for a web app still open from before, and only answer with the counts as they are.
 
-const callNotConnectedSchema = z.object({
-  action: z.enum(["increment", "decrement"]),
-});
-
-/** PATCH /leads/:id/call-not-connected */
-export const updateCallNotConnected = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
+async function currentCallCounts(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const parsed = callNotConnectedSchema.safeParse(req.body);
-    if (!parsed.success) {
-      sendError(res, "Validation failed", 400, parsed.error.flatten().fieldErrors);
-      return;
-    }
-    const lead = await Lead.findById(req.params.id);
+    const lead = await Lead.findById(req.params.id).select("callCount callConnected callNotConnected").lean();
     if (!lead) { sendError(res, "Lead not found", 404); return; }
-
-    const current = lead.callNotConnected ?? 0;
-    const newCount = parsed.data.action === "increment"
-      ? current + 1
-      : Math.max(0, current - 1);
-
-    const update: Record<string, unknown> = { callNotConnected: newCount };
-    if (parsed.data.action === "increment") {
-      update.callCount = (lead.callCount ?? 0) + 1;
-    }
-    await Lead.updateOne({ _id: lead._id }, { $set: update });
-    sendSuccess(res, "Call not connected count updated", { callNotConnected: newCount, callCount: update.callCount ?? lead.callCount ?? 0 });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/** PATCH /leads/:id/call-count */
-export const updateCallCount = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
-  try {
-    const parsed = callNotConnectedSchema.safeParse(req.body);
-    if (!parsed.success) {
-      sendError(res, "Validation failed", 400, parsed.error.flatten().fieldErrors);
-      return;
-    }
-    const lead = await Lead.findById(req.params.id);
-    if (!lead) { sendError(res, "Lead not found", 404); return; }
-
-    const current = lead.callCount ?? 0;
-    const newCount = parsed.data.action === "increment"
-      ? current + 1
-      : Math.max(0, current - 1);
-
-    const update: Record<string, unknown> = { callCount: newCount };
-
-    if (parsed.data.action === "increment") {
-      const now = new Date();
-      // Every call is a contact + follow-up touch
-      update.lastContactedAt = now;
-      update.lastFollowupDate = now;
-
-      // First call by the ASSIGNED agent stamps firstContactTime (never overwritten)
-      const isAssignedAgent =
-        lead.assignedTo && lead.assignedTo.toString() === req.user!.userId;
-      if (isAssignedAgent && !lead.firstContactTime) {
-        update.firstContactTime = now;
-      }
-    }
-
-    await Lead.updateOne({ _id: lead._id }, { $set: update });
-    sendSuccess(res, "Call count updated", {
-      callCount: newCount,
-      firstContactTime: update.firstContactTime ?? lead.firstContactTime ?? null,
-      lastContactedAt: update.lastContactedAt ?? lead.lastContactedAt ?? null,
-      lastFollowupDate: update.lastFollowupDate ?? lead.lastFollowupDate ?? null,
+    sendSuccess(res, "Call counts come from 3CX and are not changed by hand", {
+      callCount: lead.callCount ?? 0,
+      callConnected: (lead as { callConnected?: number }).callConnected ?? 0,
+      callNotConnected: lead.callNotConnected ?? 0,
+      fromThreecx: true,
     });
   } catch (error) {
     next(error);
   }
-};
+}
+
+/** PATCH /leads/:id/call-not-connected — no longer changes anything (counts from 3CX). */
+export const updateCallNotConnected = currentCallCounts;
+
+/** PATCH /leads/:id/call-count — no longer changes anything (counts from 3CX). */
+export const updateCallCount = currentCallCounts;
 
 /** DELETE /leads/:id/payments/:paymentId */
 export const deletePayment = async (

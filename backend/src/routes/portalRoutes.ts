@@ -10,6 +10,7 @@ import {
   provisionFromPortal,
 } from "../services/portalService.js";
 import { enrolmentFlowForPortal } from "../services/portalEnrolmentFlow.js";
+import { CallFilterError, callsForPortal, recordingLinkForPortal } from "../services/portalCalls.js";
 
 const router = Router();
 
@@ -112,6 +113,34 @@ router.get(
   "/enrolment-flow",
   wrap(async (_req, res) => {
     sendSuccess(res, "Enrolment flow", await enrolmentFlowForPortal());
+  }),
+);
+
+/**
+ * 3CX calls, for Root's "3CX calls" page and its Pending page (2026-10-14):
+ * every call, with the totals and per-person table this CRM's Calls page shows,
+ * and each person's email. Read only.
+ */
+router.get(
+  "/calls",
+  wrap(async (req, res) => {
+    try {
+      sendSuccess(res, "Calls", await callsForPortal(req.query as Record<string, unknown>));
+    } catch (err) {
+      if (err instanceof CallFilterError) { sendError(res, err.message, 400); return; }
+      throw err;
+    }
+  }),
+);
+
+/** A recording's link on this server — signed, 10 minutes — for Root to hand to the browser. */
+router.get(
+  "/calls/:id/recording-link",
+  wrap(async (req, res) => {
+    const link = await recordingLinkForPortal(String(req.params.id), req.query.index);
+    if (link === "bad") { sendError(res, "Invalid call or recording", 400); return; }
+    if (!link) { sendError(res, "No recording for this call", 404); return; }
+    sendSuccess(res, "Recording link", link);
   }),
 );
 

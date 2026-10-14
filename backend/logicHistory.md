@@ -820,3 +820,50 @@ A course says what bonus comes with it (`Course.bonusAmount`, the course's curre
 3. Handover: each such payment goes to finance with `original: { currency, amountMinor, rate }` beside its AED `amountMinor`;
    finance keeps it, shows it, and records the payment in AED with the original in its note.
 4. The lead's payment (added at the close) is in AED; its note ends "· INR 50,000 at 1 INR = 0.044 AED".
+
+## 3CX calls — brought over from the Draw CRM (2026-10-14)
+
+The Draw CRM's 3CX work (Tetra Commission's call sync and call flow, for leads), with this CRM's rules where they differ.
+**Files**: `lib/threecx.ts`, `models/LeadCall.ts`, `services/callSyncService.ts`, `services/leadCallService.ts`,
+`services/portalCalls.ts`, `controllers/leadCallController.ts`, `controllers/clickToCallController.ts`,
+`routes/callRoutes.ts`, `routes/portalRoutes.ts`, `services/leaderboardService.ts`, `utils/dubaiDay.ts`.
+
+1. **The sync**: every minute (off with a log line when `RUN_SCHEDULERS=false` or a `THREECX_*` is missing) the 3CX call
+   log is read from where the last run got to less 3 hours, a day at a time — each day after the first from 3 hours
+   before it starts, so a call whose rows straddle a day's start is read whole; the first run reaches 90 days back. State and
+   a 15-minute lock in `app_settings` `_id: "threecx_calls"` (a raw collection — not the `AppSetting` model's
+   `appsettings`). Rows sharing a `MainCallHistoryId` are one call, keyed `call:<id>` (unique: never stored twice).
+2. **Matching**: a lead by the last 9 digits of any number in its phone field (a number on several leads: the one
+   assigned to whoever took it, else the newest); a person by `User.extension`. Extensions come from 3CX's users by email
+   every 6 hours (`extensionSource: "3cx"`); one typed on the Users screen (`"manual"`) or there before (no source) is
+   never overwritten.
+3. **Who sees what** (as `getLeads`): Super Admin, Reporter and the Sales Manager (Commission settings) every call; a team
+   leader their teams' people's calls and calls on their teams' leads; anyone else their own calls and calls on their
+   leads. Module `calls` (view, export), open by default.
+4. **Recordings** play through the server on a 10-minute signed link; the 3CX key never reaches a browser.
+5. **Counts**: `callCount` / `callConnected` / `callNotConnected` (missed + not answered) counted again from `lead_calls`
+   for every lead a run touched; the first run (`countsVersion` unset) first copies every lead's non-zero counts into
+   `lead_call_counts_before_3cx` (`_id` = the lead's, `savedAt`; upserts, a lead copied already keeps its first copy),
+   marks the copy done (`app_settings.threecx_calls.handCountsCopiedAt`) only once every lead is in — a copy cut short
+   is finished by the next run before any count is replaced — then counts every lead with calls and sets the rest to 0. Raw writes, only where a number changed: `updatedAt` untouched. `PATCH /leads/:id/call-count` and
+   `/call-not-connected` now answer with the counts and change nothing.
+6. **Contact dates** (this CRM only): the old Call button's `PATCH call-count` stamped `lastContactedAt`,
+   `lastFollowupDate` and — on the assigned agent's first call — `firstContactTime`; Inactive Leads, the missed follow-up
+   warning and the response-time reports read them. The new Call button only logs the click (`POST /calls/click`), so that
+   route now stamps them: both dates on every click with a lead id by someone with `leads.edit` (or the Super Admin —
+   what the old counter route asked; the click itself needs only a sign-in), `firstContactTime` only when the clicker is
+   the lead's owner and it is still empty. Calls made outside the CRM (straight from the 3CX app) stamp nothing, as before.
+7. **After the call** (web, existing routes only): Follow Up → `PATCH /status` with `followUpNote` (the notes —
+   required; at most 1,000 characters, the follow-up history's limit — the route allows 2,000, the model 1,000), `followUpAt` (now), `nextFollowUpAt` (optional; the server makes the "Follow-up due" reminder); Follow Up
+   on a lead already in it → `POST /reminders` ("Follow-up due", when a time is given) + `POST /followups` (no status
+   change, no team-leader alert); Meeting Scheduled → `meetingAt` (required, not past) + `meetingNote`; Lost →
+   `lostReason` (one of `LOST_REASONS`) + `lostNotes` (required); Call Back → `POST /reminders` ("Call back", optional)
+   then the status; any other status as it is; Closed → the enrolment dialog, the status only once it is saved. Then
+   `POST /notes` with the summary ("Call through 3CX — connected · Follow Up, 16 Oct, 3:00 PM GST"), the lost reason
+   and the notes. A time in the past is refused in the popup before anything is sent. Each request is named; Save
+   pressed again after a part-way failure sends only the ones that did not go through, judged against the lead's
+   status when Save was first pressed (so a status is not changed twice, a reminder or follow-up not added twice).
+8. **Leaderboard**: calls = `lead_calls` in the Dubai month by the call's person (`calls`, `connected`, `talkSeconds`);
+   `rankBy` revenue (revenue → closings → follow-ups → calls) | calls | talk. The old `call_logs` no longer count.
+9. **Root portal**: `GET /service/calls` (portal secret) — the Calls page's totals, per-person rows with emails, a page of
+   calls; `GET /service/calls/:id/recording-link` — a link signed here for 10 minutes.

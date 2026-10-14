@@ -6,22 +6,31 @@ import { Loader2, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtFull } from "@/lib/currency";
 import { useAuthStore } from "@/lib/store/authStore";
-import { useLeaderboard } from "@/hooks/useLeaderboard";
+import { useLeaderboard, type LeaderboardRankBy } from "@/hooks/useLeaderboard";
+import { fmtTalkTotal } from "@/components/calls/callUi";
+import { dubaiDate } from "@/lib/dubaiDates";
 
 /**
  * Leaderboard (the owner, 2026-10-07).
  *
  * Every salesperson's month, ranked by revenue, then closings, then follow-ups,
- * then calls — counted on the server, in Dubai months. Open to everyone; your
+ * then calls — or by calls, or by talk time (2026-10-14) — counted on the
+ * server, in Dubai months. Calls are 3CX's: every call with a lead on their
+ * extension, the connected ones, and the time talking. Open to everyone; your
  * own row is marked.
  */
 
+const RANKS: { id: LeaderboardRankBy; label: string; says: string }[] = [
+  { id: "revenue", label: "Revenue", says: "ranked by revenue, then closings, follow-ups and calls" },
+  { id: "calls", label: "Calls", says: "ranked by calls (3CX), then talk time" },
+  { id: "talk", label: "Talk time", says: "ranked by time talking on 3CX calls, then calls" },
+];
+
 const MEDALS = ["🥇", "🥈", "🥉"];
 
-/** "2026-10" for the current Dubai month. */
+/** "2026-10" for the current month on the Dubai calendar. */
 function thisDubaiMonth(): string {
-  const d = new Date(Date.now() + 4 * 3_600_000);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  return dubaiDate().slice(0, 7);
 }
 
 function monthLabel(m: string): string {
@@ -32,7 +41,8 @@ function monthLabel(m: string): string {
 export default function LeaderboardPage() {
   const [month, setMonth] = useState(thisDubaiMonth);
   const me = useAuthStore((s) => s.user);
-  const { data, isLoading, error } = useLeaderboard(month);
+  const [rankBy, setRankBy] = useState<LeaderboardRankBy>("revenue");
+  const { data, isLoading, error } = useLeaderboard(month, rankBy);
   const rows = data?.rows ?? [];
 
   return (
@@ -49,9 +59,22 @@ export default function LeaderboardPage() {
           <div className="min-w-0">
             <h1 className="text-xl font-bold text-foreground">Leaderboard</h1>
             <p className="text-sm text-muted-foreground">
-              {monthLabel(month)} — ranked by revenue, then closings, follow-ups and calls
+              {monthLabel(month)} — {RANKS.find((r) => r.id === rankBy)?.says}
             </p>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex rounded-lg border border-border bg-card p-0.5" role="group" aria-label="Rank by">
+          {RANKS.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => setRankBy(r.id)}
+              className={cn("rounded-md px-3 py-1.5 text-xs font-medium transition-colors", rankBy === r.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+            >
+              {r.label}
+            </button>
+          ))}
         </div>
         <input
           type="month"
@@ -61,6 +84,7 @@ export default function LeaderboardPage() {
           className="h-9 rounded-lg border border-border bg-card px-3 text-sm text-foreground"
           aria-label="Month"
         />
+        </div>
       </motion.div>
 
       <div className="overflow-hidden rounded-2xl border border-border/60 bg-card">
@@ -86,6 +110,8 @@ export default function LeaderboardPage() {
                   <th className="px-4 py-3 text-right">Closings</th>
                   <th className="px-4 py-3 text-right">Follow-ups</th>
                   <th className="px-4 py-3 text-right">Calls</th>
+                  <th className="px-4 py-3 text-right">Connected</th>
+                  <th className="px-4 py-3 text-right">Talk time</th>
                 </tr>
               </thead>
               <tbody>
@@ -107,7 +133,9 @@ export default function LeaderboardPage() {
                       <td className="px-4 py-3 text-right font-semibold text-foreground tabular-nums">{fmtFull(r.revenue)}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{r.closings}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{r.followUps}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{r.calls}</td>
+                      <td className={cn("px-4 py-3 text-right tabular-nums", rankBy === "calls" && "font-semibold text-foreground")}>{r.calls}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{r.connected}</td>
+                      <td className={cn("px-4 py-3 text-right tabular-nums", rankBy === "talk" && "font-semibold text-foreground")}>{r.talkSeconds ? fmtTalkTotal(r.talkSeconds) : "—"}</td>
                     </motion.tr>
                   );
                 })}

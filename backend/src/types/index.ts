@@ -57,6 +57,12 @@ export const CRM_MODULES = [
    * the page, create records a payment for finance. Open by default.
    */
   "balancePayments",
+  /*
+   * Calls: the 3CX calls with leads (lead_calls) — view the Calls page, export
+   * its CSV. Open to everyone by default; each sees only their own calls, their
+   * team's or everyone's (leadCallService).
+   */
+  "calls",
 ] as const;
 
 export type CrmModule = (typeof CRM_MODULES)[number];
@@ -74,6 +80,8 @@ export const OPEN_BY_DEFAULT: Partial<Record<CrmModule, Partial<ModulePermission
   calendar: { view: true },
   pay: { view: true },
   balancePayments: { view: true, create: true },
+  // The Calls page: 3CX calls with leads, each person scoped to their own, their team's or everyone's (2026-10-14).
+  calls: { view: true, export: true },
 };
 
 export type PermissionsMap = {
@@ -100,6 +108,8 @@ export interface IUser extends Document {
   role: Types.ObjectId | IRole;
   designation?: string;
   extension?: string;        // 3CX phone extension number e.g. "101"
+  /** Where the extension came from: typed on the Users screen ("manual", never overwritten) or 3CX's users by email. */
+  extensionSource?: "manual" | "3cx" | null;
   status: "active" | "inactive";
   createdAt: Date;
   updatedAt: Date;
@@ -440,6 +450,7 @@ export interface ILead extends Document {
   campaign?: string;
   callNotConnected: number;
   callCount: number;
+  callConnected: number;
   firstContactTime?: Date | null;
   initialLeadResponse?: InitialLeadResponse | null;
   primaryConcern?: PrimaryConcern | null;

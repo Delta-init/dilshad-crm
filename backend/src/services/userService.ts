@@ -17,7 +17,13 @@ export class UserService {
       throw Object.assign(new Error("Role not found"), { statusCode: 404 });
     }
 
-    const user = await User.create({ ...input, email: input.email.toLowerCase() });
+    const extension = typeof input.extension === "string" ? input.extension.trim() : "";
+    const user = await User.create({
+      ...input,
+      email: input.email.toLowerCase(),
+      // Typed here: the 3CX call sync never overwrites it.
+      ...(extension ? { extension, extensionSource: "manual" } : {}),
+    });
     return User.findById(user._id).populate("role");
   }
 
@@ -111,9 +117,17 @@ export class UserService {
       ...(input.email !== undefined && { email: input.email.toLowerCase() }),
       ...(input.role !== undefined && { role: input.role }),
       ...(input.designation !== undefined && { designation: input.designation }),
-      ...(input.extension !== undefined && { extension: input.extension }),
       ...(input.status !== undefined && { status: input.status }),
     });
+
+    // An extension changed here is typed by hand: the 3CX call sync never overwrites it. Cleared, 3CX may fill it again.
+    if (input.extension !== undefined) {
+      const extension = (input.extension ?? "").trim();
+      if (extension !== String(user.extension ?? "").trim()) {
+        user.extension = extension || undefined;
+        user.extensionSource = extension ? "manual" : null;
+      }
+    }
 
     await user.save();
     return User.findById(id).populate("role");

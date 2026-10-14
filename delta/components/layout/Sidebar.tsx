@@ -57,7 +57,7 @@ export const navItems: { href: string; label: string; icon: React.ElementType; p
   { href: "/dashboard", label: "Dashboard",          icon: LayoutDashboard, permModule: "dashboard" },
   { href: "/my-tracker",label: "My Tracker",         icon: ClipboardCheck,  permModule: "tracker"   },
   { href: "/leads",     label: "Leads",              icon: FileText,        permModule: "leads"     },
-  { href: "/calls",     label: "Calls",              icon: PhoneCall,       permModule: "leads"     },
+  { href: "/calls",     label: "Calls",              icon: PhoneCall,       permModule: "calls"     },
   { href: "/reminders", label: "Reminders",          icon: Bell,            permModule: "reminders" },
   /* The Super Admin's, unless a role is given the Inactive Leads box. */
   { href: "/inactive-leads", label: "Inactive Leads", icon: TimerOff,       permModule: "inactive-leads" },

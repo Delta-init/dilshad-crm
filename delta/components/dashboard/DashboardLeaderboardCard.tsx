@@ -7,11 +7,13 @@ import { cn } from "@/lib/utils";
 import { fmtFull } from "@/lib/currency";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useLeaderboard, type LeaderboardRow } from "@/hooks/useLeaderboard";
+import { fmtTalkTotal } from "@/components/calls/callUi";
 
 /**
  * This month's leaderboard on the dashboard (the owner, 2026-10-07): the top
- * five, and your own place underneath when you are further down. The full board
- * is one click away.
+ * five, and your own place underneath when you are further down, with their 3CX
+ * calls and talk time (2026-10-14). The full board — ranked by calls or talk
+ * time too — is one click away.
  */
 
 const TOP = 5;
@@ -71,13 +73,15 @@ function LeaderboardCard() {
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2 text-right">Revenue</th>
                 <th className="px-4 py-2 text-right">Closings</th>
+                <th className="hidden px-4 py-2 text-right sm:table-cell">Calls</th>
+                <th className="hidden px-4 py-2 text-right sm:table-cell">Talk</th>
               </tr>
             </thead>
             <tbody>
               {top.map((r) => <Row key={r.userId} r={r} mine={r.userId === me?._id} />)}
               {showMine && (
                 <>
-                  <tr><td colSpan={4} className="px-4 py-1 text-center text-xs text-muted-foreground">…</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-1 text-center text-xs text-muted-foreground">…</td></tr>
                   <Row r={mine} mine />
                 </>
               )}
@@ -99,6 +103,8 @@ function Row({ r, mine }: { r: LeaderboardRow; mine: boolean }) {
       </td>
       <td className="px-4 py-2 text-right font-semibold text-foreground tabular-nums">{fmtFull(r.revenue)}</td>
       <td className="px-4 py-2 text-right tabular-nums">{r.closings}</td>
+      <td className="hidden px-4 py-2 text-right tabular-nums sm:table-cell" title={`${r.connected} connected`}>{r.calls}</td>
+      <td className="hidden px-4 py-2 text-right tabular-nums sm:table-cell">{r.talkSeconds ? fmtTalkTotal(r.talkSeconds) : "—"}</td>
     </tr>
   );
 }

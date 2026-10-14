@@ -8,7 +8,7 @@ import {
   RefreshCw, StickyNote, Send, Pencil, Trash2, CheckCheck,
   X, ChevronDown, Activity, Clock, UserCheck, FilePlus2,
   MessageSquarePlus, PencilLine, Minus, UsersRound, ArrowRightLeft, BookOpen,
-  PhoneOff, Plus, MessageSquare, AlertTriangle, Target, TrendingUp, CircleDollarSign,
+  MessageSquare, AlertTriangle, Target, TrendingUp, CircleDollarSign,
   MessageCircle, XCircle,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -32,7 +32,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-import { useLead, useUpdateLeadStatus, useAssignLead, useAddLeadNote, useUpdateLeadNote, useDeleteLeadNote, useUpdateLead, useAssignLeadToTeam, useTransferLeadToTeam, useUpdateCallNotConnected, useUpdateCallCount } from "@/hooks/useLeads";
+import { useLead, useUpdateLeadStatus, useAssignLead, useAddLeadNote, useUpdateLeadNote, useDeleteLeadNote, useUpdateLead, useAssignLeadToTeam, useTransferLeadToTeam } from "@/hooks/useLeads";
 import { useAllCourses } from "@/hooks/useCourses";
 import { useTeams } from "@/hooks/useTeams";
 import { useAuthStore } from "@/lib/store/authStore";
@@ -493,8 +493,6 @@ export default function LeadDetailPage() {
   const assignLead = useAssignLead();
   const assignToTeam = useAssignLeadToTeam();
   const transferToTeam = useTransferLeadToTeam();
-  const callNotConnected = useUpdateCallNotConnected();
-  const callCount = useUpdateCallCount();
 
   const canEdit = hasPermission("leads", "edit");
   const currentUserId = authUser?._id ?? "";
@@ -815,105 +813,28 @@ export default function LeadDetailPage() {
                 )}
                 <InfoRow icon={Clock} label="Last Updated" value={formatDate(lead.updatedAt)} />
 
-                {/* Call Not Connected Counter */}
-                <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/15">
-                        <PhoneOff className="h-4 w-4 text-orange-400" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-orange-300/80">Call Not Connected</p>
-                        <p className="text-[10px] text-muted-foreground">Times call was not answered</p>
-                      </div>
+                {/* Calls — counted from 3CX's calls with this lead (2026-10-14); not edited by hand */}
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/15">
+                      <Phone className="h-4 w-4 text-blue-400" />
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {canEdit && (
-                        <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => callNotConnected.mutate({ leadId: lead._id, action: "decrement" })}
-                          disabled={callNotConnected.isPending || (lead.callNotConnected ?? 0) === 0}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/50 bg-background text-muted-foreground hover:text-foreground hover:border-border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                          aria-label="Decrement"
-                        >
-                          <Minus className="h-3 w-3" />
-                        </motion.button>
-                      )}
-                      <AnimatePresence mode="wait">
-                        <motion.span
-                          key={lead.callNotConnected ?? 0}
-                          initial={{ opacity: 0, y: -6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 6 }}
-                          transition={{ duration: 0.15 }}
-                          className="w-8 text-center text-xl font-bold text-orange-400 tabular-nums"
-                        >
-                          {lead.callNotConnected ?? 0}
-                        </motion.span>
-                      </AnimatePresence>
-                      {canEdit && (
-                        <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => callNotConnected.mutate({ leadId: lead._id, action: "increment" })}
-                          disabled={callNotConnected.isPending}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/50 bg-background text-muted-foreground hover:text-foreground hover:border-border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                          aria-label="Increment"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </motion.button>
-                      )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-blue-300/80">Calls</p>
+                      <p className="text-[10px] text-muted-foreground">From 3CX — counted by themselves after each call</p>
                     </div>
                   </div>
-                </div>
-
-                {/* Call Count */}
-                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/15">
-                        <Phone className="h-4 w-4 text-blue-400" />
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    {[
+                      { label: "Calls", value: lead.callCount ?? 0, cls: "text-blue-400" },
+                      { label: "Connected", value: lead.callConnected ?? 0, cls: "text-emerald-400" },
+                      { label: "Not connected", value: lead.callNotConnected ?? 0, cls: "text-orange-400" },
+                    ].map((c) => (
+                      <div key={c.label} className="rounded-lg bg-background/60 px-2 py-1.5">
+                        <p className={`text-xl font-bold tabular-nums ${c.cls}`}>{c.value}</p>
+                        <p className="text-[10px] text-muted-foreground">{c.label}</p>
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-blue-300/80">Call Count</p>
-                        <p className="text-[10px] text-muted-foreground">Total calls made</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {canEdit && (
-                        <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => callCount.mutate({ leadId: lead._id, action: "decrement" })}
-                          disabled={callCount.isPending || (lead.callCount ?? 0) === 0}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/50 bg-background text-muted-foreground hover:text-foreground hover:border-border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                          aria-label="Decrement"
-                        >
-                          <Minus className="h-3 w-3" />
-                        </motion.button>
-                      )}
-                      <AnimatePresence mode="wait">
-                        <motion.span
-                          key={lead.callCount ?? 0}
-                          initial={{ opacity: 0, y: -6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 6 }}
-                          transition={{ duration: 0.15 }}
-                          className="w-8 text-center text-xl font-bold text-blue-400 tabular-nums"
-                        >
-                          {lead.callCount ?? 0}
-                        </motion.span>
-                      </AnimatePresence>
-                      {canEdit && (
-                        <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => callCount.mutate({ leadId: lead._id, action: "increment" })}
-                          disabled={callCount.isPending}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/50 bg-background text-muted-foreground hover:text-foreground hover:border-border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                          aria-label="Increment"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </motion.button>
-                      )}
-                    </div>
+                    ))}
                   </div>
                 </div>
 

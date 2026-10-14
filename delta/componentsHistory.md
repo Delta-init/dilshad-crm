@@ -1239,3 +1239,22 @@ A new close starts "Bonus given?" at yes with the course's bonus, marked "From t
 - `lib/currency.ts` — `fmtFull` caps at two decimals and reads a missing amount as 0; `fmtCompact` is now only for chart axes.
 - `app/(dashboard)/reports/page.tsx` — `fmtUSD` is `fmtFull` (was `fmtCompact`); `KpiCard` puts the value on its own full-width line, smaller when long; the revenue chart's Y axis keeps `fmtCompact`.
 - `app/(dashboard)/teams/[teamId]/page.tsx` — `fmtUSD` is `fmtFull`; new local `MoneyFigure` for the Total Received / Total Pending / Avg per Lead cards; the Y axis keeps `fmtCompact`.
+
+### Change log — 2026-10-14 (3CX calls, from the Draw CRM)
+- `components/calls/callUi.tsx` (new) — `CallResult`, `CallPerson`, `RecordingPlayer`, `SyncNote`, `fmtClockDuration`,
+  `fmtTalkTotal`, `fmtWhen` (Dubai), `RESULTS`.
+- `components/calls/ThreecxTestDialog.tsx` (new) — the Super Admin's Test connection, step by step.
+- `components/calls/CallFlow.tsx` (new) — `CallFlowProvider` (in the dashboard layout), `useCallFlow`, `dialOf`: the call
+  choice, the call window, "How did the call go?" with this CRM's status rules (Follow Up asks what happened and an
+  optional next follow-up — picked again on a lead in Follow Up it logs one more follow-up; Meeting Scheduled asks when;
+  Lost picks from `LOST_REASONS` and needs notes; Call Back an optional reminder), and the enrolment dialog for Closed.
+  Pending log kept in sessionStorage `remotecrm.pendingCallLog` for 30 minutes. Save is safe to press again after a
+  part-way failure (each request named; only the missing ones are sent); a Follow Up note goes to the follow-up history
+  cut to 1,000 characters; a refused form shows its first reason.
+- `components/leads/ClickToCall.tsx` — one Call button that opens the call flow (was a dropdown: 3CX web client popup /
+  tel: / copy, each bumping the call count).
+- `app/(dashboard)/calls/page.tsx` — rewritten: 3CX calls only. `components/leads/CallsPanel.tsx` — the lead's 3CX calls.
+- Lead page: the Call Not Connected / Call Count + / − counters → one read-only "Calls — from 3CX" box. Leads list: a
+  Calls (3CX) column. Kanban: card and preview show the three counts.
+- Leaderboard page + `DashboardLeaderboardCard`: Calls, Connected, Talk time; Revenue / Calls / Talk time switch.
+- `lib/dubaiDates.ts` (new) — `DUBAI_TZ`, `dubaiDate()`. Sidebar Calls → module `calls`.

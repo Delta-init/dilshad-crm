@@ -853,3 +853,23 @@ on the lead is marked done. `getUserLeadStats` also returns `meeting_done`.
 - `suggestedEmailOf(student, leadEmail)` — async now; skips a taken email. `suggestedEmailFor(h, student)`; `listEnrolments`
   works the suggestions out for the rows that need one.
 - `checkClientEmail(email, { leadId | studentId })` (new) — behind `GET /students/email-check`.
+
+## callSyncService / leadCallService / clickToCall — 3CX calls (added 2026-10-14, from the Draw CRM)
+
+- `syncCalls(by)` → `{ ok, skipped?, error?, windows, rows, calls, inserted, updated, leadsRecounted? }`;
+  `startCallSyncWorker()`; `syncExtensions()`; `takeLock` / `releaseLock`; `getCallSettings()`.
+- `recountLeadCalls(leadIds?)` — counts from `lead_calls`; no ids = every lead (with calls counted, the rest to 0).
+- `keepHandCounts()` (this CRM only) — copies every lead's non-zero counts into `HAND_COUNTS`
+  (`lead_call_counts_before_3cx`, upserts) before the first count from 3CX; done once `handCountsCopiedAt` is set, which
+  happens only when every lead is in; returns how many were copied this time.
+- `groupRows`, `parseCall`, `phoneKey`, `phoneKeysOf`, `leadsByPhone`, `pickLead`, `durationSeconds`, `callLogPath`.
+- `recordingPath`, `checkRecordingLink`, `recordingSource`, `recordingCount`.
+- `leadCallService.list(viewer, filters)`, `.forLead(viewer, leadId)`, `canSeeCall`, `canWorkLead`, `scopeOf`.
+- `clickToCallController`: `getClickToCall`, `startThreecxCall`, `getMyCallState`, `hangUpMyCall`.
+- `portalCalls`: `callsForPortal(query)`, `recordingLinkForPortal(id, index)`, `CallFilterError`.
+- `lib/threecx.ts`: `threecxConfigured`, `threecxSettings`, `threecxFetch`, `threecxJson`, `threecxPost`.
+- `LeaderboardService.getLeaderboard(month?, rankBy = "revenue")` — rows add `connected`, `talkSeconds`.
+- `utils/dubaiDay.ts`: `dubaiToday(now?)`, `dubaiDayStart(value)` (new, beside `dubaiDayRange`).
+- `logClickToCall` (callController, changed) — also stamps the lead's contact dates, for `leads.edit` / Super Admin
+  (logicHistory "3CX calls" 6).
+- `leadService.addFollowUp` (fixed) — populates the new entry through the lead; it used to throw after saving.

@@ -1,7 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
+import { Types } from "mongoose";
 import type { AuthenticatedRequest } from "../types/index.js";
 import { Lead } from "../models/Lead.js";
 import { CallLog } from "../models/CallLog.js";
+import { isSuperAdmin } from "../services/commissionService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 
 const PROD_URL       = process.env.CRM_API_URL    ?? "https://api-crm.deltainstitutions.com";
@@ -555,6 +557,21 @@ export const logClickToCall = async (
       initiatedBy:    req.user!.userId,
       source:         "click_to_call",
     });
+
+    // Pressing Call is a contact, as the old call counter had it — the counts come from 3CX since 2026-10-14, these
+    // dates still from here: lastContactedAt and lastFollowupDate now, and firstContactTime on the assigned agent's
+    // first call. Inactive Leads, the missed follow-up warning and the response-time reports read them. Only for
+    // someone who may edit leads, as that counter's route asked: the click itself needs no more than a sign-in.
+    const role = req.user!.role;
+    const mayWorkLeads = isSuperAdmin(role) || role?.permissions?.leads?.edit === true;
+    if (leadId && Types.ObjectId.isValid(leadId) && mayWorkLeads) {
+      const now = new Date();
+      await Lead.updateOne({ _id: leadId }, { $set: { lastContactedAt: now, lastFollowupDate: now } });
+      await Lead.updateOne(
+        { _id: leadId, assignedTo: req.user!.userId, firstContactTime: null },
+        { $set: { firstContactTime: now } },
+      );
+    }
 
     sendSuccess(res, "Call logged", {
       callLogId:       log._id.toString(),

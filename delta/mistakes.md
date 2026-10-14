@@ -416,3 +416,14 @@ Copy the template at the top and place it at the **top** of the correct category
 **What happened**: `tailwind.config.ts` scanned `pages`, `components`, `app` and `src` only, yet every status colour lives in `lib/statusConfig.ts`. A class used only there was never generated — MIA's Kanban drop tint (`bg-rose-500/5`) had none, and the new statuses' teal and pink classes would have been missing too. It worked for most statuses only because the same classes happened to appear in some page.
 
 **Rule**: any folder whose files hold Tailwind class strings is in `content` — `lib/` is now.
+
+## [2026-10-14] After-call Save: a second press repeated what had gone through (before shipping)
+
+**What happened:** "How did the call go?" sends up to three requests (reminder, status / follow-up, note). When one
+failed part-way and Save was pressed again, everything was sent again — and since the lead now showed Follow Up, the
+retry took the "another follow-up" path: two follow-ups, two reminders. A Follow Up note of 1,001–1,500 characters was
+also refused outright (the follow-up history keeps 1,000) with only "Validation failed" shown.
+
+**Rule:** a multi-request save names each request and remembers which went through (`sent` ref in
+`AfterCallDialog`), judging paths by the state when Save was first pressed; cut a field to the model's limit, not the
+route's; show a refused form's first reason (`errText`).

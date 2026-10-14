@@ -315,3 +315,35 @@ user PDF, the Sales Funnel's "qualified" step and the AI insights' closings.
 
 **Also:** report dates are Dubai days. `new Date(day + "T00:00:00.000Z")` reads them as UTC days — 4 hours off. Use
 `gstDayRange`.
+
+## populate() on an array entry threw after the save — Log follow-up said it failed (2026-10-14)
+
+**What happened:** `leadService.addFollowUp` saved the lead, then called `saved.populate("followedUpBy", …)` on the new
+`followUps` entry. Mongoose 8 throws on `populate()` of an array subdocument, so `POST /leads/:id/followups` answered 500
+with the follow-up already saved — the lead page's Log follow-up panel showed "Failed to log follow-up" and stayed open,
+inviting a second (duplicate) save. Found by the 3CX port's check (the after-call popup uses the same route).
+
+**Rule:** populate an array entry through its parent: `lead.populate({ path: `followUps.${i}.followedUpBy`, select })`,
+then return `lead.followUps[i]`. Never `doc.arr[i].populate(...)`.
+
+## A call split across two day windows kept only its later rows (2026-10-14)
+
+**What happened:** the 3CX sync reads the call log a day at a time (the first run: 90 of them). A call's rows have their
+own start times; when they straddle the start of a day (a queue call answered a second later), each day parsed only its
+own rows and the later day's upsert overwrote the earlier — the call kept one row: wrong talk time, taker, recordings.
+Caught by the check (2 runs in 10, when the fixture's call fell on a boundary). The Draw CRM's sync has the same gap.
+
+**Rule:** read each day after the first from `OVERLAP_MS` before it starts, so the later day sees the whole call; calls
+are keyed, so reading a row twice is harmless.
+
+## A one-time copy counted as done when it had only begun (2026-10-14, before shipping)
+
+**What happened:** `keepHandCounts` treated "the backup collection has any document" as "the copy is done". A copy cut
+short after its first 1,000 leads (a restart, a database error) was then skipped by the next run, which replaced every
+lead's counts — the rest of the counts from before 3CX gone, never retried. Found by the 4-case test (a fail-point on
+the second batch).
+
+**Rule:** a one-time migration marks itself done only after its last write (here `handCountsCopiedAt`), writes with
+upserts so it can be run again, and nothing irreversible runs before that mark. Likewise, a side effect moved to a
+looser route keeps the old route's permission: the contact stamp on `POST /calls/click` asks `leads.edit`, as
+`PATCH /call-count` did.

@@ -849,3 +849,37 @@ three runners stop only the mongod they started (its pid file) — `mongod --shu
 
 **Change Log**:
 - 1.0.0 — Initial build. Existing leads' emails are left as they are.
+
+## Calls from 3CX — brought over from the Draw CRM (2026-10-14)
+
+**What it does**: The Calls page lists only calls with leads through 3CX, read from 3CX's call log every minute (90 days
+back the first time): when, in or out, connected / missed / not answered, who took it, talk and ring time, and the
+recordings (played from 3CX through the server). Totals, a per-person table, filters (Dubai days: today / 7 days / 30 days
+/ this month / custom; direction; result; salesperson; lead name or number), sorting, paging and a CSV. A lead's page
+shows its calls the same way. The Super Admin has Sync now and Test connection. Extensions are filled from 3CX by email;
+one typed on the Users screen wins. The old click-to-call / journal logs (`call_logs`) stay in the database and on the QC
+screens; Inactive Leads still reads them.
+
+Every Call button asks "3CX call" (3CX rings the caller's own 3CX app / web client, then dials the lead; a call window
+follows it and can hang up) or "Phone call". After a call started here, "How did the call go?": connected yes / no, the
+next status with what this CRM asks for it (Follow Up: what happened, and the next follow-up if any — on a lead already in
+Follow Up, one more follow-up; Meeting Scheduled: when; Call Back: a reminder if wanted; Lost: one of its reasons and
+notes; Closed through the enrolment dialog), and notes saved as a lead note.
+
+A lead's call counts (calls, connected, not connected) come from 3CX and are no longer typed by hand: the lead page's
++ / − counters are gone. On the first sync after deploy the counts kept before (the old Call button's clicks and the
++ / −) are copied into `lead_call_counts_before_3cx`, then replaced by 3CX's — a lead with none from 3CX goes to 0.
+Pressing Call still stamps the lead's last contacted / last follow-up dates, and the first contact on the owner's first
+call, as before. The Leaderboard's calls are 3CX's (calls, connected, talk time), rankable by calls or talk time. The
+Root portal can read every call (`GET /service/calls`).
+
+**Routes**: `/api/v1/calls/log*`, `/calls/click-to-call`, `/calls/3cx/*` (middlewareHistory "Calls routes"),
+`GET /leaderboard?rankBy=`, `GET /service/calls`, `GET /service/calls/:id/recording-link`.
+
+**Env**: `THREECX_URL`, `THREECX_CLIENT_ID`, `THREECX_API_KEY` (all three, or no sync and no 3CX calls);
+`RUN_SCHEDULERS`.
+
+**Models Used**: `LeadCall` (`lead_calls`, new), `User.extensionSource` (new), `Lead.callConnected` (new), `Lead`,
+`Team`, `CommissionSettings`, `CallLog`, `app_settings` (`_id: "threecx_calls"`), `lead_call_counts_before_3cx` (new).
+
+**Tests**: `scripts/calls-check.sh` (210 checks, stand-in 3CX, scratch mongod), `scripts/portal-calls-check.sh` (20).

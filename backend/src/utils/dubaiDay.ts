@@ -23,3 +23,15 @@ export function dubaiDayRange(from?: string, to?: string): { $gte?: Date; $lte?:
   if (finish) range.$lte = finish;
   return start || finish ? range : null;
 }
+
+/** Today on the Dubai calendar, "YYYY-MM-DD" (the 3CX Calls page and the Leaderboard, 2026-10-14). */
+export function dubaiToday(now: Date = new Date()): string {
+  return new Date(now.getTime() + 4 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** When the Dubai day a value names begins — "YYYY-MM-DD" as written, a timestamp by its Dubai day; null if neither. */
+export function dubaiDayStart(value: string): Date | null {
+  const v = value.trim();
+  const day = DAY.test(v) ? v : (() => { const at = new Date(v); return isNaN(at.getTime()) ? null : dubaiToday(at); })();
+  return day ? new Date(`${day}T00:00:00.000+04:00`) : null;
+}

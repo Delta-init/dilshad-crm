@@ -882,3 +882,18 @@ back) and the added email.
 - **Where**: Reports (KPI cards, rankings, leaderboards, Top Revenue Earners, tables, chart tooltips) and the team page (revenue cards, member revenue)
 - **What**: the whole amount — "$2,250", "$71,570.25" — where it used to be shortened to one decimal ("$2.3K"). Only chart axes stay short ("$1.5K"), being the scale, not a figure. At most two decimals (`fmtFull`). The same as Draw and the Sales CRM.
 - **Cards**: the figure sits on its own line under the title and icon, a size smaller when long, so the whole amount fits on a phone (`KpiCard` on Reports, `MoneyFigure` on the team page)
+
+## Calls from 3CX (2026-10-14)
+
+- **Where**: Calls page, a lead's page (Calls section and the Calls box), the leads list (Calls column), Kanban cards,
+  every Call button, Leaderboard and its dashboard card
+- **What**: the Draw CRM's 3CX calls, here. The Calls page shows only calls with leads through 3CX (synced every minute):
+  stat cards (click one to filter), talk time and the average connected call, a table per person, period / direction /
+  result / salesperson / search filters, sorting, pages, a CSV, and each call's recording. Super Admin: Sync now and Test
+  connection. Each person sees their own calls and their leads', a team leader their team's, the Super Admin / Reporter
+  / Sales Manager everyone's.
+- **Call button**: "3CX call" (when 3CX is connected and the person has an extension) or "Phone call"; a call window
+  follows a 3CX call. After the call, "How did the call go?" — connected yes / no, the next status with what this CRM
+  asks for it (Follow Up: what happened, next follow-up optional; Meeting Scheduled: when; Call Back: optional reminder;
+  Lost: a reason from the list and notes; Closed: the enrolment form), notes. "Later" keeps it for 30 minutes.
+- **Counts**: calls / connected / not connected come from 3CX and are read-only (the + / − counters are gone)

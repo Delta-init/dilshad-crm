@@ -10,6 +10,7 @@ import { useReminderNotifications } from "@/hooks/useReminderNotifications";
 import { useActivityHeartbeat } from "@/hooks/useActivityHeartbeat";
 import { RecentPageTracker } from "@/components/shared/CommandPalette";
 import { RootPortalHistoryBridge } from "@/components/shared/RootPortalHistoryBridge";
+import { CallFlowProvider } from "@/components/calls/CallFlow";
 
 /**
  * Pages everyone signed in may open, whatever their role. Every other page is
@@ -76,8 +77,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <RecentPageTracker />
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        {/* Every Call button's dialogs: 3CX or phone, the call window, "How did the call go?" */}
+        <CallFlowProvider>
+          <Header />
+          <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        </CallFlowProvider>
       </div>
     </div>
   );

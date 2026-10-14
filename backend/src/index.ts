@@ -17,6 +17,7 @@ import { startBackupScheduler } from "./services/backupService.js";
 import { startInactiveLeadScheduler } from "./services/inactiveLeadScheduler.js";
 import { startIdleAlertScheduler } from "./services/idleAlertScheduler.js";
 import { startMeetingReminderScheduler } from "./services/meetingReminderScheduler.js";
+import { startCallSyncWorker } from "./services/callSyncService.js";
 
 const app = express();
 
@@ -69,6 +70,8 @@ const start = async () => {
     // Outside the gate: idempotent on the CRM's own id, and usually the reason
     // a local copy is pointed at real data in the first place.
     startFinanceHandoverWorker();
+    // 3CX calls with leads, every minute (off without THREECX_* or with RUN_SCHEDULERS=false).
+    startCallSyncWorker();
   });
 };
 

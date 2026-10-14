@@ -1490,3 +1490,25 @@ of the client's email (the toast says to add it first).
 **Types:** `EmailCheck` (`ok`, `takenBy { name, code?, kind }`, `message`) in `hooks/useStudents.ts`. `POST /students`, `PUT
 /students/:id/correction`, `POST /students/:id/enrolment/email` and `POST /students/:id/invoice` (sent back) answer 409 "This
 email is already used by … — enter …'s own email." for an email another client holds.
+
+## 3CX calls (added 2026-10-14, from the Draw CRM)
+
+**File:** `hooks/useCalls.ts` (the older `useRecentCalls` / `useQcQueue` / `useLeadCalls` stay for the QC screens).
+
+| Hook / call | Query key | Endpoint | Notes |
+|---|---|---|---|
+| `useCallLog(filters)` | `["calls", "log", filters]` | `GET /calls/log` | page of calls + stats + people + period + threecx; every minute |
+| `fetchCallLogForExport(filters)` | — | `GET /calls/log?export=1&limit=5000` | the CSV |
+| `useLeadCallLog(leadId)` | `["calls", "log", "lead", id]` | `GET /calls/log/lead/:leadId` | a lead's calls + stats |
+| `getRecordingLink(callId, i)` | — | `GET /calls/log/:id/recording-link` | a 10-minute link |
+| `useSyncCallsNow()` | — | `POST /calls/log/sync` | Super Admin |
+| `testThreecx()` | — | `POST /calls/log/test` | Super Admin's Test connection (`ThreecxTestDialog`) |
+| `useClickToCall()` | `["calls", "click-to-call"]` | `GET /calls/click-to-call` | `{ enabled, connected, extension, webClientUrl }` |
+| (CallFlow) | — | `POST /calls/3cx/call`, `GET /calls/3cx/state`, `POST /calls/3cx/hang-up` | the call window |
+| (CallFlow) | — | `POST /calls/click` | the click log; the server stamps the lead's contact dates |
+| (CallFlow) | — | `PATCH /leads/:id/status`, `POST /leads/:id/followups`, `POST /leads/:id/reminders`, `POST /leads/:id/notes` | "How did the call go?" — payloads per status in backend logicHistory "3CX calls" 7 |
+| `useLeaderboard(month?, rankBy?)` | `["leaderboard", month, rankBy]` | `GET /leaderboard?rankBy=` | rows add `connected`, `talkSeconds` |
+
+Removed: `useUpdateCallNotConnected`, `useUpdateCallCount` (the counts come from 3CX). `Lead.callConnected` added.
+**Types:** `ThreecxCall`, `CallStats`, `CallPersonRow`, `ThreecxStatus`, `CallLogFilters`, `CallLogResponse`,
+`PlacedCall`, `MyCallState`.
