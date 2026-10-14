@@ -72,11 +72,15 @@ export function toNotificationDTO(n: Pick<INotification, "_id" | "type" | "title
 export async function notify(input: NotifyInput): Promise<void> {
   const userIds = [...new Set(input.userIds.map(String))].filter((id) => Types.ObjectId.isValid(id));
   if (!userIds.length) return;
+  // Cut to what the record holds: a lead's name has no limit, and one too long must not lose the whole notice.
+  const title = input.title.slice(0, 200);
+  const body = input.body.slice(0, 1000);
+  const url = (input.url ?? "").slice(0, 500);
 
   // 1 + 2 — the record, and the live copy carrying its id.
   try {
     const docs = await Notification.insertMany(
-      userIds.map((user) => ({ user, type: input.type, title: input.title, body: input.body, url: input.url ?? "" }))
+      userIds.map((user) => ({ user, type: input.type, title, body, url }))
     );
     for (const doc of docs) {
       emitToUser(String(doc.user), "notification", toNotificationDTO(doc));
@@ -87,9 +91,9 @@ export async function notify(input: NotifyInput): Promise<void> {
 
   // 3 — the phone.
   sendPushToUsers(userIds, {
-    title: input.title,
-    body: input.body,
-    url: input.url,
+    title,
+    body,
+    url: url || undefined,
     tag: input.tag,
     data: { type: input.type },
   }).catch((err) => console.error(`🔔 Push for "${input.type}" failed:`, err instanceof Error ? err.message : err));

@@ -4,10 +4,12 @@ import { toast } from "@/lib/toast";
 import api from "@/lib/axios";
 import type { ApiResponse, PaginationMeta } from "@/types";
 import type {
+  FilterTeam,
   InactiveLeadFilters,
   InactiveLeadsResponse,
   LeadMoveEntry,
   LeadMoveFilters,
+  MovePerson,
   ReassignRequest,
   ReassignResult,
 } from "@/types/inactiveLeads";
@@ -48,6 +50,48 @@ export const useLeadMoves = (filters: LeadMoveFilters, enabled = true) =>
       return { items: res.data.data ?? [], pagination: res.data.pagination as PaginationMeta };
     },
     placeholderData: keepPreviousData,
+  });
+
+/** A server not yet updated has no lists of its own (404): the older lists stand in until it is. */
+const notThereYet = (error: unknown) => (error as { response?: { status?: number } })?.response?.status === 404;
+
+/** Every active team, for the page's team filter — the page's own list, so it needs no Teams permission. */
+export const useInactiveLeadTeams = (enabled = true) =>
+  useQuery({
+    queryKey: [...INACTIVE_LEADS_KEY, "teams"],
+    enabled,
+    staleTime: 5 * 60_000,
+    queryFn: async (): Promise<FilterTeam[]> => {
+      try {
+        return (await api.get<ApiResponse<FilterTeam[]>>("/inactive-leads/teams")).data.data ?? [];
+      } catch (error) {
+        if (!notThereYet(error)) throw error;
+        const res = await api.get<ApiResponse<Array<{ _id: string; name: string }>>>("/teams", { params: { status: "active", limit: "100" } });
+        return (res.data.data ?? []).map((t) => ({ id: t._id, name: t.name }));
+      }
+    },
+  });
+
+/** Who a lead can be moved to by hand, by name — the Move dialog's own list, so it needs no Users permission. */
+export const useMovePeople = (search: string, enabled = true) =>
+  useQuery({
+    queryKey: [...INACTIVE_LEADS_KEY, "people", search],
+    enabled,
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    queryFn: async (): Promise<MovePerson[]> => {
+      try {
+        return (await api.get<ApiResponse<MovePerson[]>>("/inactive-leads/people", { params: search ? { search } : {} })).data.data ?? [];
+      } catch (error) {
+        if (!notThereYet(error)) throw error;
+        const res = await api.get<ApiResponse<Array<{ _id: string; name: string; email: string; designation?: string | null }>>>("/users", {
+          params: { status: "active", limit: "100", ...(search ? { search } : {}) },
+        });
+        return (res.data.data ?? [])
+          .map((u) => ({ id: u._id, name: u.name, email: u.email, designation: u.designation ?? null }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+      }
+    },
   });
 
 export const useReassignInactiveLeads = () => {

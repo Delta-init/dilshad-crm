@@ -545,6 +545,17 @@ Each feature documents:
 
 **Change Log**:
 - 1.0.0 — Initial build. Automatic moves only for leads assigned after the switch went on (`enabledAt`).
+- 1.1.0 (2026-10-15) — fixes found bringing it to the Sales CRM:
+  - "acted" is the owner's alone: a colleague's call (the Call button sets the contact date for anyone) no longer
+    counts; the owner's calls straight from 3CX (`LeadCall`, by its person — out answered or not, in when picked
+    up) now do; an inbound call nobody answered at their extension doesn't;
+  - a lead handed back to the person who first added it counts like any other (timed from `originalCreatedAt`);
+  - a lead worked, closed or moved while its move is on its way is left alone (every move and stuck flag is written
+    under `stillInactive`; the lead is checked again in the team's queue, so a lost race spends nobody's turn);
+  - the 2,000 cap counts after the calls are checked, so leads their owners phoned can't hide newer ones;
+  - the page's own `GET /inactive-leads/teams` and `/people` lists; settings: read without stamping "last saved",
+    saving nothing writes nothing, time zones by name, two half-saves of the hours can't cross; a notice whose lead
+    name is very long is cut to fit instead of being lost. `scripts/inactive-leads-check.sh` — 271 checks.
 
 ---
 

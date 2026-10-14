@@ -867,3 +867,21 @@ The Draw CRM's 3CX work (Tetra Commission's call sync and call flow, for leads),
    `rankBy` revenue (revenue → closings → follow-ups → calls) | calls | talk. The old `call_logs` no longer count.
 9. **Root portal**: `GET /service/calls` (portal secret) — the Calls page's totals, per-person rows with emails, a page of
    calls; `GET /service/calls/:id/recording-link` — a link signed here for 10 minutes.
+
+## Inactive leads — fixes (2026-10-15)
+
+Found bringing the feature to the Sales CRM; `services/inactiveLeadService.ts` unless said.
+
+1. **The owner's acts only**: `OWNER_ACTED` no longer reads `lastContactedAt` (the Call button sets it for anyone's
+   call); owner calls come from `call_logs` (`initiatedBy`, or their extension — not an inbound call nobody answered)
+   and `lead_calls` (3CX, `user` = the owner, out any or in answered) since `assignedAt`, and `firstContactTime`.
+   "Took it on the spot" is timed from `originalCreatedAt ?? createdAt` (a hand-over resets `createdAt`).
+2. **`stillInactive(lead)`** — `{ _id, assignedTo, assignedAt, status ∈ new/assigned, $expr: not OWNER_ACTED }`: the
+   filter every move and stuck flag is written under; `moveWithinTeam` checks it inside the team queue before the
+   pick (`changed: true` → no flag, the hand move says "Not inactive any more — it was worked, closed or moved").
+3. **The cap after the calls**: read 2,000 at a time from the last one read (`assignedAt`, `_id`), check the calls,
+   until 2,000 are left or 25 chunks were read.
+4. **Settings** (`settingsService`): read with `findOne`, created only when missing; nothing to save → no write; a
+   start or end sent alone is written under a filter on the stored other half (400 when they'd cross); time zones
+   must be listed names, any case, stored as listed; `days` de-duplicated before the max-7 check.
+5. **`notify()`**: the stored notice and the push are cut to 200 / 1,000 / 500 (title / body / url).

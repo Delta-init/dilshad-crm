@@ -33,8 +33,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket";
 import { useAuthStore } from "@/lib/store/authStore";
-import { useTeams } from "@/hooks/useTeams";
-import { INACTIVE_LEADS_KEY, useInactiveLeads, useLeadMoves } from "@/hooks/useInactiveLeads";
+import { INACTIVE_LEADS_KEY, useInactiveLeadTeams, useInactiveLeads, useLeadMoves } from "@/hooks/useInactiveLeads";
 import { MoveLeadsDialog } from "@/components/inactive-leads/MoveLeadsDialog";
 import type { AutoMoveState, InactiveLead, InactiveRule, LeadMoveEntry } from "@/types/inactiveLeads";
 
@@ -199,8 +198,18 @@ export default function InactiveLeadsPage() {
     },
     canView && tab === "moves"
   );
-  const { data: teamsData } = useTeams({ status: "active", limit: 100 }, { enabled: canView });
-  const teams = teamsData?.data ?? [];
+  // The page's own list of teams: the filter works without the Teams box.
+  const { data: teams = [] } = useInactiveLeadTeams(canView);
+
+  // Moving the last leads off the last page leaves it empty: step back to the last page there is.
+  const totalPages = data?.pagination?.totalPages ?? 0;
+  useEffect(() => {
+    if (totalPages > 0 && page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+  const movesTotalPages = moves.data?.pagination?.totalPages ?? 0;
+  useEffect(() => {
+    if (movesTotalPages > 0 && movesPage > movesTotalPages) setMovesPage(movesTotalPages);
+  }, [movesPage, movesTotalPages]);
 
   // Live: when the mover acts, or a lead is moved elsewhere, the list is stale.
   useEffect(() => {
@@ -360,7 +369,7 @@ export default function InactiveLeadsPage() {
               <SelectContent>
                 <SelectItem value={ALL}>All teams</SelectItem>
                 {teams.map((t) => (
-                  <SelectItem key={t._id} value={t._id}>
+                  <SelectItem key={t.id} value={t.id}>
                     {t.name}
                   </SelectItem>
                 ))}

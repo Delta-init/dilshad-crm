@@ -1935,7 +1935,7 @@ export class ReportService {
     if (dateFrom) logDateFilter.$gte = new Date(dateFrom + "T00:00:00.000Z");
     if (dateTo)   logDateFilter.$lte = new Date(dateTo   + "T23:59:59.999Z");
 
-    const AUDITABLE = ["status_changed", "note_added", "note_updated", "note_deleted", "lead_assigned"];
+    const AUDITABLE = ["status_changed", "note_added", "note_updated", "note_deleted", "lead_assigned", "inactive_reassigned"];
 
     const pipeline: object[] = [
       ...(teamId ? [{ $match: { team: new mongoose.Types.ObjectId(teamId) } }] : []),

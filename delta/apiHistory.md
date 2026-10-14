@@ -1512,3 +1512,8 @@ email is already used by … — enter …'s own email." for an email another cl
 Removed: `useUpdateCallNotConnected`, `useUpdateCallCount` (the counts come from 3CX). `Lead.callConnected` added.
 **Types:** `ThreecxCall`, `CallStats`, `CallPersonRow`, `ThreecxStatus`, `CallLogFilters`, `CallLogResponse`,
 `PlacedCall`, `MyCallState`.
+
+### Inactive Leads — the page's own lists (2026-10-15)
+- `useInactiveLeadTeams(enabled)` — `GET /inactive-leads/teams`; `useMovePeople(search, enabled)` —
+  `GET /inactive-leads/people` (only while the Move dialog is open on "A person I choose"). Types `FilterTeam`,
+  `MovePerson`.

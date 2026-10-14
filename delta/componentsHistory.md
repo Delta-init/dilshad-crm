@@ -1268,3 +1268,10 @@ A new close starts "Bonus given?" at yes with the course's bonus, marked "From t
   (`compact` on cards); filters as above; an unknown state from the server shows as itself; still the Super Admin only.
 - Both pages: the tab bar scrolls inside itself rather than widening the page on the narrowest phones.
 - `components/shared/StatCard.tsx` — fills its grid cell, so a row of them is one height.
+
+### Change log — 2026-10-15 (inactive leads: own lists, bell)
+- `app/(dashboard)/inactive-leads/page.tsx` — the team filter from `useInactiveLeadTeams`; an emptied last page steps
+  back.
+- `components/inactive-leads/MoveLeadsDialog.tsx` — people from `useMovePeople`, only while open on it; an error line.
+- `components/notifications/NotificationBell.tsx` — keeps a stored notice that came on the socket after the list was
+  read.

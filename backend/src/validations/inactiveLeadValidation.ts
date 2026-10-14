@@ -25,6 +25,11 @@ export const listLeadMovesQuery = z.object({
   teamId: optionalQuery(objectId),
 });
 
+// GET /inactive-leads/people — the Move dialog's people
+export const movePeopleQuery = z.object({
+  search: optionalQuery(z.string().trim().max(100)),
+});
+
 // POST /inactive-leads/reassign — no `to`: each lead goes to the next person in its team.
 export const reassignInactiveLeadsSchema = z
   .object({

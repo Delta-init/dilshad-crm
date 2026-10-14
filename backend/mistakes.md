@@ -347,3 +347,21 @@ the second batch).
 upserts so it can be run again, and nothing irreversible runs before that mark. Likewise, a side effect moved to a
 looser route keeps the old route's permission: the contact stamp on `POST /calls/click` asks `leads.edit`, as
 `PATCH /call-count` did.
+
+## Inactive leads: found bringing it to the Sales CRM (2026-10-15)
+
+- **A lead worked or closed while its move was on its way was still moved, its status reset** — the move's update
+  checked only `{ _id, assignedTo, assignedAt }` and set status "assigned": a lead closed in the window reopened.
+  **Rule**: a write decided on an earlier read re-asserts, in its filter, everything the decision rested on
+  (`stillInactive`).
+- **A colleague's call counted as the owner acting; the owner's own calls from 3CX didn't** — `lastContactedAt` (set
+  by anyone's Call button) was an "acted" sign, and `lead_calls` were never read. **Fix**: owner-only signs; 3CX
+  calls by their person.
+- **A lead handed back to the person who first added it never counted** — "took it on the spot" compared with
+  `createdAt`, which every hand-over resets. **Fix**: `originalCreatedAt ?? createdAt`.
+- **Leads their owners phoned could fill the 2,000 cap and hide newer inactive ones**, and **a move that lost a race
+  still spent someone's turn** — fixed as above (logicHistory "Inactive leads — fixes").
+- **Every settings read stamped `updatedAt`** (an upsert to read; Mongoose timestamps add `$set: { updatedAt }`), and
+  **two half-saves of the hours at once could store an end before the start**. **Rule**: never upsert to read;
+  check a half against the stored other half in the write's filter.
+- **A very long lead name lost the whole notice** — the record caps title / body; `insertMany` failed (only logged).

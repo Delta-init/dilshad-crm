@@ -276,8 +276,16 @@ export function NotificationBell() {
   useEffect(() => {
     if (!storedList) return;
     const stored = storedList.items.map(fromStored);
-    // Live-only notices (older events that are not stored) stay; stored ones are replaced by the server's copy.
-    setNotifications((prev) => mergeNotifications(stored, prev.filter((n) => !n.stored)));
+    const known = new Set(stored.map((n) => n.id));
+    const newest = stored.reduce((t, n) => Math.max(t, new Date(n.createdAt).getTime()), 0);
+    // Live-only notices (older events that are not stored) stay; stored ones are replaced by the server's copy —
+    // except one that came on the socket after this list was read, which the list can't have yet.
+    setNotifications((prev) =>
+      mergeNotifications(
+        stored,
+        prev.filter((n) => !n.stored || (!known.has(n.id) && new Date(n.createdAt).getTime() > newest))
+      )
+    );
   }, [storedList]);
 
   // ── Show push permission banner if not yet granted ────────────────────────

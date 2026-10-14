@@ -436,3 +436,10 @@ route's; show a refused form's first reason (`errText`).
 - **Fix**: cards below `lg`, tables from `lg`; no outer padding on the pages.
 - **Rule**: pick a table's breakpoint by the width it gets beside the sidebar (6+ columns → cards below `lg`), and pages
   in `(dashboard)` add no outer padding.
+
+## [2026-10-15] A list replaced wholesale by a refetch that started before a socket push
+
+- **What happened**: the bell replaced every stored notice with the server's list; a notice that arrived on the
+  socket while that list was in flight vanished until the next refetch.
+- **Fix**: keep a socket-arrived stored notice the list doesn't have when it is newer than the list's newest.
+- **Rule**: when merging a fetched list with pushed items, keep the pushed ones newer than the fetch.

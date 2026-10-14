@@ -1,9 +1,16 @@
 import type { Response, NextFunction } from "express";
 import type { AuthenticatedRequest } from "../types/index.js";
-import { listInactiveLeads, listLeadMoves, reassignInactiveLeads } from "../services/inactiveLeadService.js";
+import {
+  listFilterTeams,
+  listInactiveLeads,
+  listLeadMoves,
+  listMovePeople,
+  reassignInactiveLeads,
+} from "../services/inactiveLeadService.js";
 import {
   listInactiveLeadsQuery,
   listLeadMovesQuery,
+  movePeopleQuery,
   reassignInactiveLeadsSchema,
 } from "../validations/inactiveLeadValidation.js";
 import { sendSuccess, sendError } from "../utils/response.js";
@@ -33,6 +40,29 @@ export async function listLeadMovesHandler(req: AuthenticatedRequest, res: Respo
     }
     const { items, pagination } = await listLeadMoves(parsed.data);
     sendSuccess(res, "Lead moves", items, 200, pagination);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/v1/inactive-leads/teams — the page's team filter
+export async function listFilterTeamsHandler(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    sendSuccess(res, "Teams", await listFilterTeams());
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/v1/inactive-leads/people — the Move dialog's people
+export async function listMovePeopleHandler(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parsed = movePeopleQuery.safeParse(req.query);
+    if (!parsed.success) {
+      sendError(res, "Validation failed", 400, parsed.error.flatten());
+      return;
+    }
+    sendSuccess(res, "People", await listMovePeople(parsed.data));
   } catch (err) {
     next(err);
   }

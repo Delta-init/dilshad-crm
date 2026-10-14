@@ -549,9 +549,14 @@ view | create | edit | delete | approve | export
 
 | Method | Path | Middleware chain |
 |--------|------|-----------------|
-| GET | `/api/v1/inactive-leads` | `authenticate` → `requireSuperAdmin` |
-| GET | `/api/v1/inactive-leads/moves` | `authenticate` → `requireSuperAdmin` |
-| POST | `/api/v1/inactive-leads/reassign` | `authenticate` → `requireSuperAdmin` |
+| GET | `/api/v1/inactive-leads` | `authenticate` → `checkPermission("inactive-leads","view")` |
+| GET | `/api/v1/inactive-leads/moves` | `authenticate` → `checkPermission("inactive-leads","view")` |
+| GET | `/api/v1/inactive-leads/teams` | `authenticate` → `checkPermission("inactive-leads","view")` (2026-10-15) |
+| GET | `/api/v1/inactive-leads/people` | `authenticate` → `checkPermission("inactive-leads","edit")` (2026-10-15) |
+| POST | `/api/v1/inactive-leads/reassign` | `authenticate` → `checkPermission("inactive-leads","edit")` |
+
+(Since the module was added to Roles these go by the "inactive-leads" box — the table said `requireSuperAdmin` until
+2026-10-15. The web page itself still opens for the Super Admin only.)
 
 **`requireSuperAdmin`** (new, `middleware/permissions.ts`) — passes only `role.isSystemRole && role.roleName === "Super Admin"`; everyone else gets 403, including a custom role with every permission ticked. It is deliberately not a module a role can be granted.
 

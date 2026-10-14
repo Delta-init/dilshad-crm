@@ -907,3 +907,12 @@ back) and the added email.
 - On a phone the search takes its own line and the pickers share the next; long names, devices and the person filter
   shorten instead of pushing the page sideways; the pages no longer add padding of their own on top of the layout's.
 - Stat cards in a row are one height.
+
+## Inactive Leads — its own lists, and what changed moving it to the Sales CRM (2026-10-15)
+
+- The team filter and the Move dialog's people come from the page's own `/inactive-leads/teams` and `/people`; the
+  dialog asks for people only while it is open on "A person I choose".
+- Moving the last leads off a page steps back to the last page there is.
+- The bell keeps a notice that came on the socket while its list was being read.
+- The server side: only the owner's own acts count (their calls straight from 3CX too, a colleague's call not); a
+  lead worked or closed while its move is on its way is left alone.

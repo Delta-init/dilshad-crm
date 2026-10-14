@@ -49,11 +49,15 @@ function toDTO(doc: IAppSettings): AppSettingsDTO {
 /** The settings, with every default filled in. The document is created the first time anyone asks. */
 export async function getAppSettings(): Promise<AppSettingsDTO> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.value;
-  const doc = await AppSetting.findOneAndUpdate(
-    { key: "app" },
-    { $setOnInsert: { key: "app" } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  ).lean<IAppSettings>();
+  // Read first: an upsert on every read would stamp updatedAt, and "last saved" would mean "last read".
+  let doc = await AppSetting.findOne({ key: "app" }).lean<IAppSettings>();
+  if (!doc) {
+    doc = await AppSetting.findOneAndUpdate(
+      { key: "app" },
+      { $setOnInsert: { key: "app" } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean<IAppSettings>();
+  }
   const value = toDTO(doc!);
   cache = { at: Date.now(), value };
   return value;
@@ -90,14 +94,24 @@ export async function updateAppSettings(input: UpdateAppSettingsInput, userId: s
   if (autoReassign !== undefined && autoReassign !== current.inactiveLeads.autoReassign) {
     set["inactiveLeads.enabledAt"] = autoReassign ? new Date() : null;
   }
+  // Nothing to save: not a save (nor a new "updated by").
+  if (Object.keys(set).length === 1) return current;
+
+  // A start or an end sent alone is checked against the other as it is stored at the moment of writing, so two
+  // such saves at once can't leave the hours ending before they start.
+  const guard: Record<string, unknown> = {};
+  const wh = input.workingHours;
+  if (wh?.start !== undefined && wh.end === undefined) guard["workingHours.end"] = { $gt: wh.start };
+  if (wh?.end !== undefined && wh.start === undefined) guard["workingHours.start"] = { $lt: wh.end };
 
   const doc = await AppSetting.findOneAndUpdate(
-    { key: "app" },
+    { key: "app", ...guard },
     { $set: set },
-    { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
+    { new: true, runValidators: true }
   ).lean<IAppSettings>();
   cache = null;
-  return toDTO(doc!);
+  if (!doc) throw Object.assign(new Error("Working hours must end after they start"), { statusCode: 400 });
+  return toDTO(doc);
 }
 
 /**

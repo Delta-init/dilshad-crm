@@ -62,6 +62,20 @@ export interface InactiveLeadFilters {
   search?: string;
 }
 
+/** GET /inactive-leads/teams — the page's team filter. */
+export interface FilterTeam {
+  id: string;
+  name: string;
+}
+
+/** GET /inactive-leads/people — someone a lead can be moved to by hand. */
+export interface MovePerson {
+  id: string;
+  name: string;
+  email: string;
+  designation: string | null;
+}
+
 /** GET /inactive-leads/moves — one lead moved on for inactivity. */
 export interface LeadMoveEntry {
   id: string;

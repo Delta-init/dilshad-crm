@@ -873,3 +873,8 @@ on the lead is marked done. `getUserLeadStats` also returns `meeting_done`.
 - `logClickToCall` (callController, changed) — also stamps the lead's contact dates, for `leads.edit` / Super Admin
   (logicHistory "3CX calls" 6).
 - `leadService.addFollowUp` (fixed) — populates the new entry through the lead; it used to throw after saving.
+
+## inactiveLeadService — the page's pickers (added 2026-10-15)
+
+- `listFilterTeams()` — every active team, by name, for the page's team filter (no Teams permission needed).
+- `listMovePeople({ search? })` — active people by name (100 at most), for the Move dialog (no Users permission needed).

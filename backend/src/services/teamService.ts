@@ -1040,7 +1040,7 @@ export class TeamService {
       } else if (action === "status") {
         conditions.push({ action: "status_changed" });
       } else if (action === "assignments") {
-        conditions.push({ action: { $in: ["lead_assigned", "team_assigned"] } });
+        conditions.push({ action: { $in: ["lead_assigned", "team_assigned", "inactive_reassigned"] } });
       } else if (action === "created") {
         conditions.push({ action: "lead_created" });
       }

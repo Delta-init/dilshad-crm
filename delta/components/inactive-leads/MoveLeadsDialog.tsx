@@ -14,8 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { useUsers } from "@/hooks/useUsers";
-import { useReassignInactiveLeads } from "@/hooks/useInactiveLeads";
+import { useMovePeople, useReassignInactiveLeads } from "@/hooks/useInactiveLeads";
 import type { InactiveLead } from "@/types/inactiveLeads";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -71,12 +70,9 @@ export function MoveLeadsDialog({ open, onOpenChange, leads, onMoved }: MoveLead
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data: usersData, isLoading: usersLoading } = useUsers(
-    open && mode === "person"
-      ? { status: "active", limit: "100", ...(query ? { search: query } : {}) }
-      : { status: "active", limit: "1" }
-  );
-  const people = useMemo(() => (usersData?.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)), [usersData]);
+  // Asked for only while the dialog is open on "A person I choose"; the server sorts by name.
+  const { data: peopleData, isLoading: usersLoading, isError: peopleError } = useMovePeople(query, open && mode === "person");
+  const people = useMemo(() => peopleData ?? [], [peopleData]);
 
   const owners = new Set(leads.map((l) => l.owner?.id).filter(Boolean));
   const count = leads.length;
@@ -154,20 +150,24 @@ export function MoveLeadsDialog({ open, onOpenChange, leads, onMoved }: MoveLead
                     <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading people…
                     </div>
+                  ) : peopleError ? (
+                    <p className="py-6 text-center text-xs text-muted-foreground">Could not load people — try again.</p>
                   ) : people.length === 0 ? (
-                    <p className="py-6 text-center text-xs text-muted-foreground">Nobody matches “{query}”.</p>
+                    <p className="py-6 text-center text-xs text-muted-foreground">
+                      {query ? <>Nobody matches “{query}”.</> : "Nobody to move it to."}
+                    </p>
                   ) : (
                     people.map((p) => {
-                      const selected = personId === p._id;
-                      const hasAll = count > 0 && owners.size === 1 && owners.has(p._id);
+                      const selected = personId === p.id;
+                      const hasAll = count > 0 && owners.size === 1 && owners.has(p.id);
                       return (
                         <motion.button
-                          key={p._id}
+                          key={p.id}
                           type="button"
                           role="option"
                           aria-selected={selected}
                           whileTap={{ scale: 0.97 }}
-                          onClick={() => setPersonId(p._id)}
+                          onClick={() => setPersonId(p.id)}
                           disabled={hasAll}
                           className={cn(
                             "flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",

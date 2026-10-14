@@ -4,6 +4,7 @@ import { LeadMove } from "../models/LeadMove.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
 import { CallLog } from "../models/CallLog.js";
+import { LeadCall } from "../models/LeadCall.js";
 import { AppSetting } from "../models/AppSetting.js";
 import { emitTeamUpdate } from "../socket.js";
 import { getAppSettings, isWithinWorkingHours, type AppSettingsDTO } from "./settingsService.js";
@@ -32,8 +33,10 @@ import type { PaginationMeta } from "../types/index.js";
 const UNTOUCHED_STATUSES = ["new", "assigned"];
 /** Activity entries that count as acting on the lead, when the owner made them. */
 const ACTING_LOGS = ["status_changed", "note_added", "note_updated"];
-/** Most leads one query considers — the page says when there were more. */
+/** Most leads one list holds — the page says when there were more. */
 const CANDIDATE_CAP = 2000;
+/** Most chunks of CANDIDATE_CAP one search reads past leads their owners phoned (50,000 leads). */
+const MAX_CHUNKS = 25;
 /** Most leads one automatic pass moves; the rest wait a minute for the next. */
 const SWEEP_CAP = 200;
 
@@ -148,17 +151,18 @@ const byOwnerSinceAssigned = (array: string, userField: string) => ({
 /** Everything on the lead itself that shows its owner acted on it since it became theirs. */
 const OWNER_ACTED = {
   $or: [
-    // They added the lead themselves and took it on the spot.
+    // They added the lead themselves and took it on the spot — timed from when it was first
+    // created: every hand-over resets createdAt to that moment (leadHandOver.ts), and a lead
+    // handed back to the person who once added it is theirs to act on like any other.
     {
       $and: [
         { $eq: ["$reporter", "$assignedTo"] },
-        { $lte: [{ $subtract: ["$assignedAt", "$createdAt"] }, 60_000] },
+        { $lte: [{ $subtract: ["$assignedAt", { $ifNull: ["$originalCreatedAt", "$createdAt"] }] }, 60_000] },
       ],
     },
-    // Stamped by the assigned agent's first call, note or status change.
+    // Stamped by the assigned agent's first call, note or status change. (Not lastContactedAt: the Call button
+    // sets it for anyone's call — a colleague phoning the lead is not its owner acting.)
     { $gte: ["$firstContactTime", "$assignedAt"] },
-    // A call counted on the lead.
-    { $gte: ["$lastContactedAt", "$assignedAt"] },
     {
       $anyElementTrue: [
         {
@@ -193,9 +197,27 @@ const OWNER_ACTED = {
   ],
 };
 
+/**
+ * Still a lead to move: the same owner since the same moment, untouched, and nothing on it showing the owner acted —
+ * the filter every move and flag is written under, so a lead worked or closed while the move was on its way is left
+ * alone. (Calls live in their own collections and are checked when the leads are found.)
+ */
+const stillInactive = (lead: Pick<Candidate, "_id" | "assignedTo" | "assignedAt">) => ({
+  _id: lead._id,
+  assignedTo: lead.assignedTo,
+  assignedAt: lead.assignedAt,
+  status: { $in: UNTOUCHED_STATUSES },
+  $expr: { $not: [OWNER_ACTED] },
+});
+
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** Leads whose owner phoned them since they became theirs — calls live in their own collection. */
+/**
+ * Leads whose owner phoned them since they became theirs — calls live in their own collections: the Call button's
+ * log (call_logs) and the calls 3CX synced (LeadCall, by the call's person — a call made straight from 3CX counts
+ * too). A call out counts even unanswered (they tried); a call in only when they picked up — a lead ringing and
+ * nobody answering is not the owner acting.
+ */
 async function leadsTheOwnerCalled(leads: Candidate[]): Promise<Set<string>> {
   const called = new Set<string>();
   if (!leads.length) return called;
@@ -207,8 +229,10 @@ async function leadsTheOwnerCalled(leads: Candidate[]): Promise<Set<string>> {
   const extensionOf = new Map(owners.map((o) => [String(o._id), (o.extension ?? "").trim()]));
 
   const calls = await CallLog.find({ leadId: { $in: leads.map((l) => l._id) }, callDate: { $gte: since } })
-    .select("leadId callDate initiatedBy agentExtension")
+    .select("leadId callDate initiatedBy agentExtension callDirection callType")
     .lean();
+  const unansweredIn = (c: { callDirection?: string | null; callType?: string | null }) =>
+    c.callDirection === "inbound" && (c.callType === "Missed" || c.callType === "Notanswered");
   const callsByLead = new Map<string, typeof calls>();
   for (const c of calls) {
     const key = String(c.leadId);
@@ -217,14 +241,31 @@ async function leadsTheOwnerCalled(leads: Candidate[]): Promise<Set<string>> {
     callsByLead.set(key, list);
   }
 
+  const synced = await LeadCall.find({
+    lead: { $in: leads.map((l) => l._id) },
+    startedAt: { $gte: since },
+    user: { $ne: null },
+    $or: [{ direction: "out" }, { status: "answered" }],
+  })
+    .select("lead user startedAt")
+    .lean<Array<{ lead: Types.ObjectId; user: Types.ObjectId | null; startedAt: Date }>>();
+  const syncedByLead = new Map<string, typeof synced>();
+  for (const c of synced) {
+    const key = String(c.lead);
+    const list = syncedByLead.get(key) ?? [];
+    list.push(c);
+    syncedByLead.set(key, list);
+  }
+
   for (const lead of leads) {
     const owner = String(lead.assignedTo);
     const extension = extensionOf.get(owner) ?? "";
     const theirs = (callsByLead.get(String(lead._id)) ?? []).some(
       (c) =>
         c.callDate >= lead.assignedAt &&
-        (String(c.initiatedBy ?? "") === owner || (extension !== "" && (c.agentExtension ?? "").trim() === extension)),
-    );
+        (String(c.initiatedBy ?? "") === owner ||
+          (extension !== "" && (c.agentExtension ?? "").trim() === extension && !unansweredIn(c))),
+    ) || (syncedByLead.get(String(lead._id)) ?? []).some((c) => c.startedAt >= lead.assignedAt && String(c.user) === owner);
     if (theirs) called.add(String(lead._id));
   }
   return called;
@@ -247,22 +288,43 @@ async function findInactiveLeads(f: CandidateFilter): Promise<{ leads: Candidate
     match.$or = [{ name: rx }, { phone: rx }, { email: rx }];
   }
 
-  const pipeline: PipelineStage[] = [{ $match: match }];
+  const notActed: PipelineStage[] = [];
   if (f.skipStuck) {
-    pipeline.push({ $match: { $expr: { $not: [{ $gte: ["$inactivity.stuckAt", "$assignedAt"] }] } } });
+    notActed.push({ $match: { $expr: { $not: [{ $gte: ["$inactivity.stuckAt", "$assignedAt"] }] } } });
   }
-  pipeline.push(
-    { $match: { $expr: { $not: [OWNER_ACTED] } } },
-    { $sort: { assignedAt: 1, _id: 1 } },
-    { $limit: CANDIDATE_CAP + 1 },
-    { $project: { name: 1, phone: 1, source: 1, status: 1, assignedTo: 1, assignedAt: 1, team: 1, inactivity: 1 } },
-  );
+  notActed.push({ $match: { $expr: { $not: [OWNER_ACTED] } } });
+  const project: PipelineStage = {
+    $project: { name: 1, phone: 1, source: 1, status: 1, assignedTo: 1, assignedAt: 1, team: 1, inactivity: 1 },
+  };
 
-  const rows = await Lead.aggregate<Candidate>(pipeline);
-  const capped = rows.length > CANDIDATE_CAP;
-  const leads = capped ? rows.slice(0, CANDIDATE_CAP) : rows;
-  const called = await leadsTheOwnerCalled(leads);
-  return { leads: leads.filter((l) => !called.has(String(l._id))), capped };
+  // Calls live in their own collections, so they are checked a chunk at a time, and the cap counts what is left —
+  // leads their owners phoned (their status not moved on) must not fill it and hide newer inactive ones. Each chunk
+  // carries on from the last lead read (longest waiting first).
+  const leads: Candidate[] = [];
+  let last: Candidate | null = null;
+  let more = false;
+  for (let chunk = 0; leads.length <= CANDIDATE_CAP; chunk++) {
+    if (chunk === MAX_CHUNKS) {
+      more = true;
+      break;
+    }
+    const after: PipelineStage[] = last
+      ? [{ $match: { $or: [{ assignedAt: { $gt: last.assignedAt } }, { assignedAt: last.assignedAt, _id: { $gt: last._id } }] } }]
+      : [];
+    const rows = await Lead.aggregate<Candidate>([
+      { $match: match },
+      ...after,
+      ...notActed,
+      { $sort: { assignedAt: 1, _id: 1 } },
+      { $limit: CANDIDATE_CAP },
+      project,
+    ]);
+    const called = await leadsTheOwnerCalled(rows);
+    for (const r of rows) if (!called.has(String(r._id))) leads.push(r);
+    if (rows.length < CANDIDATE_CAP) break;
+    last = rows[rows.length - 1];
+  }
+  return { leads: leads.slice(0, CANDIDATE_CAP), capped: more || leads.length > CANDIDATE_CAP };
 }
 
 const isStuck = (l: Candidate): boolean => Boolean(l.inactivity?.stuckAt && l.inactivity.stuckAt >= l.assignedAt);
@@ -397,9 +459,10 @@ export async function listLeadMoves(q: {
 // ─── Moving one ───────────────────────────────────────────────────────────────
 
 /**
- * Hands the lead to `to` — only if it is still with the same person from the
- * same moment it was read, so a lead reassigned or moved in between is left
- * alone. Logged on the lead and in the move log. True when it moved.
+ * Hands the lead to `to` — only if it is still inactive with the same person
+ * from the same moment it was read (`stillInactive`), so a lead reassigned,
+ * moved, worked or closed in between is left alone. Logged on the lead and in
+ * the move log. True when it moved.
  */
 async function moveLead(
   lead: Candidate,
@@ -422,7 +485,7 @@ async function moveLead(
   if (ctx.by) log.performedBy = new Types.ObjectId(ctx.by.id);
 
   const result = await Lead.updateOne(
-    { _id: lead._id, assignedTo: lead.assignedTo, assignedAt: lead.assignedAt },
+    stillInactive(lead),
     {
       $set: {
         assignedTo: new Types.ObjectId(to.id),
@@ -470,16 +533,20 @@ async function moveLead(
 /**
  * The lead's next owner by its team's split rule, and the move — both inside
  * the team's split queue so the pick sees every assignment before it.
- * Nobody who already lost it, and nobody deactivated, is picked.
+ * Nobody who already lost it, and nobody deactivated, is picked. `changed`:
+ * the lead was worked, closed or moved meanwhile, and nobody's turn was spent.
  */
 async function moveWithinTeam(
   lead: Candidate,
   from: Person,
   ctx: { kind: "automatic" | "manual"; by: Person | null; now: Date; inactiveMinutes: number },
-): Promise<{ to: Person | null; moved: boolean }> {
+): Promise<{ to: Person | null; moved: boolean; changed?: boolean }> {
   if (!lead.team) return { to: null, moved: false };
   const teamId = String(lead.team);
   return runInTeamQueue(teamId, async () => {
+    // Checked here, where every move queued before it has landed: a lead another pass or a hand move already took,
+    // or its owner has acted on, is left alone before anyone's turn is spent on it.
+    if (!(await Lead.exists(stillInactive(lead)))) return { to: null, moved: false, changed: true };
     const team = await Team.findById(teamId)
       .populate("members", "_id status")
       .populate("leaders", "_id status")
@@ -496,15 +563,13 @@ async function moveWithinTeam(
     const user = await User.findById(pick).select("name").lean<{ _id: Types.ObjectId; name: string } | null>();
     if (!user) return { to: null, moved: false };
     const to = { id: String(user._id), name: user.name };
-    return { to, moved: await moveLead(lead, to, from, ctx) };
+    const moved = await moveLead(lead, to, from, ctx);
+    return moved ? { to, moved } : { to, moved, changed: true };
   });
 }
 
 async function markStuck(lead: Candidate, now: Date): Promise<boolean> {
-  const result = await Lead.updateOne(
-    { _id: lead._id, assignedTo: lead.assignedTo, assignedAt: lead.assignedAt },
-    { $set: { "inactivity.stuckAt": now } },
-  );
+  const result = await Lead.updateOne(stillInactive(lead), { $set: { "inactivity.stuckAt": now } });
   return result.modifiedCount > 0;
 }
 
@@ -663,6 +728,37 @@ async function names(ids: string[]): Promise<Map<string, string>> {
   return new Map(users.map((u) => [String(u._id), u.name]));
 }
 
+// ─── For the page's pickers ───────────────────────────────────────────────────
+
+/**
+ * Who a lead can be moved to by hand — everyone active, by name: the Move
+ * dialog's list, for whoever may move leads (no Users permission needed).
+ */
+export async function listMovePeople(
+  q: { search?: string },
+): Promise<Array<{ id: string; name: string; email: string; designation: string | null }>> {
+  const filter: Record<string, unknown> = { status: { $ne: "inactive" } };
+  if (q.search) {
+    const rx = new RegExp(escapeRegex(q.search), "i");
+    filter.$or = [{ name: rx }, { email: rx }];
+  }
+  const users = await User.find(filter)
+    .select("name email designation")
+    .sort({ name: 1, _id: 1 })
+    .limit(100)
+    .lean<Array<{ _id: Types.ObjectId; name: string; email: string; designation?: string | null }>>();
+  return users.map((u) => ({ id: String(u._id), name: u.name, email: u.email, designation: u.designation ?? null }));
+}
+
+/** Every active team, by name — the page's team filter (no Teams permission needed). */
+export async function listFilterTeams(): Promise<Array<{ id: string; name: string }>> {
+  const teams = await Team.find({ status: { $ne: "inactive" } })
+    .select("name")
+    .sort({ name: 1, _id: 1 })
+    .lean<Array<{ _id: Types.ObjectId; name: string }>>();
+  return teams.map((t) => ({ id: String(t._id), name: t.name }));
+}
+
 // ─── By hand, from the page ───────────────────────────────────────────────────
 
 /**
@@ -725,6 +821,7 @@ export async function reassignInactiveLeads(
 
     let to: Person | null = null;
     let moved = false;
+    let changed = false;
     if (target) {
       if (target.id === from.id) {
         skip(`It is already ${target.name}'s`);
@@ -737,15 +834,16 @@ export async function reassignInactiveLeads(
         skip("It has no team — pick a person instead");
         continue;
       }
-      ({ to, moved } = await moveWithinTeam(lead, from, ctx));
-      if (!to) {
+      ({ to, moved, changed = false } = await moveWithinTeam(lead, from, ctx));
+      if (!to && !changed) {
         skip("Nobody else in the team can take it — pick a person instead");
         continue;
       }
     }
 
     if (!moved || !to) {
-      skip("It changed while moving — refresh and try again");
+      // Worked, closed or moved on while this request was on its way.
+      skip("Not inactive any more — it was worked, closed or moved");
       continue;
     }
     result.moved.push({ leadId: String(lead._id), leadName: lead.name ?? "", from, to });
@@ -810,13 +908,13 @@ export async function sweepInactiveLeads(now: Date = new Date()): Promise<SweepR
     const from: Person = { id: String(lead.assignedTo), name: ownerNames.get(String(lead.assignedTo)) ?? "Unknown" };
     const inactiveMinutes = workingMinutesBetween(settings.workingHours, lead.assignedAt, now);
     try {
-      const { to, moved } = await moveWithinTeam(lead, from, { kind: "automatic", by: null, now, inactiveMinutes });
+      const { to, moved, changed } = await moveWithinTeam(lead, from, { kind: "automatic", by: null, now, inactiveMinutes });
       if (moved && to) {
         moves.push({ leadId: String(lead._id), leadName: lead.name ?? "", from, to, inactiveMinutes });
-      } else if (!to && (await markStuck(lead, now))) {
+      } else if (!to && !changed && (await markStuck(lead, now))) {
         stuck.push({ lead, ownerName: from.name, teamName: lead.team ? teamNames.get(String(lead.team)) ?? null : null });
       }
-      // Picked someone but the lead changed underneath: it is looked at again next minute.
+      // Worked, closed or moved meanwhile: left alone (still inactive, it is looked at again next minute).
     } catch (err) {
       console.error(`[inactiveLeads] could not move lead ${String(lead._id)}:`, err instanceof Error ? err.message : err);
     }

@@ -64,7 +64,9 @@ function offsetAt(timeZone: string, at: number): number {
 /** The instant a local date and minute of the day happen in `timeZone`. */
 function zonedInstant(timeZone: string, day: CalendarDay, minuteOfDay: number): number {
   const local = Date.UTC(day.y, day.m - 1, day.d) + minuteOfDay * MINUTE;
-  // Guess with the offset at that moment, then correct once — enough across a DST change.
+  // Guess with the offset at that moment, then correct once — enough across a DST change. Working hours that take
+  // in the very hour a DST change skips or repeats (01:00–03:00 in London, midnight in Santiago) are counted to
+  // within that hour; office hours in the zones the Settings page offers never are.
   const guess = local - offsetAt(timeZone, local);
   return local - offsetAt(timeZone, guess);
 }
