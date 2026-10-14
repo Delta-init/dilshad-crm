@@ -321,8 +321,19 @@ const MEMBER_PALETTE = [
   "#8b5cf6","#3b82f6","#ec4899","#84cc16","#06b6d4","#f43f5e",
 ];
 
-const fmtUSD  = fmtCompact;
+// The exact figure — "$2,250", not "$2.3K" (2026-10-14); short only on chart axes.
+const fmtUSD  = fmtFull;
 const fullUSD = fmtFull;
+
+/** A card's money figure on a line of its own, a size smaller when long, so the whole amount fits on a phone. */
+function MoneyFigure({ value }: { value: string }) {
+  return (
+    <p className={cn(
+      "mt-1 font-bold text-foreground tabular-nums whitespace-nowrap",
+      value.length > 10 ? "text-base sm:text-xl" : value.length > 7 ? "text-lg sm:text-2xl" : "text-2xl",
+    )}>{value}</p>
+  );
+}
 
 type RevQuickPeriod = "today" | "week" | "month" | "quarter" | "year" | "custom";
 
@@ -2321,18 +2332,16 @@ function TeamRevenueTab({ teamId }: { teamId: string }) {
             <div className="absolute inset-0 opacity-5 bg-gradient-to-br from-emerald-500 to-emerald-600" />
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
-                <div className="space-y-1 flex-1 min-w-0">
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Total Received</p>
-                  {overview.isLoading
-                    ? <div className="h-7 w-20 rounded-lg bg-muted/50 animate-pulse mt-1" />
-                    : <p className="text-2xl font-bold text-foreground tabular-nums">{fmtUSD(ovData?.totalRevenue ?? 0)}</p>
-                  }
-                  {!overview.isLoading && <p className="text-xs text-muted-foreground">{ovData?.paymentCount ?? 0} payments</p>}
-                </div>
+                <p className="flex-1 min-w-0 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Total Received</p>
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ml-2 bg-gradient-to-br from-emerald-500 to-emerald-600">
                   <DollarSign className="h-4 w-4 text-white" />
                 </div>
               </div>
+              {overview.isLoading
+                ? <div className="h-7 w-20 rounded-lg bg-muted/50 animate-pulse mt-1" />
+                : <MoneyFigure value={fmtUSD(ovData?.totalRevenue ?? 0)} />
+              }
+              {!overview.isLoading && <p className="text-xs text-muted-foreground">{ovData?.paymentCount ?? 0} payments</p>}
             </CardContent>
           </Card>
         </motion.div>
@@ -2343,18 +2352,16 @@ function TeamRevenueTab({ teamId }: { teamId: string }) {
             <div className="absolute inset-0 opacity-5 bg-gradient-to-br from-amber-500 to-amber-600" />
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
-                <div className="space-y-1 flex-1 min-w-0">
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Total Pending</p>
-                  {overview.isLoading
-                    ? <div className="h-7 w-20 rounded-lg bg-muted/50 animate-pulse mt-1" />
-                    : <p className="text-2xl font-bold text-foreground tabular-nums">{fmtUSD(ovData?.totalPending ?? 0)}</p>
-                  }
-                  {!overview.isLoading && <p className="text-xs text-muted-foreground">outstanding balance</p>}
-                </div>
+                <p className="flex-1 min-w-0 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Total Pending</p>
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ml-2 bg-gradient-to-br from-amber-500 to-amber-600">
                   <TrendingUp className="h-4 w-4 text-white" />
                 </div>
               </div>
+              {overview.isLoading
+                ? <div className="h-7 w-20 rounded-lg bg-muted/50 animate-pulse mt-1" />
+                : <MoneyFigure value={fmtUSD(ovData?.totalPending ?? 0)} />
+              }
+              {!overview.isLoading && <p className="text-xs text-muted-foreground">outstanding balance</p>}
             </CardContent>
           </Card>
         </motion.div>
@@ -2389,18 +2396,16 @@ function TeamRevenueTab({ teamId }: { teamId: string }) {
             <div className="absolute inset-0 opacity-5 bg-gradient-to-br from-blue-500 to-blue-600" />
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
-                <div className="space-y-1 flex-1 min-w-0">
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Avg per Lead</p>
-                  {overview.isLoading
-                    ? <div className="h-7 w-20 rounded-lg bg-muted/50 animate-pulse mt-1" />
-                    : <p className="text-2xl font-bold text-foreground tabular-nums">{fmtUSD(ovData?.avgRevenuePerLead ?? 0)}</p>
-                  }
-                  {!overview.isLoading && <p className="text-xs text-muted-foreground">{ovData?.payingLeadCount ?? 0} paying leads</p>}
-                </div>
+                <p className="flex-1 min-w-0 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Avg per Lead</p>
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ml-2 bg-gradient-to-br from-blue-500 to-blue-600">
                   <TrendingUp className="h-4 w-4 text-white" />
                 </div>
               </div>
+              {overview.isLoading
+                ? <div className="h-7 w-20 rounded-lg bg-muted/50 animate-pulse mt-1" />
+                : <MoneyFigure value={fmtUSD(ovData?.avgRevenuePerLead ?? 0)} />
+              }
+              {!overview.isLoading && <p className="text-xs text-muted-foreground">{ovData?.payingLeadCount ?? 0} paying leads</p>}
             </CardContent>
           </Card>
         </motion.div>
@@ -2475,7 +2480,7 @@ function TeamRevenueTab({ teamId }: { teamId: string }) {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
                   <XAxis dataKey="label" tick={{ fontSize:10, fill:"hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize:10, fill:"hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} tickFormatter={(v: number) => fmtUSD(v)} width={58} />
+                  <YAxis tick={{ fontSize:10, fill:"hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} tickFormatter={(v: number) => fmtCompact(v)} width={58} />
                   <RechartsTooltip content={<RevTooltip />} />
                   {tlMembers.length > 1 && (
                     <Legend wrapperStyle={{ fontSize:"11px", paddingTop:"8px" }} formatter={(v) => <span style={{ color:"hsl(var(--foreground))" }}>{v}</span>} />

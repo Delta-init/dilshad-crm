@@ -167,18 +167,21 @@ function KpiCard({ title, value, sub, icon: Icon, gradient, delay = 0, loading, 
         <div className={cn("absolute inset-0 opacity-5", gradient)} />
         <CardContent className="p-5">
           <div className="flex items-start justify-between">
-            <div className="space-y-1 flex-1 min-w-0">
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider line-clamp-2 leading-tight">{title}</p>
-              {loading
-                ? <Skeleton className="h-8 w-20 mt-1" />
-                : <p className="text-2xl sm:text-3xl font-bold text-foreground tabular-nums">{value}</p>
-              }
-              {sub && !loading && <p className="text-xs text-muted-foreground">{sub}</p>}
-            </div>
+            <p className="flex-1 min-w-0 text-[10px] font-medium text-muted-foreground uppercase tracking-wider line-clamp-2 leading-tight">{title}</p>
             <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ml-3", gradient)}>
               <Icon className="h-5 w-5 text-white" />
             </div>
           </div>
+          {/* The whole figure, under the icon so it has the card's width; long ones
+              ("$71,570.25") a size smaller so they stay on one line on a phone. */}
+          {loading
+            ? <Skeleton className="h-8 w-20 mt-1" />
+            : <p className={cn(
+                "mt-1 font-bold text-foreground tabular-nums whitespace-nowrap",
+                String(value).length > 10 ? "text-lg sm:text-2xl" : String(value).length > 7 ? "text-xl sm:text-3xl" : "text-2xl sm:text-3xl",
+              )}>{value}</p>
+          }
+          {sub && !loading && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
         </CardContent>
       </Card>
     </motion.div>
@@ -248,7 +251,9 @@ function ChartTooltip({ active, payload, label }: {
 // ── Currency helpers (delegates to global currency store) ─────────────────────
 // Components that use these must call useCurrencyStore() to subscribe to changes
 
-const fmtUSD  = fmtCompact;
+// The exact figure — "$2,250", not "$2.3K" (2026-10-14). Short amounts only
+// on chart axes, where they mark the scale (fmtCompact there).
+const fmtUSD  = fmtFull;
 const fullUSD = fmtFull;
 
 /** Plain number format */
@@ -1505,7 +1510,7 @@ function RevenueTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) 
                     tick={{ fontSize:10, fill:"hsl(var(--muted-foreground))" }}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={(v: number) => fmtUSD(v)}
+                    tickFormatter={(v: number) => fmtCompact(v)}
                     width={60}
                   />
                   <RechartsTooltip content={<RevTooltip />} />

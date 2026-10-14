@@ -876,3 +876,9 @@ back) and the added email.
 
 **Change Log**:
 - 1.0.0 — Initial build
+
+## Exact money figures (2026-10-14)
+
+- **Where**: Reports (KPI cards, rankings, leaderboards, Top Revenue Earners, tables, chart tooltips) and the team page (revenue cards, member revenue)
+- **What**: the whole amount — "$2,250", "$71,570.25" — where it used to be shortened to one decimal ("$2.3K"). Only chart axes stay short ("$1.5K"), being the scale, not a figure. At most two decimals (`fmtFull`). The same as Draw and the Sales CRM.
+- **Cards**: the figure sits on its own line under the title and icon, a size smaller when long, so the whole amount fits on a phone (`KpiCard` on Reports, `MoneyFigure` on the team page)

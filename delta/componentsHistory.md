@@ -1234,3 +1234,8 @@ A new close starts "Bonus given?" at yes with the course's bonus, marked "From t
   client's own email" in Still needed; a 409 shows there too.
 - `AddClientEmail` — the same check and message; the button waits for it.
 - `hooks/useStudents.useEmailCheck` (new).
+
+### Change log — 2026-10-14 (exact money figures)
+- `lib/currency.ts` — `fmtFull` caps at two decimals and reads a missing amount as 0; `fmtCompact` is now only for chart axes.
+- `app/(dashboard)/reports/page.tsx` — `fmtUSD` is `fmtFull` (was `fmtCompact`); `KpiCard` puts the value on its own full-width line, smaller when long; the revenue chart's Y axis keeps `fmtCompact`.
+- `app/(dashboard)/teams/[teamId]/page.tsx` — `fmtUSD` is `fmtFull`; new local `MoneyFigure` for the Total Received / Total Pending / Avg per Lead cards; the Y axis keeps `fmtCompact`.

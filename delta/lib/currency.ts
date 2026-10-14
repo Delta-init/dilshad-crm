@@ -8,10 +8,10 @@ export function fmtCompact(n: number): string {
   return `${symbol}${n}`;
 }
 
-/** Full: $1,234,567 */
+/** Full: $1,234,567 — the exact figure, cents only when there are any (at most two). */
 export function fmtFull(n: number): string {
   const { symbol, locale } = getActiveCurrency();
-  return `${symbol}${n.toLocaleString(locale)}`;
+  return `${symbol}${(Number(n) || 0).toLocaleString(locale, { maximumFractionDigits: 2 })}`;
 }
 
 /** Intl.NumberFormat full currency string: $1,234 */
