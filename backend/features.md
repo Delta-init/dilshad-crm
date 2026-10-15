@@ -894,3 +894,37 @@ Root portal can read every call (`GET /service/calls`).
 `Team`, `CommissionSettings`, `CallLog`, `app_settings` (`_id: "threecx_calls"`), `lead_call_counts_before_3cx` (new).
 
 **Tests**: `scripts/calls-check.sh` (210 checks, stand-in 3CX, scratch mongod), `scripts/portal-calls-check.sh` (20).
+
+## The open leaderboard — a TV board, live (2026-10-15)
+
+**What it does**: The leaderboard without signing in, for a TV on the wall or a phone — as the Bangalore CRM's public
+link, and the same as the Sales CRM's. Every salesperson's month (Dubai months): revenue, closings, follow-ups logged,
+3CX calls / connected / talk time (`lead_calls`, by the call's person), today's calls and talk
+time, and the leads each holds now by status; ranked by revenue, calls or talk time. Talk-time targets: 1,000 minutes a
+month, 100 a day. No emails, nothing else about anyone. The Super Admins and the commission plan's excluded people are
+not on it (as on the signed-in board, which now shows the same new figures).
+
+Live: a screen joins the socket's `/public-leaderboard` namespace (no sign-in). While any screen is there the board is
+counted again every 5 seconds while a count is quick — less often when it isn't (counting takes at most about a
+twentieth of the time; never more than a minute apart); when anything on it changes, every screen is told
+`leaderboard:changed` (the month and when — no names, no figures) and fetches the board again, answered from that same
+count in any ranking. A screen is also told once as it joins. The watch goes on 15 s after the last screen leaves (a
+TV reloading comes straight back), and only one count of it runs at a time however often screens come and go. One
+screen per connection, 200 at most; one more is turned away and keeps its refresh. A lead with no status counts as
+"unknown".
+
+**Routes**:
+- `GET /api/v1/public/leaderboard?month=YYYY-MM&rankBy=revenue|calls|talk` — no sign-in; no month = this Dubai
+  month; a bad month (1900-01 to next month — a TV clock a little ahead at midnight) or rank → 400. This month, while watched live: the watcher's count.
+  Otherwise kept 15 s, the same ask counted once, two counted at a time — 503 "busy, try again" past 100 waiting.
+- `GET /api/v1/leaderboard` (signed in, `leaderboard:view`) — the same rows (now with today's calls and the leads by
+  status), counted fresh.
+
+**Socket**: namespace `/public-leaderboard` — server → screen `leaderboard:changed` `{ month, at }`; screens send
+nothing (anything sent is ignored).
+
+**Models Used**: `Lead` (payments, follow-ups, status by owner), `Student` (closings), `LeadCall`,
+`User`, `Role`, `CommissionSettings` (`excludedUsers`).
+
+**Tests**: `scripts/leaderboard-check.sh` — 67 checks (scratch mongod; the live line in Case 5, with raw WebSocket
+screens and a pile of joins in one polling request; the open door's limits in Case 6).

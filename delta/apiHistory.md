@@ -1517,3 +1517,14 @@ Removed: `useUpdateCallNotConnected`, `useUpdateCallCount` (the counts come from
 - `useInactiveLeadTeams(enabled)` — `GET /inactive-leads/teams`; `useMovePeople(search, enabled)` —
   `GET /inactive-leads/people` (only while the Move dialog is open on "A person I choose"). Types `FilterTeam`,
   `MovePerson`.
+
+### GET /public/leaderboard?month&rankBy — the open board, live (2026-10-15)
+- **Hook**: `usePublicLeaderboard(month, rankBy, live?)` — a plain `fetch` (no token, no refresh), every 30 s (every
+  minute while live), the previous board kept while the next loads. Rows also carry `callsToday`, `connectedToday`, `talkSecondsToday`, `leadCounts`,
+  `totalLeads` (optional — an older server still shows the rest); the board `currentMonth`, `targets`, `updatedAt`.
+  `DEFAULT_TALK_TARGETS` (100 / 1,000 min) when the server doesn't say; `RANK_OPTIONS`, `fmtTalk`.
+- **Live**: `useLeaderboardLive(month, onChange)` — socket.io-client to the API's `/public-leaderboard` namespace (its
+  own connection, `forceNew`, no sign-in); `leaderboard:changed` for the month shown → `onChange` (the page refetches).
+  Returns `LiveState`: "connecting" (not up yet), "live", "reconnecting" (lost after being up). Turned away (too many
+  screens, or one already on the connection) → tries again a minute later; dropped by the server → again in 2 s.
+- `GET /leaderboard` (signed in): the same new row fields.

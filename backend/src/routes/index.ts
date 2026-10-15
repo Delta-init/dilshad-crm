@@ -24,6 +24,7 @@ import activityRoutes from "./activityRoutes.js";
 import meetingRoutes from "./meetingRoutes.js";
 import commissionRoutes from "./commissionRoutes.js";
 import leaderboardRoutes from "./leaderboardRoutes.js";
+import publicRoutes from "./publicRoutes.js";
 
 const router = Router();
 
@@ -52,6 +53,7 @@ router.use("/mentors", mentorRoutes);
 // Sales commission: the plan per course, and what each approved sale earns.
 router.use("/commission", commissionRoutes);
 router.use("/leaderboard", leaderboardRoutes);
+router.use("/public", publicRoutes); // no sign-in: the open leaderboard only
 router.use("/notifications", notificationRoutes);
 router.use("/settings", settingsRoutes);
 // The super admin's Inactive leads page — see inactiveLeadRoutes.

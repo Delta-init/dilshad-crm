@@ -885,3 +885,35 @@ Found bringing the feature to the Sales CRM; `services/inactiveLeadService.ts` u
    start or end sent alone is written under a filter on the stored other half (400 when they'd cross); time zones
    must be listed names, any case, stored as listed; `days` de-duplicated before the max-7 check.
 5. **`notify()`**: the stored notice and the push are cut to 200 / 1,000 / 500 (title / body / url).
+
+## The open leaderboard, live (2026-10-15)
+
+**Files**: `services/leaderboardService.ts`, `services/leaderboardLive.ts`, `routes/publicRoutes.ts`, `socket.ts`.
+
+1. **Figures**: as the signed-in board (revenue = payments paid in the month; closings = enrolments that month, not
+   dropped; follow-ups logged that month; 3CX calls with leads that month by the call's
+   person), plus today's calls / connected / talk (the Dubai day, the same grouping) and the leads each holds now by
+   status (every lead assigned to them, any date — "now", not the month's). `currentMonth`, `targets` (100 / 1,000 min),
+   `updatedAt`.
+2. **Answers**: this month, while watched, straight from the watcher's latest count (if counted within its interval
+   + 5 s, and the month hasn't turned), re-ranked for calls / talk (`rerankLeaderboard` — nothing counted again).
+   Otherwise kept 15 s by month and rank (at most 50; the oldest go first); the same ask while it's being counted
+   waits for that count; two counts at a time, up to 100 waiting, the rest → 503. A change seen by the watcher bumps a
+   generation, so a count started before it is never kept over the fresh one. Months 1900-01 to next month (a TV
+   whose clock runs a little ahead asks for it just before midnight on the 1st — it's empty). A lead with no status
+   (only a raw write could leave one) counts as "unknown", never "null" or "".
+3. **Watching**: the first screen to join starts counting this month's board (ranked by revenue); the next count waits
+   20× as long as the last took — 5 s at the least, a minute at the most — so the counting never takes more than about
+   5% of the time however large the CRM. The last screen to leave stops it 15 s later, unless one joins meanwhile — a
+   TV reloading comes straight back, and coming and going can't restart the counting. The watcher's count is shared:
+   a watch starting while one is under way waits for it, so there is never more than one. Each count is compared with the last
+   (the month, every person's figures and status counts, by person); different → the kept answers are dropped and
+   every screen is told `leaderboard:changed` `{ month, at }`. The first count of a watch always tells (what screens
+   were sent may be up to 15 s old); a screen joining a running watch is told at once — so each screen is told exactly
+   once as it joins. One count at a time; a count from a watch that has since stopped changes nothing. A failing
+   count is logged at most once a minute.
+4. **Open, capped**: the namespace has no token check (the main namespace keeps its own). One screen per connection
+   (more joins on it are refused: "This connection already has a screen"), and 200 at most — screens still joining
+   count too, so a pile of joins in one request can't get past it. A joining screen's "gone before it got in" listener
+   comes off once it's in, so joining and leaving on one connection can't pile listeners up. Nothing a screen sends is listened to. It only
+   reads, and only while a screen is connected to that process.

@@ -365,3 +365,27 @@ looser route keeps the old route's permission: the contact stamp on `POST /calls
   **two half-saves of the hours at once could store an end before the start**. **Rule**: never upsert to read;
   check a half against the stored other half in the write's filter.
 - **A very long lead name lost the whole notice** — the record caps title / body; `insertMany` failed (only logged).
+
+## [2026-10-15] The live leaderboard — found in the Sales CRM's check, built in here from the start
+
+- **Screens joining just after the live watch's first look were never told to fetch** — only that first look said
+  "changed", so a screen joining moments later kept what it had loaded (up to 15 s old) until the next change. Found
+  by the Sales CRM's 200-screen burst check. **Here**: a screen joining a running watch is told at once — every screen
+  exactly once as it joins (Case 5 checks it).
+
+## [2026-10-15] The live leaderboard — what the test round found (fixed before shipping)
+
+- **The 200-screen cap could be passed in one request** — the door checked `nsp.sockets.size`, but Socket.IO adds a
+  socket a tick after its middleware, so thousands of joins packed into one long-polling POST all got in. **Fix**: one
+  screen per connection, and screens still joining count towards the cap.
+- **Counting the whole board every 5 s around the clock** — passes over the leads each time, where before it was
+  counted when someone opened the page. **Fix**: the next count waits 20× as long as the last took (5 s – 1 min); this
+  month's board in every ranking comes from that one count; other asks are kept 15 s, counted once however many ask,
+  two at a time (503 past 100 waiting); no future months, no years before 2000.
+- **A lead with no status showed as a "Null" / "Undefined" / blank chip** — the count grouped by the raw value.
+  **Fix**: no status (or an empty one) counts as "unknown".
+- **The rewrite's own slip, found by the second test round**: every watch started a count at once and a stopped
+  watch's count ran on, so a script joining and leaving over and over while no TV was on started counts side by side
+  (13 at once), past the two-at-a-time limit. **Fix**: one watcher count at a time, shared by every watch, and the
+  watch goes on 15 s after the last screen leaves. Also: a "close" listener piled up per join on one connection (now
+  taken off once the screen is in).

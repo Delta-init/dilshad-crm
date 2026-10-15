@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, Trophy } from "lucide-react";
+import { Link2, Loader2, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtFull } from "@/lib/currency";
+import { toast } from "@/lib/toast";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useLeaderboard, type LeaderboardRankBy } from "@/hooks/useLeaderboard";
 import { fmtTalkTotal } from "@/components/calls/callUi";
@@ -17,7 +18,9 @@ import { dubaiDate } from "@/lib/dubaiDates";
  * then calls — or by calls, or by talk time (2026-10-14) — counted on the
  * server, in Dubai months. Calls are 3CX's: every call with a lead on their
  * extension, the connected ones, and the time talking. Open to everyone; your
- * own row is marked.
+ * own row is marked. On the current month, today's calls too (2026-10-15);
+ * "Public link" copies the open board's address (/public/leaderboard — no
+ * sign-in, live — a TV board), as the Bangalore CRM's.
  */
 
 const RANKS: { id: LeaderboardRankBy; label: string; says: string }[] = [
@@ -44,6 +47,18 @@ export default function LeaderboardPage() {
   const [rankBy, setRankBy] = useState<LeaderboardRankBy>("revenue");
   const { data, isLoading, error } = useLeaderboard(month, rankBy);
   const rows = data?.rows ?? [];
+  // Today's calls belong to the current month only.
+  const showToday = month === thisDubaiMonth() && (data?.currentMonth ?? true);
+
+  const copyPublicLink = async () => {
+    const url = `${window.location.origin}/public/leaderboard`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Public link copied — anyone with it sees the board", { description: url });
+    } catch {
+      window.open(url, "_blank", "noopener");
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6 pb-6">
@@ -84,6 +99,14 @@ export default function LeaderboardPage() {
           className="h-9 rounded-lg border border-border bg-card px-3 text-sm text-foreground"
           aria-label="Month"
         />
+        <button
+          type="button"
+          onClick={copyPublicLink}
+          title="The open board — anyone with the link sees it, no sign-in"
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          <Link2 className="h-3.5 w-3.5" /> Public link
+        </button>
         </div>
       </motion.div>
 
@@ -112,6 +135,7 @@ export default function LeaderboardPage() {
                   <th className="px-4 py-3 text-right">Calls</th>
                   <th className="px-4 py-3 text-right">Connected</th>
                   <th className="px-4 py-3 text-right">Talk time</th>
+                  {showToday && <th className="px-4 py-3 text-right">Today</th>}
                 </tr>
               </thead>
               <tbody>
@@ -136,6 +160,12 @@ export default function LeaderboardPage() {
                       <td className={cn("px-4 py-3 text-right tabular-nums", rankBy === "calls" && "font-semibold text-foreground")}>{r.calls}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{r.connected}</td>
                       <td className={cn("px-4 py-3 text-right tabular-nums", rankBy === "talk" && "font-semibold text-foreground")}>{r.talkSeconds ? fmtTalkTotal(r.talkSeconds) : "—"}</td>
+                      {showToday && (
+                        <td className="px-4 py-3 text-right tabular-nums" title="Calls today · talk time today">
+                          {r.callsToday ?? "—"}
+                          <span className="ml-1.5 text-xs text-muted-foreground">{r.talkSecondsToday ? fmtTalkTotal(r.talkSecondsToday) : ""}</span>
+                        </td>
+                      )}
                     </motion.tr>
                   );
                 })}

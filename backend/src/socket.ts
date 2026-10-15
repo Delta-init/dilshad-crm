@@ -2,6 +2,7 @@ import { Server, type Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { env } from "./config/env.js";
 import { verifyAccessToken } from "./utils/jwt.js";
+import { startLeaderboardLive } from "./services/leaderboardLive.js";
 
 let io: Server;
 
@@ -57,6 +58,9 @@ export function initSocket(httpServer: HttpServer): Server {
       }
     });
   });
+
+  // The open leaderboard's own namespace: no sign-in, only "changed" goes out (leaderboardLive.ts).
+  startLeaderboardLive(io);
 
   console.log("🔌 Socket.IO initialized");
   return io;

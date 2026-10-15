@@ -1275,3 +1275,19 @@ A new close starts "Bonus given?" at yes with the course's bonus, marked "From t
 - `components/inactive-leads/MoveLeadsDialog.tsx` — people from `useMovePeople`, only while open on it; an error line.
 - `components/notifications/NotificationBell.tsx` — keeps a stored notice that came on the socket after the list was
   read.
+
+### Change log — 2026-10-15 (the open leaderboard, a TV board)
+- `app/public/leaderboard/page.tsx` (new, the same as the Sales and Draw CRMs') — outside the dashboard layout, no sign-in. Its
+  own theme tokens as CSS variables (solid colours; dark unless `public-leaderboard-dark` = "0" in this browser) and a
+  boot script, so a light screen never flashes dark. `PersonCard` (a phone layout and a desktop / TV grid with a header
+  row; 1st–3rd in gold / silver / bronze — border, side bar, badge, the ranked figure), `RankMark` (`Trophy3D` for the
+  leader only, turning with CSS; numbered badges below), `Flash`, `TargetBar` / `TargetFigure`, `LeadsNow` (the leads
+  held now, by status), `Clock` (Dubai). Controls fade after 4 s idle and the pointer hides (≥ 1024 px); auto-scroll
+  after 20 s idle when taller than the screen (≥ 1024 px); full screen; ▲ / ▼ for 8 s after a live re-order.
+- `app/public/leaderboard/layout.tsx` (new) — title "Leaderboard — Remote CRM", dark status bar.
+- `app/(dashboard)/leaderboard/page.tsx` — Today column (current month only); **Public link** (copies, else opens).
+- `hooks/useLeaderboard.ts` — `usePublicLeaderboard`, `useLeaderboardLive`, `RANK_OPTIONS`, `fmtTalk`,
+  `DEFAULT_TALK_TARGETS`, the new optional row fields.
+- The open board's statuses are named from `lib/statusConfig.ts` (`STATUS_META`), in pipeline order with closed and lost
+  last; an unknown key in its own words ("unknown" → "Unknown").
+- Shared links carry og site name and type.

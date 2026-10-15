@@ -443,3 +443,17 @@ route's; show a refused form's first reason (`errText`).
   socket while that list was in flight vanished until the next refetch.
 - **Fix**: keep a socket-arrived stored notice the list doesn't have when it is newer than the list's newest.
 - **Rule**: when merging a fetched list with pushed items, keep the pushed ones newer than the fetch.
+
+## [2026-10-15] The open leaderboard page — what the test round found (fixed before shipping)
+
+- **A TV left on stayed on the old month after midnight on the 1st** — the month timer compared React's pending month
+  with a variable it had already moved on. **Fix**: compare with the month that just ended, read first.
+- **A figure flashed blue on stepping to another month** — the flash's scope was the month asked for, while the old
+  month's rows were still on screen (`keepPreviousData`); and a flash cut short by a ranking switch stayed blue.
+  **Fix**: the scope is the board on screen; a new scope clears the flash.
+- **▲ / ▼ carried over to another month or ranking** for up to 8 s. **Fix**: a different board starts with none.
+- **"Reconnecting" before the live line had ever connected.** **Fix**: Connecting / Live / Reconnecting.
+- **The live line's address fell back to port 5001** (the Sales CRM's) where this CRM's API runs on 7868, so a copy run
+  without `NEXT_PUBLIC_API_URL` never went live. **Fix**: 7868, as `lib/socket.ts`.
+- **The live line stayed down after the server dropped it** ("io server disconnect" isn't retried by socket.io).
+  **Fix**: try again in 2 s, as `lib/socket.ts` does.

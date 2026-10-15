@@ -640,3 +640,12 @@ Not a permission module: `authenticate` only, like Mentors — a module would st
 
 `calls` is a new permission module, open by default (view, export) — a role saved before it gets it from the schema
 default; unticked on the Roles screen, 403. All `/calls/log*` and `/calls/3cx/*` routes sit before `/calls/:callId`.
+
+### The open leaderboard (2026-10-15)
+
+| Method | Route | Chain |
+|--------|-------|-------|
+| GET | `/api/v1/public/leaderboard` | none (open) → `month` (1900-01 … next month) / `rankBy` checked (400) → `getPublicLeaderboard` (503 when busy) |
+
+Mounted as `/public` in `routes/index.ts`, after `/leaderboard`. The socket's `/public-leaderboard` namespace is open
+too: no token check (that is the main namespace's), one screen per connection, at most 200 screens.

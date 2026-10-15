@@ -878,3 +878,15 @@ on the lead is marked done. `getUserLeadStats` also returns `meeting_done`.
 
 - `listFilterTeams()` — every active team, by name, for the page's team filter (no Teams permission needed).
 - `listMovePeople({ search? })` — active people by name (100 at most), for the Move dialog (no Users permission needed).
+
+## The open leaderboard, live (added 2026-10-15)
+
+- `leaderboardService` — `getLeaderboard(month?, rankBy)` now also gives `callsToday`, `connectedToday`,
+  `talkSecondsToday`, `leadCounts` (status → leads held now), `totalLeads`; and on the board `currentMonth`, `targets`
+  (`TALK_TARGETS`: 100 / 1,000 min), `updatedAt` (type `Leaderboard`).
+- `leaderboardService.rerankLeaderboard(board, rankBy)` — the same count in another ranking.
+- `leaderboardLive` — `getPublicLeaderboard(month, rankBy)` (the open board: the watcher's count while watched, else
+  kept 15 s, counted once, two at a time; throws `LeaderboardBusyError` past 100 waiting), `startLeaderboardLive(io)`
+  (the `/public-leaderboard` namespace and its watcher), `liveLeaderboardState()` (`screens`, `joining`, `watching`,
+  `everyMs` — for the checks); `PUBLIC_LEADERBOARD_NAMESPACE`, `LEADERBOARD_CHANGED`, `LIVE_EVERY_MS`,
+  `LIVE_SLOWEST_MS`, `MAX_SCREENS`, `LINGER_MS`.

@@ -916,3 +916,23 @@ back) and the added email.
 - The bell keeps a notice that came on the socket while its list was being read.
 - The server side: only the owner's own acts count (their calls straight from 3CX too, a colleague's call not); a
   lead worked or closed while its move is on its way is left alone.
+
+## The open leaderboard — a TV board, live (2026-10-15)
+
+- **Where**: `/public/leaderboard` — no sign-in; the Leaderboard page's **Public link** button copies it (or opens it
+  where copying isn't allowed). For a TV on the wall or a phone. The same board as the Sales and Draw CRMs'.
+- **What**: only the leaderboard — a card per salesperson, the month's revenue, calls (connected), call time against
+  1,000 minutes a month and today's calls and call time against 100 minutes (bars blue on the way, green with a tick
+  once reached), closings, follow-ups and the leads each holds now by status (meetings and wrong numbers included). Ranked by
+  revenue, calls or call time.
+- **Look**: dark unless a screen is switched to light (remembered on that screen); solid colours only, blue the main one;
+  1st gold, 2nd silver, 3rd bronze, everyone else the same; a turning 3D trophy for the leader only.
+- **Live**: the board changes the moment the API says so (within about 5 s of a sale, a call or a lead moving); the
+  cards slide to their new places, ▲ / ▼ shows who moved for a few seconds, a changed figure shows blue for a moment.
+  The badge says Connecting, Live, or Reconnecting (then it still refreshes every 30 s; every minute while live). A wall
+  screen moves on to the new month at midnight on the 1st (Dubai). Statuses are named as this CRM names them. Not for
+  search engines.
+- **On a TV**: the controls (rank, month, refresh, light / dark, full screen) and the pointer fade after 4 s untouched
+  and come back with the mouse; untouched for 20 s, a board taller than the screen glides down, rests and goes back up
+  (big screens only). The Dubai clock ticks in the corner.
+- **Signed-in Leaderboard page**: a Today column (calls · call time today) for the current month.
