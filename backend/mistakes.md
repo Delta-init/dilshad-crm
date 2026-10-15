@@ -389,3 +389,9 @@ looser route keeps the old route's permission: the contact stamp on `POST /calls
   (13 at once), past the two-at-a-time limit. **Fix**: one watcher count at a time, shared by every watch, and the
   watch goes on 15 s after the last screen leaves. Also: a "close" listener piled up per join on one connection (now
   taken off once the screen is in).
+
+## [2026-10-15] Currency on the account — what the test rounds found (fixed before shipping)
+
+- **A pick time taken from the device's clock** let a slow clock's fresh picks lose and a fast clock's late pick win.
+  **Fix**: a save sent at once is "now" by this server; a late one sends how long ago it was made (`pickedAgoMs`, on
+  the device's own clock) and is placed at server time minus that.

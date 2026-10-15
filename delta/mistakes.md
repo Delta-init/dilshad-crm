@@ -382,7 +382,7 @@ No `min` attribute on `datetime-local` input, and no frontend validation.
 
 Copy the template at the top and place it at the **top** of the correct category section.
 
-**Entry count**: 12
+**Entry count**: 13
 *(Increment every time you add a mistake)*
 
 ---
@@ -457,3 +457,23 @@ route's; show a refused form's first reason (`errText`).
   without `NEXT_PUBLIC_API_URL` never went live. **Fix**: 7868, as `lib/socket.ts`.
 - **The live line stayed down after the server dropped it** ("io server disconnect" isn't retried by socket.io).
   **Fix**: try again in 2 s, as `lib/socket.ts` does.
+
+## [2026-10-15] Currency on the account — what the test rounds found (fixed before shipping)
+
+- **A device's earlier choice was copied to whoever signed in next** — the "carry it over" save couldn't tell whose
+  choice a shared computer held. **Fix**: the device remembers whose choice it holds; an older one is offered ("Keep it
+  on your account?", per person, at up to three openings), never saved by itself; another person's goes back to USD.
+- **Device clocks**: picks stamped with the device's time lost to — or beat — picks from devices whose clocks differed.
+  **Fix**: a save sent at once is "now" by the server; one sent late says only how long ago it was made.
+- **A late pick could still lose** — quick taps on a slow link whose last save failed (the tap before it, stamped on
+  arrival, looked newer at the next open), and a pick whose device clock went back before it was sent counted as
+  "now". **Fix**: the device remembers the account as it last saw it; a late pick goes as "now" when nothing changed
+  meanwhile, with its age only when another device changed it, and as a year old when its clock went back.
+- **A save could land on the next person's account** — someone on a slow link picked, then signed out (or began
+  viewing as someone) before their queued save went; it went with the next sign-in (or, before one, with no sign-in at
+  all, and its refusal reloaded the sign-in page). **Fix**: a queued save goes only while its person is still the one
+  signed in (else it waits for their next visit), and a refused pick's "the newer one stands" is shown only to them.
+- **Small ones**: an answer arriving after a pick overwrote it; a failed save was lost at the next open (now kept per
+  person and sent later); quick taps could land out of order (one at a time now); redrawing remounted pages mid-edit
+  (now only when the account's currency arrives, and not while typing); picks while viewing as someone changed the
+  admin's own. All fixed.

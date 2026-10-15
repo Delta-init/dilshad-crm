@@ -649,3 +649,9 @@ default; unticked on the Roles screen, 403. All `/calls/log*` and `/calls/3cx/*`
 
 Mounted as `/public` in `routes/index.ts`, after `/leaderboard`. The socket's `/public-leaderboard` namespace is open
 too: no token check (that is the main namespace's), one screen per connection, at most 200 screens.
+
+### Preferences (2026-10-15)
+
+| Method | Route | Chain |
+|--------|-------|-------|
+| GET / PUT | `/api/v1/auth/preferences` | `authenticate` (a View-as pass can read, not write) → `getPreferences` / `updatePreferences` (zod, strict) |

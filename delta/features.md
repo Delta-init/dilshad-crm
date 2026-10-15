@@ -936,3 +936,12 @@ back) and the added email.
   and come back with the mouse; untouched for 20 s, a board taller than the screen glides down, rests and goes back up
   (big screens only). The Dubai clock ticks in the corner.
 - **Signed-in Leaderboard page**: a Today column (calls · call time today) for the current month.
+
+## Currency follows you (2026-10-15)
+
+- Settings → Currency is kept on your account as well as this device, so every device you sign in on shows amounts in
+  the currency you picked. When the app opens it takes the account's (and redraws the page, unless you're typing). A
+  device that already had one picked before this (not the USD default) asks — "Keep it on your account?", at up to
+  three openings — since on a shared computer it may be someone else's; a choice the device holds for another person
+  goes back to USD. A pick that can't reach the account is kept on the device, for you, and sent next time: the newest
+  pick wins, by when it was picked. Not while viewing as someone (picks are refused then).

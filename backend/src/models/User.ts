@@ -1,6 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 import bcrypt from "bcryptjs";
 import type { IUser } from "../types/index.js";
+import { DISPLAY_CURRENCIES } from "../utils/currencies.js";
 
 const userSchema = new Schema<IUser>(
   {
@@ -47,6 +48,13 @@ const userSchema = new Schema<IUser>(
       enum: ["manual", "3cx", null],
       default: null,
     },
+    /**
+     * The currency they see amounts in (Settings → Currency, 2026-10-15) — kept on their account, so it follows them
+     * to every device they sign in on. null: never picked (the app's default, USD).
+     */
+    currency: { type: String, enum: [...DISPLAY_CURRENCIES, null], default: null },
+    /** When that currency was picked — a pick saved late (the app was offline) never replaces a newer one. */
+    currencyAt: { type: Date, default: null },
     status: {
       type: String,
       enum: ["active", "inactive"],

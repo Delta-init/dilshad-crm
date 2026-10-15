@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
 import type { AuthenticatedRequest } from "../types/index.js";
 import { AuthService } from "../services/authService.js";
-import { loginSchema, refreshTokenSchema, changePasswordSchema } from "../validations/authValidation.js";
+import { loginSchema, refreshTokenSchema, changePasswordSchema, preferencesSchema } from "../validations/authValidation.js";
+import { User } from "../models/User.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import { recordLogin, recordLoginFailure, recordLogout } from "../services/activityService.js";
 import axios from "axios";
@@ -138,6 +139,58 @@ export const ssoLogin = async (req: Request, res: Response, next: NextFunction):
       sendError(res, "Could not reach the Root portal to verify this token", 502);
       return;
     }
+    next(error);
+  }
+};
+
+// GET /api/v1/auth/preferences — the signed-in person's own: the currency they see amounts in (null: never picked),
+// and when they picked it.
+export const getPreferences = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const user = await User.findById(req.user!.userId)
+      .select("currency currencyAt")
+      .lean<{ currency?: string | null; currencyAt?: Date | null } | null>();
+    if (!user) {
+      sendError(res, "User not found", 404);
+      return;
+    }
+    sendSuccess(res, "Preferences", { currency: user.currency ?? null, currencyAt: user.currencyAt ?? null });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/v1/auth/preferences — { currency, pickedAgoMs? }: kept on their own account, so it follows them to every
+// device. The newest pick wins by when it was picked — this server's time, less how long ago the pick was made for one
+// sent late (the app was offline): not kept over a newer one from another device, and the answer says what is
+// (`applied: false`). Sent at once, a pick is "now".
+export const updatePreferences = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = preferencesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      // All of it — an unknown field is a form error, not a field's.
+      sendError(res, "Validation failed", 400, parsed.error.flatten());
+      return;
+    }
+    const at = new Date(Date.now() - (parsed.data.pickedAgoMs ?? 0));
+    const select = "currency currencyAt";
+    type Prefs = { currency?: string | null; currencyAt?: Date | null } | null;
+    const updated = await User.findOneAndUpdate(
+      { _id: req.user!.userId, $or: [{ currencyAt: null }, { currencyAt: { $lte: at } }] },
+      { $set: { currency: parsed.data.currency, currencyAt: at } },
+      { new: true }
+    ).select(select).lean<Prefs>();
+    const user = updated ?? (await User.findById(req.user!.userId).select(select).lean<Prefs>());
+    if (!user) {
+      sendError(res, "User not found", 404);
+      return;
+    }
+    sendSuccess(res, updated ? "Preferences saved" : "A newer choice is already saved", {
+      currency: user.currency ?? null,
+      currencyAt: user.currencyAt ?? null,
+      applied: Boolean(updated),
+    });
+  } catch (error) {
     next(error);
   }
 };

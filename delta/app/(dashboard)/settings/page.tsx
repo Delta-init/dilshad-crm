@@ -11,8 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useCurrencyStore, CURRENCIES } from "@/lib/store/currencyStore";
+import { chooseCurrency } from "@/hooks/useSyncedCurrency";
 import { fmtCompact, fmtFull } from "@/lib/currency";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { AutomationSettingsCard } from "@/components/settings/AutomationSettingsCard";
 
 const containerVariants = {
@@ -26,7 +27,7 @@ const itemVariants = {
 };
 
 export default function SettingsPage() {
-  const { currencyCode, setCurrency } = useCurrencyStore();
+  const { currencyCode } = useCurrencyStore();
 
   // preview numbers re-render whenever currencyCode changes because we read the store
   const preview1 = fmtFull(1234567);
@@ -60,7 +61,8 @@ export default function SettingsPage() {
               Currency
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Choose the currency displayed throughout the app — on reports, payments, courses, and revenue charts.
+              Choose the currency displayed throughout the app — on reports, payments, courses, and revenue charts. Kept on
+              your account, so it follows you to every device you sign in on.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -73,7 +75,7 @@ export default function SettingsPage() {
                   <motion.button
                     key={c.code}
                     whileTap={{ scale: 0.97 }}
-                    onClick={() => setCurrency(c.code)}
+                    onClick={() => chooseCurrency(c.code)}
                     className={cn(
                       "relative flex items-center gap-3 rounded-xl border p-3 text-left transition-all duration-150",
                       active

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DISPLAY_CURRENCIES } from "../utils/currencies.js";
 
 export const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -23,3 +24,13 @@ export const changePasswordSchema = z.object({
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+// PUT /auth/preferences — the signed-in person's own preferences: today, the currency they see amounts in. A pick that
+// couldn't be saved at once is sent later with how long ago it was made (pickedAgoMs, by the device's own clock — so a
+// clock set wrong doesn't matter); up to a year.
+export const preferencesSchema = z
+  .object({
+    currency: z.enum(DISPLAY_CURRENCIES),
+    pickedAgoMs: z.number().int().min(0).max(366 * 86_400_000).optional(),
+  })
+  .strict();

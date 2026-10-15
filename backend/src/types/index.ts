@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import type { Document, Types } from "mongoose";
+import type { DisplayCurrency } from "../utils/currencies.js";
 
 // ─── Permission Actions ────────────────────────────────────────────────────────
 export type PermissionAction = "view" | "create" | "edit" | "delete" | "approve" | "export";
@@ -104,6 +105,10 @@ export interface IUser extends Document {
   _id: Types.ObjectId;
   name: string;
   email: string;
+  /** The currency they see amounts in (Settings → Currency), on every device; null when never picked. */
+  currency?: DisplayCurrency | null;
+  /** When it was picked. */
+  currencyAt?: Date | null;
   password: string;
   role: Types.ObjectId | IRole;
   designation?: string;

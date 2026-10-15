@@ -7,6 +7,8 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { navItems } from "@/components/layout/Sidebar";
 import { CRM_MODULES } from "@/types";
 import { useReminderNotifications } from "@/hooks/useReminderNotifications";
+import { useSyncedCurrency } from "@/hooks/useSyncedCurrency";
+import { CurrencyRedraw } from "@/components/shared/CurrencyRedraw";
 import { useActivityHeartbeat } from "@/hooks/useActivityHeartbeat";
 import { RecentPageTracker } from "@/components/shared/CommandPalette";
 import { SaleCelebration } from "@/components/shared/SaleCelebration";
@@ -25,6 +27,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { isAuthenticated, hasPermission } = useAuthStore();
   const router = useRouter();
   useReminderNotifications();
+  // The currency they see amounts in, from their account — the same on every device (2026-10-15).
+  useSyncedCurrency();
   useActivityHeartbeat();
 
   useEffect(() => {
@@ -82,7 +86,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Every Call button's dialogs: 3CX or phone, the call window, "How did the call go?" */}
         <CallFlowProvider>
           <Header />
-          <main className="flex-1 overflow-y-auto p-6">{children}</main>
+          <main className="flex-1 overflow-y-auto p-6"><CurrencyRedraw>{children}</CurrencyRedraw></main>
         </CallFlowProvider>
       </div>
     </div>
