@@ -71,6 +71,8 @@ interface Mentor {
   name: string;
   email: string;
   shared: boolean;
+  /** Which academy they teach for — both academies' mentors are listed (2026-10-17); absent from an older LMS. */
+  academy?: { id: string; name: string } | null;
   slots: { dayOfWeek: number; startTime: string; endTime: string }[];
   classes: MentorClass[];
   meetings: MentorMeeting[];
@@ -195,6 +197,13 @@ export default function MentorsPage() {
    * course and module leave them be; the search does not.
    */
   const [find, setFind] = useState("");
+  /* Dubai's mentors, Bangalore's, or both (2026-10-17) — "" for both. */
+  const [academy, setAcademy] = useState("");
+  const academies = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of schedule.data?.mentors ?? []) if (x.academy?.id) m.set(x.academy.id, x.academy.name || "Academy");
+    return Array.from(m).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [schedule.data]);
   const [course, setCourse] = useState("");
   const [mod, setMod] = useState("");
   const { courses, modules } = useMemo(() => {
@@ -216,12 +225,13 @@ export default function MentorsPage() {
   const shown = useMemo(() => {
     const all = schedule.data?.mentors ?? [];
     const q = query.trim().toLowerCase();
-    const people = q ? all.filter((m) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)) : all;
+    const inAcademy = academy ? all.filter((m) => m.academy?.id === academy) : all;
+    const people = q ? inAcademy.filter((m) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)) : inAcademy;
     // Searching or narrowing: only the mentors with something that matches this week.
     return filtering
       ? people.filter((m) => m.classes.some((c) => c.status !== "cancelled" && classShown(c)) || m.meetings.some(meetingShown))
       : people;
-  }, [schedule.data, query, needle, course, mod]);
+  }, [schedule.data, query, needle, course, mod, academy]);
 
   /*
    * Booking an hour.
@@ -525,6 +535,8 @@ export default function MentorsPage() {
           >
             <span className="tabular-nums">{at(c.startsAt)}</span>{" "}
             {c.mine ? (c.title || "Class") : "Booked elsewhere"}
+            {/* Cancelled in the LMS: still shown, so an empty-looking day says why (2026-10-17). */}
+            {c.status === "cancelled" && <span className="ml-1 inline-block rounded bg-rose-500/15 px-1 text-[10px] font-medium text-rose-400 no-underline">Cancelled</span>}
             {c.mine && c.course && (
               <span className="block truncate text-[10px] opacity-70">{c.course}{c.module ? ` · ${c.module}` : ""}</span>
             )}
@@ -601,6 +613,13 @@ export default function MentorsPage() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Search sessions — title, course, module, who it's with…" className="pl-9" />
         </div>
+        {academies.length > 1 && (
+          <select value={academy} onChange={(e) => setAcademy(e.target.value)} aria-label="Academy"
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+            <option value="">Both academies</option>
+            {academies.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
+        )}
         <select value={course} onChange={(e) => { setCourse(e.target.value); setMod(""); }} aria-label="Course"
           className="h-9 rounded-md border border-input bg-background px-2 text-sm">
           <option value="">All courses</option>
@@ -655,7 +674,7 @@ export default function MentorsPage() {
             </>
           ) : (
             <>
-              <p className="mt-3 text-sm font-medium">No mentors in this academy</p>
+              <p className="mt-3 text-sm font-medium">{academy ? "No mentors in this academy" : "No mentors"}</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 Anybody given the instructor role in the LMS appears here.
               </p>
@@ -714,7 +733,10 @@ export default function MentorsPage() {
                     <p className="truncate text-sm font-medium text-foreground">{m.name || m.email}</p>
                     <p className="truncate text-xs text-muted-foreground">{m.email}</p>
                   </div>
-                  {m.shared && <Badge variant="outline" className="shrink-0 text-[10px]">Shared</Badge>}
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    {m.academy?.name && <Badge variant="outline" className="text-[10px]">{m.academy.name}</Badge>}
+                    {m.shared && <Badge variant="outline" className="text-[10px]">Shared</Badge>}
+                  </div>
                 </div>
                 <div className="space-y-2 px-3 py-2.5">
                   {cell ?? (
@@ -762,11 +784,10 @@ export default function MentorsPage() {
                     <td className="px-3 py-2.5">
                       <p className="truncate font-medium text-foreground">{m.name || m.email}</p>
                       <p className="truncate text-xs text-muted-foreground">{m.email}</p>
-                      {m.shared && (
-                        <Badge variant="outline" className="mt-1 text-[10px]">
-                          Shared
-                        </Badge>
-                      )}
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {m.academy?.name && <Badge variant="outline" className="text-[10px]">{m.academy.name}</Badge>}
+                        {m.shared && <Badge variant="outline" className="text-[10px]">Shared</Badge>}
+                      </div>
                     </td>
 
                     {days.map((day) => (
@@ -1093,7 +1114,9 @@ export default function MentorsPage() {
           {classDetail.isPending && <Skeleton className="h-40 w-full" />}
           {classDetail.isError && (
             <p className="py-6 text-sm text-muted-foreground">
-              {apiErrorMessage(classDetail.error, "That class could not be opened.")}
+              {(classDetail.error as { response?: { status?: number } })?.response?.status === 404
+                ? "This class is the other academy's, so its students and timeline stay in that academy's LMS. The calendar still shows its time, course and module."
+                : apiErrorMessage(classDetail.error, "That class could not be opened.")}
             </p>
           )}
           {classDetail.data && (() => {

@@ -44,6 +44,8 @@ export interface Mentor {
   email: string;
   /** Lent to this academy rather than belonging to it. */
   shared: boolean;
+  /** The academy the mentor belongs to (absent from an older LMS). */
+  academy?: { id: string; name: string } | null;
   slots: { dayOfWeek: number; startTime: string; endTime: string }[];
   classes: MentorClass[];
   /** Time booked with them that is not a class. */
@@ -96,8 +98,10 @@ export const mentorService = {
       throw httpError(`At most ${MAX_WINDOW_DAYS} days at a time`, 400);
     }
 
+    /* Both academies' mentors, each with its academy, and every class with its title (2026-10-17: one company
+       runs Dubai and Bangalore, and the staff here book either — as Root's calendar does). */
     const data = await callLms<MentorSchedule>("/mentors", {
-      query: { from: from.toISOString(), to: to.toISOString() },
+      query: { from: from.toISOString(), to: to.toISOString(), allAcademies: "1" },
       verb: "list its mentors",
     });
 
@@ -149,7 +153,8 @@ export const mentorService = {
     return callLms("/mentor-meetings", {
       method: "POST",
       verb: "book that meeting",
-      body: input,
+      // Any academy's mentor, as the calendar lists both (2026-10-17).
+      body: { ...input, allAcademies: true },
     });
   },
 
