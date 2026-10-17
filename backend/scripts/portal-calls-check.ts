@@ -143,6 +143,23 @@ try {
   r = await get(`/calls/${new Types.ObjectId()}/recording-link`);
   check("a call without one, or unknown: 404", r.status === 404 && (await get(`/calls/${d.calls.find((c: any) => c.recordings === 0).id}/recording-link`)).status === 404, show(r));
   check("a bad id or index: 400", (await get("/calls/nope/recording-link")).status === 400 && (await get(`/calls/${recorded}/recording-link?index=x`)).status === 400);
+  section("Case 5 — inactive leads, for Root's Pending → Sales tab");
+  const stale = new Types.ObjectId(), fresh = new Types.ObjectId(), worked = new Types.ObjectId();
+  const lead = (o: Record<string, unknown>) => ({ name: "A lead", phone: `97150${Math.floor(Math.random() * 1e7)}`, source: "Meta", status: "assigned",
+    assignedTo: sally, team: null, notes: [], reminders: [], activityLogs: [], createdAt: new Date(), updatedAt: new Date(), ...o });
+  await db.collection("leads").insertMany([
+    lead({ _id: stale, name: "Stale Sam", assignedAt: new Date(Date.now() - 30 * 86_400_000) }),    // a month untouched: inactive
+    lead({ _id: fresh, name: "Fresh Fay", assignedAt: new Date() }),                                // just given: not yet
+    lead({ _id: worked, name: "Worked Will", status: "followup", assignedAt: new Date(Date.now() - 30 * 86_400_000) }), // worked: never
+  ]);
+  check("no secret: 401", (await get("/inactive-leads", null)).status === 401);
+  r = await get("/inactive-leads");
+  const ids = new Set((r.body.data?.items ?? []).map((x: any) => x.id));
+  const sam = (r.body.data?.items ?? []).find((x: any) => x.id === String(stale));
+  check("the month-old untouched lead is there, with its owner's email and how long it has waited", r.status === 200 && !!sam
+    && sam.owner?.email?.toLowerCase() === "sally@test.local" && sam.waitingMinutes > 0, show(r));
+  check("…not the one just given, nor one being worked", !ids.has(String(fresh)) && !ids.has(String(worked)));
+  check("the page's summary and rule come with it", typeof r.body.data?.summary?.total === "number" && typeof r.body.data?.rule?.limitMinutes === "number", show(r));
 } finally {
   server.close();
   await mongoose.disconnect();
