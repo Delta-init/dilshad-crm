@@ -19,8 +19,9 @@ import type { PaginationMeta } from "../types/index.js";
  * the limit set in Settings (working time only).
  *
  * "Acted" means the owner, since the lead became theirs, changed its status,
- * added a note, logged a follow-up, set a reminder or phoned it. Opening the
- * lead is not acting on it. A lead whose status has moved past new/assigned
+ * added a note, logged a follow-up or set a reminder — or anyone has called it,
+ * ever (2026-10-17: a lead that was called is active). Opening the lead is not
+ * acting on it. A lead whose status has moved past new/assigned
  * has been worked by someone, so it never counts.
  *
  * Such leads move on to the next person by the team's own split rule — never
@@ -213,61 +214,24 @@ const stillInactive = (lead: Pick<Candidate, "_id" | "assignedTo" | "assignedAt"
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * Leads whose owner phoned them since they became theirs — calls live in their own collections: the Call button's
- * log (call_logs) and the calls 3CX synced (LeadCall, by the call's person — a call made straight from 3CX counts
- * too). A call out counts even unanswered (they tried); a call in only when they picked up — a lead ringing and
- * nobody answering is not the owner acting.
+ * Leads anyone has called (the user, 2026-10-17: "inactive leads only marks leads not called — a lead that was called
+ * is an active lead"): any call on record for it, by anyone — its owner, a colleague, someone it had before — at any
+ * time, in the Call button's log (call_logs) or the calls 3CX synced (LeadCall, a call made straight from 3CX too). A
+ * call out counts even unanswered (somebody tried); a call in only when it was picked up — the client ringing and
+ * nobody answering is not the lead being called.
  */
-async function leadsTheOwnerCalled(leads: Candidate[]): Promise<Set<string>> {
+async function leadsCalled(leads: Candidate[]): Promise<Set<string>> {
   const called = new Set<string>();
   if (!leads.length) return called;
-
-  const since = new Date(Math.min(...leads.map((l) => l.assignedAt.getTime())));
-  const owners = await User.find({ _id: { $in: [...new Set(leads.map((l) => String(l.assignedTo)))] } })
-    .select("extension")
-    .lean<Array<{ _id: Types.ObjectId; extension?: string | null }>>();
-  const extensionOf = new Map(owners.map((o) => [String(o._id), (o.extension ?? "").trim()]));
-
-  const calls = await CallLog.find({ leadId: { $in: leads.map((l) => l._id) }, callDate: { $gte: since } })
-    .select("leadId callDate initiatedBy agentExtension callDirection callType")
-    .lean();
-  const unansweredIn = (c: { callDirection?: string | null; callType?: string | null }) =>
-    c.callDirection === "inbound" && (c.callType === "Missed" || c.callType === "Notanswered");
-  const callsByLead = new Map<string, typeof calls>();
-  for (const c of calls) {
-    const key = String(c.leadId);
-    const list = callsByLead.get(key) ?? [];
-    list.push(c);
-    callsByLead.set(key, list);
-  }
-
-  const synced = await LeadCall.find({
-    lead: { $in: leads.map((l) => l._id) },
-    startedAt: { $gte: since },
-    user: { $ne: null },
-    $or: [{ direction: "out" }, { status: "answered" }],
-  })
-    .select("lead user startedAt")
-    .lean<Array<{ lead: Types.ObjectId; user: Types.ObjectId | null; startedAt: Date }>>();
-  const syncedByLead = new Map<string, typeof synced>();
-  for (const c of synced) {
-    const key = String(c.lead);
-    const list = syncedByLead.get(key) ?? [];
-    list.push(c);
-    syncedByLead.set(key, list);
-  }
-
-  for (const lead of leads) {
-    const owner = String(lead.assignedTo);
-    const extension = extensionOf.get(owner) ?? "";
-    const theirs = (callsByLead.get(String(lead._id)) ?? []).some(
-      (c) =>
-        c.callDate >= lead.assignedAt &&
-        (String(c.initiatedBy ?? "") === owner ||
-          (extension !== "" && (c.agentExtension ?? "").trim() === extension && !unansweredIn(c))),
-    ) || (syncedByLead.get(String(lead._id)) ?? []).some((c) => c.startedAt >= lead.assignedAt && String(c.user) === owner);
-    if (theirs) called.add(String(lead._id));
-  }
+  const ids = leads.map((l) => l._id);
+  const [logged, synced] = await Promise.all([
+    CallLog.distinct("leadId", {
+      leadId: { $in: ids },
+      $nor: [{ callDirection: "inbound", callType: { $in: ["Missed", "Notanswered"] } }],
+    }),
+    LeadCall.distinct("lead", { lead: { $in: ids }, $or: [{ direction: "out" }, { status: "answered" }] }),
+  ]);
+  for (const id of [...logged, ...synced]) if (id) called.add(String(id));
   return called;
 }
 
@@ -298,7 +262,7 @@ async function findInactiveLeads(f: CandidateFilter): Promise<{ leads: Candidate
   };
 
   // Calls live in their own collections, so they are checked a chunk at a time, and the cap counts what is left —
-  // leads their owners phoned (their status not moved on) must not fill it and hide newer inactive ones. Each chunk
+  // leads somebody phoned (their status not moved on) must not fill it and hide newer inactive ones. Each chunk
   // carries on from the last lead read (longest waiting first).
   const leads: Candidate[] = [];
   let last: Candidate | null = null;
@@ -319,7 +283,7 @@ async function findInactiveLeads(f: CandidateFilter): Promise<{ leads: Candidate
       { $limit: CANDIDATE_CAP },
       project,
     ]);
-    const called = await leadsTheOwnerCalled(rows);
+    const called = await leadsCalled(rows);
     for (const r of rows) if (!called.has(String(r._id))) leads.push(r);
     if (rows.length < CANDIDATE_CAP) break;
     last = rows[rows.length - 1];

@@ -3,13 +3,13 @@
  * port found). Never a real mailbox (no SMTP here) and nobody's phone (no push subscriptions).
  *
  *   - Case 1: the settings (defaults, the switch stamping when it went on); which leads count as inactive — every
- *     way an owner acts (status, note, follow-up, reminder, the Call button, a 3CX call out or picked up — straight
- *     from 3CX too), working time only, the newest hand-over; the automatic mover — the team's split rule, never back
+ *     way an owner acts (status, note, follow-up, reminder) and any call by anyone, ever (2026-10-17 — the Call
+ *     button, a 3CX call out or picked up, straight from 3CX too), working time only, the newest hand-over; the automatic mover — the team's split rule, never back
  *     to anyone who lost it, flagged once when nobody is left, who is told what; moving by hand; the moves log; the
  *     bell's stored notices; the team split, and with people left out;
  *   - Case 2: the caps (counted after the calls), a 5,000-character lead name, switched on with no time recorded or
  *     a minute ago, two passes and a hand move at once (one move, one turn), a lead closed or noted while its move is
- *     on its way (left alone), a colleague's call (not the owner acting), deactivated people, every skip reason, a new
+ *     on its way (left alone), a colleague's call (a called lead is active), deactivated people, every skip reason, a new
  *     limit at once, time zone names, two half-saves at once, the page's own team and people lists;
  *   - Case 3: bad filters, bad move bodies and bad settings — 400 and nothing changed;
  *   - Case 4: who may see the page, move leads, see and change the settings; everyone's notices their own.
@@ -351,10 +351,7 @@ const L: Record<string, LeadRow> = {};
     noteBefore: "a note from before it was theirs",
     nameEdit: "editing the name is not acting on it",
     callExtMissedIn: "a call in at their extension that nobody answered",
-    callOther: "somebody else pressed Call",
     tcxInMissed: "a 3CX call in they missed",
-    tcxOther: "a 3CX call by somebody else",
-    tcxBefore: "a 3CX call from before it was theirs",
     handedBack: "handed back to the person who first added it — timed from the hand-over, not the first add",
     noTeam: "no team — still listed",
     goneOwner: "its owner is deactivated — still listed",
@@ -375,6 +372,10 @@ const L: Record<string, LeadRow> = {};
     tcxOut: "a 3CX call out by the owner",
     tcxNoAnswer: "a 3CX call out by the owner, unanswered — they tried",
     tcxInAnswered: "a 3CX call in the owner picked up",
+    // A lead that was called is active, whoever called it, whenever (the user, 2026-10-17).
+    callOther: "somebody else pressed Call",
+    tcxOther: "a 3CX call by somebody else",
+    tcxBefore: "a 3CX call from before it was theirs",
     ownSpot: "added it themselves and took it on the spot",
     unassigned: "nobody's",
     closed: "closed",
@@ -396,13 +397,13 @@ const L: Record<string, LeadRow> = {};
   check("deactivated owner shown as such", got.get("goneOwner")?.owner?.active === false, got.get("goneOwner")?.owner);
   check("no team → team null", got.get("noTeam")?.team === null, got.get("noTeam")?.team);
   check("automatic moves off → every row says so", list.items.every((i) => i.autoMove === "off"), [...new Set(list.items.map((i) => i.autoMove))]);
-  check("summary: 17 inactive, none stuck, not capped", list.summary.total === 17 && list.summary.stuck === 0 && list.summary.capped === false, list.summary);
+  check("summary: 14 inactive, none stuck, not capped", list.summary.total === 14 && list.summary.stuck === 0 && list.summary.capped === false, list.summary);
   check("the rule: 45 min, off, the shift, in working hours at Monday noon", list.rule.limitMinutes === 45 && list.rule.autoReassign === false && list.rule.inWorkingHours === true && list.rule.workingHours.start === "10:00", list.rule);
 
   const byTeam = await svc.listInactiveLeads({ page: 1, limit: 100, teamId: String(team.Alpha) }, NOW);
-  check("filter by team → Alpha's only", byTeam.items.length === 15 && byTeam.items.every((i) => i.team?.name === "Alpha"), byTeam.items.map((i) => i.name));
+  check("filter by team → Alpha's only", byTeam.items.length === 12 && byTeam.items.every((i) => i.team?.name === "Alpha"), byTeam.items.map((i) => i.name));
   const byOwner = await svc.listInactiveLeads({ page: 1, limit: 100, ownerId: String(ids.Ann) }, NOW);
-  check("filter by owner → Ann's only", byOwner.items.map((i) => i.name).sort().join() === ["callExtMissedIn", "callOther", "edge45", "handedBack", "idle"].sort().join(), byOwner.items.map((i) => i.name));
+  check("filter by owner → Ann's only", byOwner.items.map((i) => i.name).sort().join() === ["callExtMissedIn", "edge45", "handedBack", "idle"].sort().join(), byOwner.items.map((i) => i.name));
   const byName = await svc.listInactiveLeads({ page: 1, limit: 100, search: "WEEK" }, NOW);
   check("search by name, any case", byName.items.length === 1 && byName.items[0].name === "weekend", byName.items.map((i) => i.name));
   const byPhone = await svc.listInactiveLeads({ page: 1, limit: 100, search: L.sunday.phone.slice(-6) }, NOW);
@@ -410,9 +411,9 @@ const L: Record<string, LeadRow> = {};
   const byRegex = await svc.listInactiveLeads({ page: 1, limit: 100, search: "(.*)" }, NOW);
   check("search text is taken literally, not as a pattern", byRegex.items.length === 0, byRegex.items.length);
   const page2 = await svc.listInactiveLeads({ page: 2, limit: 5 }, NOW);
-  check("paging: page 2 of 4, five rows, the 6th to the 10th", page2.items.length === 5 && page2.pagination.total === 17 && page2.pagination.totalPages === 4 && page2.items[0].name === order[5], { names: page2.items.map((i) => i.name), p: page2.pagination });
+  check("paging: page 2 of 3, five rows, the 6th to the 10th", page2.items.length === 5 && page2.pagination.total === 14 && page2.pagination.totalPages === 3 && page2.items[0].name === order[5], { names: page2.items.map((i) => i.name), p: page2.pagination });
   const page9 = await svc.listInactiveLeads({ page: 9, limit: 5 }, NOW);
-  check("paging past the end: no rows, the total still right", page9.items.length === 0 && page9.summary.total === 17, page9.summary);
+  check("paging past the end: no rows, the total still right", page9.items.length === 0 && page9.summary.total === 14, page9.summary);
   const sunday = await svc.listInactiveLeads({ page: 1, limit: 100 }, gst(SUN, "12:00"));
   check("on a Sunday: outside working hours, the rule says so", sunday.rule.inWorkingHours === false, sunday.rule.inWorkingHours);
 }
@@ -850,8 +851,8 @@ section("Case 2 — what the first test round found");
   (Team as unknown as { findById: typeof realFindById }).findById = realFindById;
   await settings({ inactiveLeads: { autoReassign: false } });
 
-  // A colleague's call — the Call button sets the contact date for anyone — is not the owner acting; the owner's
-  // own call straight from 3CX (synced, by its person) is.
+  // A called lead is active, whoever called it (2026-10-17) — a colleague's call as much as the owner's own call
+  // straight from 3CX.
   await reset();
   const [byCat, byAnn] = await seed(
     leadDoc({ name: "Called By Cat", owner: ids.Ann, extra: { lastContactedAt: gst(MON, "10:20") } }),
@@ -862,7 +863,7 @@ section("Case 2 — what the first test round found");
     { key: "n2-ann", startedAt: gst(MON, "10:21"), direction: "out", status: "answered", answered: true, lead: byAnn._id, user: ids.Ann },
   ]);
   const called = await svc.listInactiveLeads({ page: 1, limit: 100 }, NOW);
-  check("a colleague's call (3CX, contact date set) → still inactive", called.items.some((i) => i.name === "Called By Cat"), called.items.map((i) => i.name));
+  check("a colleague's call (3CX, contact date set) → not inactive", !called.items.some((i) => i.name === "Called By Cat"), called.items.map((i) => i.name));
   check("…the owner's own call straight from 3CX → not inactive", !called.items.some((i) => i.name === "Called By Ann"));
 
   // Leads their owners phoned don't fill the cap and hide newer inactive ones.
