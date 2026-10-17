@@ -107,3 +107,39 @@ export interface ReassignResult {
   moved: Array<{ leadId: string; leadName: string; from: PersonRef; to: PersonRef }>;
   skipped: Array<{ leadId: string; leadName: string; reason: string }>;
 }
+
+/** Where the leads of a period went — the Workflow tab (GET /inactive-leads/workflow). */
+export interface WorkflowCounts {
+  came: number; assigned: number; unassigned: number; worked: number; fresh: number; inactive: number;
+  movedAuto: number; movedHand: number; onBreak: number; nobodyLeft: number; waiting: number;
+}
+
+export interface WorkflowPerson {
+  id: string; name: string; active: boolean; team: string | null;
+  /** Leads of the period they held at some point: theirs now, or moved from or to them. */
+  held: number;
+  now: number; worked: number; fresh: number; inactiveNow: number;
+  lost: number; got: number;
+  statuses: Record<string, number>;
+  breakMinutes: number;
+}
+
+export interface LeadWorkflow {
+  generatedAt: string;
+  period: { from: string; to: string; days: number };
+  /** breaks: false — this CRM keeps no breaks. */
+  rule: { limitMinutes: number; hours: { start: string; end: string }; timezone: string; breaks?: boolean };
+  totals: WorkflowCounts & { moves: number };
+  statuses: Array<{ status: string; count: number }>;
+  timeline: { unit: "hour" | "day"; rows: Array<{ key: string; came: number }> };
+  teams: Array<WorkflowCounts & { id: string | null; name: string; statuses: Record<string, number> }>;
+  people: WorkflowPerson[];
+  movesMap: Array<{ from: PersonRef; to: PersonRef; count: number; automatic: number }>;
+}
+
+export interface LeadWorkflowFilters {
+  from?: string;
+  to?: string;
+  teamId?: string;
+  personId?: string;
+}

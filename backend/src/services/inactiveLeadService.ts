@@ -309,6 +309,29 @@ const ruleOf = (s: AppSettingsDTO, now: Date): InactiveRuleDTO => ({
   inWorkingHours: isWithinWorkingHours(s, now),
 });
 
+// ─── For the Workflow tab (2026-10-17) ───────────────────────────────────────
+
+/** Every lead inactive right now, as the page and the mover count it, with what the mover will do with it. The first 2,000. */
+export async function inactiveNow(now: Date = new Date()): Promise<Map<string, { owner: string; state: AutoMoveState }>> {
+  const settings = await getAppSettings();
+  const cutoff = workingCutoff(settings.workingHours, now, settings.inactiveLeads.limitMinutes);
+  const { leads } = await findInactiveLeads({ cutoff });
+  return new Map(leads.map((l) => [String(l._id), { owner: String(l.assignedTo), state: autoMoveState(l, settings) }]));
+}
+
+/** Of these leads, the ones their owner acted on since they became theirs, or anyone has called — the page's rules. */
+export async function actedOn(ids: Types.ObjectId[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!ids.length) return out;
+  const rows = await Lead.aggregate<Candidate & { acted: boolean }>([
+    { $match: { _id: { $in: ids }, assignedTo: { $ne: null } } },
+    { $project: { assignedTo: 1, assignedAt: 1, acted: OWNER_ACTED } },
+  ]);
+  for (const r of rows) if (r.acted) out.add(String(r._id));
+  for (const id of await leadsCalled(rows)) out.add(id);
+  return out;
+}
+
 // ─── The page ─────────────────────────────────────────────────────────────────
 
 export async function listInactiveLeads(

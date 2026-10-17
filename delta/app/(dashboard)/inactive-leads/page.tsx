@@ -16,6 +16,7 @@ import {
   TimerOff,
   X,
   RefreshCw,
+  Workflow,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,10 +36,11 @@ import { getSocket } from "@/lib/socket";
 import { useAuthStore } from "@/lib/store/authStore";
 import { INACTIVE_LEADS_KEY, useInactiveLeadTeams, useInactiveLeads, useLeadMoves } from "@/hooks/useInactiveLeads";
 import { MoveLeadsDialog } from "@/components/inactive-leads/MoveLeadsDialog";
+import { LeadWorkflowView } from "@/components/inactive-leads/LeadWorkflow";
 import type { AutoMoveState, InactiveLead, InactiveRule, LeadMoveEntry } from "@/types/inactiveLeads";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-type Tab = "inactive" | "moves";
+type Tab = "inactive" | "moves" | "workflow";
 type BadgeVariant = "default" | "secondary" | "warning" | "success" | "destructive" | "outline";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -323,6 +325,7 @@ export default function InactiveLeadsPage() {
             {([
               { key: "inactive", label: "Inactive now", icon: Hourglass },
               { key: "moves", label: "Moves log", icon: History },
+              { key: "workflow", label: "Workflow", icon: Workflow },
             ] as const).map((t) => (
               <motion.button
                 key={t.key}
@@ -348,7 +351,8 @@ export default function InactiveLeadsPage() {
             ))}
           </div>
 
-          {/* On a phone the search takes its own line and the pickers share the next. */}
+          {/* On a phone the search takes its own line and the pickers share the next. The Workflow tab has its own. */}
+          {tab !== "workflow" && (
           <div className="flex flex-wrap items-center gap-2">
             {tab === "inactive" && (
               <div className="relative w-full sm:w-56">
@@ -399,7 +403,11 @@ export default function InactiveLeadsPage() {
               </Button>
             </motion.div>
           </div>
+          )}
         </div>
+
+        {/* ── Workflow ── */}
+        {tab === "workflow" && <LeadWorkflowView teams={teams} />}
 
         <AnimatePresence>
           {owner && tab === "inactive" && (

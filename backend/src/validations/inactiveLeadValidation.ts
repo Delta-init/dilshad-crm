@@ -25,6 +25,15 @@ export const listLeadMovesQuery = z.object({
   teamId: optionalQuery(objectId),
 });
 
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+// GET /inactive-leads/workflow — the Workflow tab: leads that came in over these Dubai days and where they went
+export const leadWorkflowQuery = z.object({
+  from: optionalQuery(day),
+  to: optionalQuery(day),
+  teamId: optionalQuery(objectId),
+  personId: optionalQuery(objectId),
+});
+
 // GET /inactive-leads/people — the Move dialog's people
 export const movePeopleQuery = z.object({
   search: optionalQuery(z.string().trim().max(100)),

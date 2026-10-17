@@ -9,6 +9,8 @@ import type {
   InactiveLeadsResponse,
   LeadMoveEntry,
   LeadMoveFilters,
+  LeadWorkflow,
+  LeadWorkflowFilters,
   MovePerson,
   ReassignRequest,
   ReassignResult,
@@ -50,6 +52,16 @@ export const useLeadMoves = (filters: LeadMoveFilters, enabled = true) =>
       return { items: res.data.data ?? [], pagination: res.data.pagination as PaginationMeta };
     },
     placeholderData: keepPreviousData,
+  });
+
+/** Where the leads of some days went — the Workflow tab. Refreshes every minute, like the list. */
+export const useLeadWorkflow = (filters: LeadWorkflowFilters, enabled = true) =>
+  useQuery({
+    queryKey: [...INACTIVE_LEADS_KEY, "workflow", filters],
+    enabled,
+    queryFn: async () => (await api.get<ApiResponse<LeadWorkflow>>("/inactive-leads/workflow", { params: params(filters) })).data.data!,
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
   });
 
 /** A server not yet updated has no lists of its own (404): the older lists stand in until it is. */

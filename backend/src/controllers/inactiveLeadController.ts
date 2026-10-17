@@ -7,7 +7,9 @@ import {
   listMovePeople,
   reassignInactiveLeads,
 } from "../services/inactiveLeadService.js";
+import { leadWorkflow } from "../services/leadWorkflowService.js";
 import {
+  leadWorkflowQuery,
   listInactiveLeadsQuery,
   listLeadMovesQuery,
   movePeopleQuery,
@@ -41,6 +43,25 @@ export async function listLeadMovesHandler(req: AuthenticatedRequest, res: Respo
     const { items, pagination } = await listLeadMoves(parsed.data);
     sendSuccess(res, "Lead moves", items, 200, pagination);
   } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/v1/inactive-leads/workflow — the Workflow tab
+export async function leadWorkflowHandler(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parsed = leadWorkflowQuery.safeParse(req.query);
+    if (!parsed.success) {
+      sendError(res, "Validation failed", 400, parsed.error.flatten());
+      return;
+    }
+    sendSuccess(res, "Lead workflow", await leadWorkflow(parsed.data));
+  } catch (err) {
+    const status = (err as { statusCode?: number }).statusCode;
+    if (status) {
+      sendError(res, (err as Error).message, status);
+      return;
+    }
     next(err);
   }
 }

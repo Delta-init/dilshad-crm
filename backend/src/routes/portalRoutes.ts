@@ -11,6 +11,8 @@ import {
 } from "../services/portalService.js";
 import { enrolmentFlowForPortal } from "../services/portalEnrolmentFlow.js";
 import { listInactiveLeads } from "../services/inactiveLeadService.js";
+import { leadWorkflow } from "../services/leadWorkflowService.js";
+import { leadWorkflowQuery } from "../validations/inactiveLeadValidation.js";
 import { CallFilterError, callsForPortal, recordingLinkForPortal } from "../services/portalCalls.js";
 
 const router = Router();
@@ -156,6 +158,26 @@ router.get(
   wrap(async (_req, res) => {
     const list = await listInactiveLeads({ page: 1, limit: 2000 });
     sendSuccess(res, "Inactive leads", { items: list.items, summary: list.summary, rule: list.rule });
+  }),
+);
+
+/**
+ * The lead workflow, for Root's Reports → Sales tab (2026-10-17): the leads that came in over some Dubai days
+ * (?from&to, YYYY-MM-DD; today by default) and where each went — exactly this CRM's Workflow tab. ?teamId, ?personId
+ * narrow it. Read only.
+ */
+router.get(
+  "/lead-workflow",
+  wrap(async (req, res) => {
+    const parsed = leadWorkflowQuery.safeParse(req.query);
+    if (!parsed.success) return sendError(res, "Use from/to as YYYY-MM-DD and ids for teamId/personId", 400);
+    try {
+      sendSuccess(res, "Lead workflow", await leadWorkflow(parsed.data));
+    } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode;
+      if (!status) throw err;
+      sendError(res, (err as Error).message, status);
+    }
   }),
 );
 
