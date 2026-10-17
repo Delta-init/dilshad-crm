@@ -20,6 +20,7 @@ import type { IRole, IStudent, IStudentPayment } from "../types/index.js";
 import { FINANCE_EMAIL_RE, emailKey, isFinanceEmail, takenMessage, type EmailHolder } from "../utils/clientEmail.js";
 import { findEmailHolder } from "./emailHolder.js";
 import { announceSaleClosed } from "./saleAnnouncement.js";
+import { syncSalesNote } from "./financeSalesNote.js";
 
 function createError(msg: string, status: number) {
   return Object.assign(new Error(msg), { statusCode: status });
@@ -617,6 +618,10 @@ export class StudentService {
       // as "Not specified" — which is what every enrolment from here used to
       // say, because this field had nothing behind it.
       language: student.language ?? "",
+      // The note written at the close, for finance only — kept apart from the
+      // invoice's own notes, which are printed for the client. Kept up to date
+      // afterwards by financeSalesNote.ts.
+      salesNote: (student.notes ?? "").trim(),
       ...(student.paymentMethod ? { declaredPaymentMethod: student.paymentMethod } : {}),
       // The key, not a copy. Both applications address the same bucket, so
       // finance attaches the file this already wrote rather than being sent
@@ -813,6 +818,7 @@ export class StudentService {
       "demoScheduled", "demoAttended", "firstContactTime", "lastFollowupDate",
       "enrollmentDate", "feeStatus", "totalFee", "paidAmount", "notes", "status",
     ];
+    const noteBefore = (student.notes ?? "").trim();
     for (const field of allowed) {
       if (data[field] !== undefined) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -843,6 +849,8 @@ export class StudentService {
     student.feeStatus     = this.computeFeeStatus(total, paid, data.feeStatus);
 
     await student.save();
+    // A changed note reaches finance straight away (financeSalesNote.ts).
+    if ((student.notes ?? "").trim() !== noteBefore) await syncSalesNote(id);
     return this.populateStudent(id);
   }
 

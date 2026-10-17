@@ -336,3 +336,43 @@ export async function sendBalancePayment(payload: {
     clearTimeout(timer);
   }
 }
+
+/**
+ * The sales note of an enrolment already with finance, as it is now in this
+ * CRM (the owner, 2026-10-17: every save reaches finance). Only the note
+ * changes there — not the approval, not the bill. Throws on anything but a
+ * 2xx; a 404 means finance does not have this enrolment.
+ */
+export async function sendSalesNote(externalId: string, salesNote: string, orgId: string): Promise<void> {
+  if (!financeConfigured() || !orgId) throw new Error("The finance connection is not set up");
+
+  const path = "/api/v1/integrations/enrolments/sales-note";
+  const raw = JSON.stringify({ source: "crm", externalId, salesNote });
+  const timestamp = String(Date.now());
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const signature = signRequest(env.FINANCE_INTEGRATION_SECRET, "POST", path, timestamp, nonce, raw);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${baseUrl()}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-delta-client": env.FINANCE_CLIENT_ID,
+        "x-delta-timestamp": timestamp,
+        "x-delta-nonce": nonce,
+        "x-delta-signature": signature,
+        "x-delta-org": orgId,
+      },
+      body: raw,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      throw new Error(body.error?.message ?? `Finance returned ${res.status}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}

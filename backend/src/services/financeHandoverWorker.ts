@@ -3,6 +3,7 @@ import { Student } from "../models/Student.js";
 import { financeConfigured, sendEnrolment } from "./financeClient.js";
 import { fetchStatusesByOrg, orgOfHandover } from "./financeOrgs.js";
 import { sweepCommission } from "./commissionService.js";
+import { drainSalesNotes } from "./financeSalesNote.js";
 import { env } from "../config/env.js";
 
 /**
@@ -53,6 +54,8 @@ export async function drainFinanceHandovers(): Promise<void> {
         flags: result.flags ?? [],
         sentAt: new Date(),
         lastError: undefined,
+        // It went with the note as it was queued — nothing left to catch up on.
+        salesNotePending: false,
       });
       await row.save();
 
@@ -213,6 +216,8 @@ async function drainNow(): Promise<void> {
       again = false;
       await drainFinanceHandovers();
     } while (again);
+    // Sales notes changed after their enrolment went, that finance has not taken yet.
+    await drainSalesNotes();
   } catch (err) {
     console.error("[finance] handover sweep failed", err);
   } finally {

@@ -83,6 +83,10 @@ const financeHandoverSchema = new Schema(
      */
     resentAt: { type: Date },
     resends: { type: Number, default: 0 },
+    /** The sales note changed after this was sent and finance has not taken
+        it yet — the worker retries (financeSalesNote.ts). */
+    salesNotePending: { type: Boolean, default: false, index: true },
+    salesNoteSyncedAt: { type: Date },
     /** When finance was last asked. Keeps the poll off rows just looked at. */
     checkedAt: { type: Date },
 
