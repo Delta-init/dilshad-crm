@@ -6,12 +6,13 @@ import {
 } from "recharts";
 import { ArrowRight, RefreshCw, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ErrorState } from "@/components/shared/ListStates";
 import { DayRangeFilter } from "@/components/inactive-leads/DayRangeFilter";
-import { useLeadWorkflow } from "@/hooks/useInactiveLeads";
+import { useLeadWorkflow, useLeadWorkflowLeads } from "@/hooks/useInactiveLeads";
 import { STATUS_META, type LeadStatus } from "@/lib/statusConfig";
 import { cn, gstTodayISO } from "@/lib/utils";
 import type { FilterTeam, LeadWorkflow, WorkflowCounts } from "@/types/inactiveLeads";
@@ -50,6 +51,9 @@ export function LeadWorkflowView({ teams }: { teams: FilterTeam[] }) {
     personId: personId === ALL ? undefined : personId,
   };
   const { data, isLoading, isFetching, error, refetch } = useLeadWorkflow(filters);
+  // The box clicked, and the leads behind it — with the same filters as the map.
+  const [pick, setPick] = useState<BoxPick | null>(null);
+  const boxLeads = useLeadWorkflowLeads({ ...filters, box: pick?.box, status: pick?.status }, !!pick);
 
   // The employee picker keeps everyone from the last look without one picked.
   const [peopleOptions, setPeopleOptions] = useState<Array<{ id: string; name: string }>>([]);
@@ -97,21 +101,23 @@ export function LeadWorkflowView({ teams }: { teams: FilterTeam[] }) {
           <ErrorState onRetry={() => refetch()} />
         </CardContent></Card>
       ) : (
-        <LeadWorkflowBody data={data} personName={personName} onPerson={(id) => setPersonId(id)} />
+        <LeadWorkflowBody data={data} personName={personName} onPerson={(id) => setPersonId(id)} onBox={setPick} />
       )}
+      <WorkflowBreakdown pick={pick} data={boxLeads.data} loading={boxLeads.isLoading} error={boxLeads.isError} onRetry={() => boxLeads.refetch()}
+        onClose={() => setPick(null)} leadHref={(id) => `/leads/${id}`} />
     </div>
   );
 }
 
 /** The map and the charts for one answer — also what Root shows for this CRM. */
-export function LeadWorkflowBody({ data, personName, onPerson }: { data: LeadWorkflow; personName?: string; onPerson?: (id: string) => void }) {
+export function LeadWorkflowBody({ data, personName, onPerson, onBox }: { data: LeadWorkflow; personName?: string; onPerson?: (id: string) => void; onBox?: (pick: BoxPick) => void }) {
   const t = data.totals;
   // A CRM that keeps no breaks (Draw, Remote) says so: no break box or columns for it.
   const breaks = data.rule.breaks !== false;
   const days = data.period.from === data.period.to ? dayLabel(data.period.from) : `${dayLabel(data.period.from)} – ${dayLabel(data.period.to)}`;
   return (
     <div className="space-y-4">
-      <WorkflowMap totals={t} statuses={data.statuses} breaks={breaks} title={`${personName ? `${personName}'s leads` : "Leads"} that came in · ${days}`}
+      <WorkflowMap totals={t} statuses={data.statuses} onBox={onBox} breaks={breaks} title={`${personName ? `${personName}'s leads` : "Leads"} that came in · ${days}`}
         note={`Inactive = no action from the owner within ${data.rule.limitMinutes} min of the ${breaks ? "moving" : "working"} hours (${data.rule.hours.start}–${data.rule.hours.end})${breaks ? ", breaks and calls not counted" : ", calls not counted"}. ${t.moves} moves in all.`} />
       <div className="grid gap-4 lg:grid-cols-3">
         <TimelineCard data={data} />
@@ -124,47 +130,50 @@ export function LeadWorkflowBody({ data, personName, onPerson }: { data: LeadWor
   );
 }
 
-function Box({ n, label, of, tone, className }: { n: number; label: string; of?: number; tone: "base" | "good" | "bad" | "muted"; className?: string }) {
+function Box({ n, label, of, tone, className, onOpen }: { n: number; label: string; of?: number; tone: "base" | "good" | "bad" | "muted"; className?: string; onOpen?: () => void }) {
+  // A box opens the leads behind it (2026-10-19), when the page can show them.
+  const Tag = onOpen ? motion.button : motion.div;
   return (
-    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-      className={cn("rounded-xl border px-3 py-2.5 text-center", className,
+    <Tag initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} {...(onOpen ? { type: "button" as const, onClick: onOpen, "aria-label": `${n} ${label} — see the leads` } : {})}
+      className={cn("block w-full rounded-xl border px-3 py-2.5 text-center", onOpen && "cursor-pointer transition hover:ring-2 hover:ring-primary/40", className,
         tone === "good" && "border-emerald-500/30 bg-emerald-500/10",
         tone === "bad" && "border-rose-500/30 bg-rose-500/10",
         tone === "muted" && "border-border/60 bg-muted/40",
         tone === "base" && "border-border/60 bg-card")}>
       <p className={cn("text-xl font-bold tabular-nums", tone === "good" && "text-emerald-600 dark:text-emerald-400", tone === "bad" && "text-rose-600 dark:text-rose-400")}>{n.toLocaleString("en-US")}</p>
       <p className="text-xs text-muted-foreground">{label}{of !== undefined ? ` · ${pctOf(n, of)}` : ""}</p>
-    </motion.div>
+    </Tag>
   );
 }
 const Down = () => <div className="mx-auto h-4 w-px bg-border" aria-hidden />;
 
 /** Came in → assigned → worked / within the limit / went inactive → how the inactive ones ended → their statuses now. */
-export function WorkflowMap({ totals: t, statuses, title, note, breaks = true }: { totals: WorkflowCounts; statuses: LeadWorkflow["statuses"]; title: string; note: string; breaks?: boolean }) {
+export function WorkflowMap({ totals: t, statuses, title, note, breaks = true, onBox }: { totals: WorkflowCounts; statuses: LeadWorkflow["statuses"]; title: string; note: string; breaks?: boolean; onBox?: (pick: BoxPick) => void }) {
   const total = statuses.reduce((n, s) => n + s.count, 0);
+  const pick = (box: string, label: string) => (onBox ? () => onBox({ box, label }) : undefined);
   return (
     <Card className="border-border/50">
       <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">{title}</CardTitle></CardHeader>
       <CardContent className="space-y-0">
-        <Box n={t.came} label="came in" tone="base" className="mx-auto max-w-[14rem]" />
+        <Box n={t.came} label="came in" onOpen={pick("came", "Came in")} tone="base" className="mx-auto max-w-[14rem]" />
         <Down />
         <div className="grid grid-cols-2 gap-3 sm:mx-auto sm:max-w-xl">
-          <Box n={t.assigned} label="assigned" of={t.came} tone="base" />
-          <Box n={t.unassigned} label="not assigned yet" of={t.came} tone="muted" />
+          <Box n={t.assigned} label="assigned" onOpen={pick("assigned", "Assigned")} of={t.came} tone="base" />
+          <Box n={t.unassigned} label="not assigned yet" onOpen={pick("unassigned", "Not assigned yet")} of={t.came} tone="muted" />
         </div>
         <Down />
         <div className="grid grid-cols-3 gap-3 sm:mx-auto sm:max-w-3xl">
-          <Box n={t.worked} label="worked by the owner" of={t.assigned} tone="good" />
-          <Box n={t.fresh} label="within the limit" of={t.assigned} tone="muted" />
-          <Box n={t.inactive} label="went inactive" of={t.assigned} tone="bad" />
+          <Box n={t.worked} label="worked by the owner" onOpen={pick("worked", "Worked by the owner")} of={t.assigned} tone="good" />
+          <Box n={t.fresh} label="within the limit" onOpen={pick("fresh", "Within the limit")} of={t.assigned} tone="muted" />
+          <Box n={t.inactive} label="went inactive" onOpen={pick("inactive", "Went inactive")} of={t.assigned} tone="bad" />
         </div>
         <Down />
         <div className={cn("grid grid-cols-2 gap-3", breaks ? "sm:grid-cols-5" : "sm:grid-cols-4")}>
-          <Box n={t.movedAuto} label="moved automatically" tone="bad" />
-          <Box n={t.movedHand} label="moved by hand" tone="bad" />
-          {breaks && <Box n={t.onBreak} label="owner on a break" tone="bad" />}
-          <Box n={t.nobodyLeft} label="nobody left to take" tone="bad" />
-          <Box n={t.waiting} label="still waiting" tone="bad" />
+          <Box n={t.movedAuto} label="moved automatically" onOpen={pick("moved_auto", "Moved automatically")} tone="bad" />
+          <Box n={t.movedHand} label="moved by hand" onOpen={pick("moved_hand", "Moved by hand")} tone="bad" />
+          {breaks && <Box n={t.onBreak} label="owner on a break" onOpen={pick("on_break", "Owner on a break")} tone="bad" />}
+          <Box n={t.nobodyLeft} label="nobody left to take" onOpen={pick("nobody_left", "Nobody left to take")} tone="bad" />
+          <Box n={t.waiting} label="still waiting" onOpen={pick("waiting", "Still waiting")} tone="bad" />
         </div>
         <Down />
         <div>
@@ -173,15 +182,18 @@ export function WorkflowMap({ totals: t, statuses, title, note, breaks = true }:
             <>
               <div className="flex h-7 w-full overflow-hidden rounded-lg">
                 {statuses.map((s) => (
-                  <div key={s.status} title={`${statusLabel(s.status)}: ${s.count}`} style={{ width: `${(s.count / total) * 100}%`, background: statusColor(s.status) }} />
+                  <button key={s.status} type="button" disabled={!onBox} onClick={() => onBox?.({ box: "status", status: s.status, label: statusLabel(s.status) })}
+                    title={`${statusLabel(s.status)}: ${s.count}`} aria-label={`${statusLabel(s.status)}: ${s.count} — see the leads`}
+                    className={cn("h-full", onBox && "cursor-pointer hover:opacity-80")} style={{ width: `${(s.count / total) * 100}%`, background: statusColor(s.status) }} />
                 ))}
               </div>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                 {statuses.map((s) => (
-                  <span key={s.status} className="flex items-center gap-1.5 text-xs">
+                  <button key={s.status} type="button" disabled={!onBox} onClick={() => onBox?.({ box: "status", status: s.status, label: statusLabel(s.status) })}
+                    className={cn("flex items-center gap-1.5 text-xs", onBox && "cursor-pointer hover:underline")}>
                     <span className="h-2.5 w-2.5 rounded-full" style={{ background: statusColor(s.status) }} />
                     {statusLabel(s.status)} <span className="font-semibold tabular-nums">{s.count}</span>
-                  </span>
+                  </button>
                 ))}
               </div>
             </>
@@ -397,5 +409,102 @@ function Legend({ items }: { items: Array<[string, string]> }) {
         </span>
       ))}
     </div>
+  );
+}
+
+// ─── The leads behind a box (the user, 2026-10-19: "click a card and see its breakdown") ─────────────────────────────
+
+/** A box of the map, or one status in "where they stand now". */
+export interface BoxPick { box: string; label: string; status?: string }
+export interface WorkflowLeadRow {
+  id: string; name: string; phone: string; source: string; status: string; stage: string;
+  owner: { id: string; name: string } | null; team: { id: string; name: string } | null;
+  cameIn: string; assignedAt: string | null;
+  move: { from: { id: string; name: string }; to: { id: string; name: string }; at: string; kind: "automatic" | "manual"; times: number } | null;
+  waitedMinutes: number | null;
+  breakSince: string | null;
+}
+export interface WorkflowLeads {
+  box: string; status: string | null; total: number; capped: boolean; rows: WorkflowLeadRow[];
+  byOwner: Array<{ id: string | null; name: string; count: number }>;
+  byTeam: Array<{ id: string | null; name: string; count: number }>;
+}
+
+const gstWhen = (iso: string | null) => (iso ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—");
+const waited = (m: number) => (m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`);
+
+/** The breakdown window: the leads behind the box picked, and how many each owner and team holds. */
+export function WorkflowBreakdown({ pick, data, loading, error, onRetry, onClose, leadHref }: {
+  pick: BoxPick | null; data?: WorkflowLeads; loading: boolean; error: boolean; onRetry: () => void; onClose: () => void;
+  /** Where a lead opens ("" or null: not a link). */
+  leadHref: (id: string) => string | null;
+}) {
+  const [tab, setTab] = useState<"list" | "owner" | "team">("list");
+  return (
+    <Dialog open={!!pick} onOpenChange={(open) => { if (!open) { onClose(); setTab("list"); } }}>
+      <DialogContent className="flex max-h-[88vh] max-w-5xl flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>{pick?.label}{data ? ` · ${data.total.toLocaleString("en-US")} lead${data.total === 1 ? "" : "s"}` : ""}</DialogTitle>
+          <DialogDescription>The leads behind this box, newest first — with the same dates, team and employee as the map.</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-1.5" role="tablist">
+          {([["list", "List"], ["owner", "By owner"], ["team", "By team"]] as const).map(([k, l]) => (
+            <Button key={k} size="sm" role="tab" aria-selected={tab === k} variant={tab === k ? "default" : "outline"} onClick={() => setTab(k)}>{l}</Button>
+          ))}
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {loading ? <Skeleton className="h-64 w-full" /> : error || !data ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              Could not load these leads. <Button variant="link" size="sm" onClick={onRetry}>Try again</Button>
+            </div>
+          ) : data.total === 0 ? <p className="py-12 text-center text-sm text-muted-foreground">No leads here.</p> : tab === "list" ? (
+            <>
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="sticky top-0 bg-background"><tr className="border-b border-border/40 text-left text-xs text-muted-foreground">
+                  {["Lead", "Owner", "Status", "Came in · assigned", "Detail"].map((h) => <th key={h} className="pb-2 pr-3 font-medium">{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {data.rows.map((r) => {
+                    const href = leadHref(r.id);
+                    return (
+                      <tr key={r.id} className="border-b border-border/20 align-top last:border-0">
+                        <td className="py-2 pr-3">
+                          {href ? <a href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" className="font-medium hover:text-primary hover:underline">{r.name || "Unnamed lead"}</a>
+                            : <span className="font-medium">{r.name || "Unnamed lead"}</span>}
+                          <div className="text-xs text-muted-foreground">{r.phone}{r.source ? ` · ${r.source}` : ""}</div>
+                        </td>
+                        <td className="py-2 pr-3">{r.owner?.name ?? <span className="text-muted-foreground">Not assigned</span>}<div className="text-xs text-muted-foreground">{r.team?.name ?? "No team"}</div></td>
+                        <td className="py-2 pr-3"><span className="rounded-full border px-1.5 py-0.5 text-[11px]" style={{ borderColor: statusColor(r.status), color: statusColor(r.status) }}>{statusLabel(r.status)}</span></td>
+                        <td className="py-2 pr-3 text-xs">{gstWhen(r.cameIn)}<div className="text-muted-foreground">{r.assignedAt ? `assigned ${gstWhen(r.assignedAt)}` : "—"}</div></td>
+                        <td className="py-2 pr-3 text-xs">
+                          {r.move ? <div>{r.move.from.name} → {r.move.to.name}<div className="text-muted-foreground">{r.move.kind === "automatic" ? "automatically" : "by hand"} · {gstWhen(r.move.at)}{r.move.times > 1 ? ` · moved ${r.move.times}×` : ""}</div></div> : null}
+                          {r.waitedMinutes != null ? <div className="text-rose-500">waited {waited(r.waitedMinutes)}</div> : null}
+                          {r.breakSince ? <div className="text-muted-foreground">on a break since {gstWhen(r.breakSince)}</div> : null}
+                          {!r.move && r.waitedMinutes == null && !r.breakSince ? <span className="text-muted-foreground/60">—</span> : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {data.capped && <p className="pt-2 text-xs text-muted-foreground">Showing the newest {data.rows.length.toLocaleString("en-US")} of {data.total.toLocaleString("en-US")} — the By owner and By team tabs count them all.</p>}
+            </>
+          ) : (
+            <div className="space-y-1.5">
+              {(tab === "owner" ? data.byOwner : data.byTeam).map((x) => {
+                const max = Math.max(...(tab === "owner" ? data.byOwner : data.byTeam).map((y) => y.count));
+                return (
+                  <div key={x.id ?? x.name} className="flex items-center gap-3 text-sm">
+                    <span className="w-44 shrink-0 truncate font-medium">{x.name}</span>
+                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full bg-primary" style={{ width: `${Math.max(4, (x.count / max) * 100)}%` }} /></span>
+                    <span className="w-24 shrink-0 text-right tabular-nums">{x.count} <span className="text-xs text-muted-foreground">{pctOf(x.count, data.total)}</span></span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

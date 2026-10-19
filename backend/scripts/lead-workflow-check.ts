@@ -224,6 +224,45 @@ check("Root, a bad day → 400", (await api(`/service/lead-workflow?from=yesterd
 check("Root, start after end → 400", (await api(`/service/lead-workflow?from=${MON}&to=${SUN}`, null, { "x-portal-secret": SECRET })).status === 400);
 check("nothing changed: no lead moved, no move written", (await LeadMove.countDocuments()) === 2 && String((await Lead.findById(L["Waiting"]).lean())?.assignedTo) === String(ids.Ann));
 
+/* ═══ The leads behind each box (2026-10-19) ═══ */
+section("The leads behind each box — always exactly the map's numbers");
+{
+  const { leadWorkflowLeads } = await import("../src/services/leadWorkflowService.js");
+  const B = (box: string, status?: string) => leadWorkflowLeads({ from: MON, to: MON, box: box as never, status }, NOW);
+  const want: Record<string, number> = { came: t.came, assigned: t.assigned, unassigned: t.unassigned, worked: t.worked, fresh: t.fresh, inactive: t.inactive,
+    moved_auto: t.movedAuto, moved_hand: t.movedHand, on_break: t.onBreak, nobody_left: t.nobodyLeft, waiting: t.waiting };
+  for (const [box, n] of Object.entries(want)) {
+    const r = await B(box);
+    check(`${box}: ${n} on the map, ${n} in the list`, r.total === n && r.rows.length === n, [r.total, r.rows.length]);
+  }
+  const st = await B("status", "followup");
+  check("a status: Follow-up's 2", st.total === 2 && st.rows.every((x) => x.status === "followup"), st.rows.map((x) => x.name));
+  const auto = await B("moved_auto");
+  check("a moved lead says from whom to whom, when, how", auto.rows[0]?.move?.from.name === "Ann" && auto.rows[0]?.move?.to.name === "Ben" && auto.rows[0]?.move?.kind === "automatic", auto.rows[0]?.move);
+  const brk = await B("on_break");
+  check("on a break: none here (no breaks kept)", brk.total === 0, brk.total);
+  const wait = await B("waiting");
+  check("still waiting: its minutes", wait.rows[0]?.waitedMinutes === 240, wait.rows[0]);
+  const came = await B("came");
+  check("newest first", came.rows[0]?.name === "Unassigned" && came.rows.at(-1)?.name === "Called", came.rows.map((x) => x.name));
+  check("by owner and by team, of all of them", came.byOwner.find((o) => o.name === "Ann")?.count === 5 && came.byOwner.find((o) => o.name === "Not assigned")?.count === 1
+    && came.byTeam.find((x) => x.name === "Beta")?.count === 1, [came.byOwner, came.byTeam]);
+  const annOnly = await leadWorkflowLeads({ from: MON, to: MON, personId: String(ids.Ann), box: "came" }, NOW);
+  check("one person: the leads they held", annOnly.total === 6, annOnly.total);
+  const r1 = await api(`/inactive-leads/workflow/leads?from=${MON}&to=${MON}&box=nope`, "Admin");
+  check("an unknown box → 400", r1.status === 400, r1.status);
+  const r2 = await api(`/inactive-leads/workflow/leads?from=${MON}&to=${MON}&box=status`, "Admin");
+  check("a status box with no status → 400", r2.status === 400, r2.status);
+  check("signed out → 401, without the box → 403", (await api(`/inactive-leads/workflow/leads?box=came`, null)).status === 401 && (await api(`/inactive-leads/workflow/leads?box=came`, "Sam")).status === 403);
+  const r3 = await api<{ total: number }>(`/inactive-leads/workflow/leads?from=${MON}&to=${MON}&box=worked`, "Vic");
+  check("the box's viewer → 200", r3.status === 200 && r3.body.data.total === t.worked, r3.status);
+  // (By the real clock, as the route goes: a box that doesn't depend on the time of day.)
+  const r4 = await api<{ total: number }>(`/service/lead-workflow/leads?from=${MON}&to=${MON}&box=came`, null, { "x-portal-secret": SECRET });
+  check("Root with the secret → the same list", r4.status === 200 && r4.body.data.total === t.came, r4.body);
+  check("Root without it → 401; a bad box → 400", (await api(`/service/lead-workflow/leads?box=came`, null)).status === 401
+    && (await api(`/service/lead-workflow/leads?box=x`, null, { "x-portal-secret": SECRET })).status === 400);
+}
+
 server.close();
 await mongoose.connection.dropDatabase();
 await mongoose.disconnect();

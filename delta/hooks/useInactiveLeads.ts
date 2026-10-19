@@ -3,6 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { toast } from "@/lib/toast";
 import api from "@/lib/axios";
 import type { ApiResponse, PaginationMeta } from "@/types";
+import type { WorkflowLeads } from "@/components/inactive-leads/LeadWorkflow";
 import type {
   FilterTeam,
   InactiveLeadFilters,
@@ -62,6 +63,14 @@ export const useLeadWorkflow = (filters: LeadWorkflowFilters, enabled = true) =>
     queryFn: async () => (await api.get<ApiResponse<LeadWorkflow>>("/inactive-leads/workflow", { params: params(filters) })).data.data!,
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
+  });
+
+/** The leads behind one box of the Workflow map — fetched when the box is clicked. */
+export const useLeadWorkflowLeads = (filters: LeadWorkflowFilters & { box?: string; status?: string }, enabled: boolean) =>
+  useQuery({
+    queryKey: [...INACTIVE_LEADS_KEY, "workflow-leads", filters],
+    enabled,
+    queryFn: async () => (await api.get<ApiResponse<WorkflowLeads>>("/inactive-leads/workflow/leads", { params: params(filters) })).data.data!,
   });
 
 /** A server not yet updated has no lists of its own (404): the older lists stand in until it is. */

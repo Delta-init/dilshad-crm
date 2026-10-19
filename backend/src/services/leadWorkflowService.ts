@@ -93,19 +93,25 @@ export interface LeadWorkflow {
 
 interface LeadRow {
   _id: Types.ObjectId;
+  name?: string;
+  phone?: string;
+  source?: string;
   status: string;
   assignedTo: Types.ObjectId | null;
+  assignedAt?: Date | null;
   team: Types.ObjectId | null;
   createdAt: Date;
   originalCreatedAt?: Date | null;
 }
+type MoveRow = { lead: Types.ObjectId; from: Types.ObjectId; to: Types.ObjectId; kind: "automatic" | "manual"; createdAt: Date };
 
 const fail = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
 
-export async function leadWorkflow(
-  q: { from?: string; to?: string; teamId?: string; personId?: string },
-  now: Date = new Date(),
-): Promise<LeadWorkflow> {
+/**
+ * What the map and the lists behind its boxes share: the period's leads (one person's, one team's) and which box each
+ * is in — so a box's list is always exactly its number.
+ */
+async function workflowBase(q: { from?: string; to?: string; teamId?: string; personId?: string }, now: Date) {
   const today = dubaiDateISO(now);
   const fromDay = q.from || q.to || today;
   const toDay = q.to || (q.from ? today : fromDay);
@@ -123,15 +129,15 @@ export async function leadWorkflow(
     $or: [{ originalCreatedAt: range }, { originalCreatedAt: { $in: [null] }, createdAt: range }],
   };
   if (q.teamId) match.team = new Types.ObjectId(q.teamId);
-  let leads = await Lead.find(match).select("status assignedTo team createdAt originalCreatedAt").lean<LeadRow[]>();
+  let leads = await Lead.find(match).select("name phone source status assignedTo assignedAt team createdAt originalCreatedAt").lean<LeadRow[]>();
 
   const ids = leads.map((l) => l._id);
   const moves = ids.length
     ? await LeadMove.find({ lead: { $in: ids }, createdAt: { $gte: start } })
         .select("lead from to kind createdAt").sort({ createdAt: 1 })
-        .lean<Array<{ lead: Types.ObjectId; from: Types.ObjectId; to: Types.ObjectId; kind: "automatic" | "manual"; createdAt: Date }>>()
+        .lean<MoveRow[]>()
     : [];
-  const movesOf = new Map<string, typeof moves>();
+  const movesOf = new Map<string, MoveRow[]>();
   for (const m of moves) movesOf.set(String(m.lead), [...(movesOf.get(String(m.lead)) ?? []), m]);
 
   // One person: the leads they held — theirs now, or moved from or to them.
@@ -156,6 +162,14 @@ export async function leadWorkflow(
     if (!UNTOUCHED.has(l.status) || acted.has(String(l._id))) return "worked";
     return "fresh";
   };
+  return { fromDay, toDay, days, start, end, leads, movesOf, inactive, stageOf, settings };
+}
+
+export async function leadWorkflow(
+  q: { from?: string; to?: string; teamId?: string; personId?: string },
+  now: Date = new Date(),
+): Promise<LeadWorkflow> {
+  const { fromDay, toDay, days, start, end, leads, movesOf, inactive, stageOf, settings } = await workflowBase(q, now);
 
   const totals = blank();
   const statuses = new Map<string, number>();
@@ -260,5 +274,90 @@ export async function leadWorkflow(
     }).sort((a, b) => b.held - a.held || a.name.localeCompare(b.name)),
     movesMap: [...pairs.values()].sort((a, b) => b.count - a.count).slice(0, 50)
       .map((p) => ({ from: { id: p.from, name: nameOf(p.from) }, to: { id: p.to, name: nameOf(p.to) }, count: p.count, automatic: p.automatic })),
+  };
+}
+
+// ─── The leads behind a box (the user, 2026-10-19: "click a card and see its breakdown") ─────────────────────────────
+
+/** A box on the map: a stage, a group of stages, or one status in "where they stand now". */
+export const WORKFLOW_BOXES = ["came", "assigned", "unassigned", "worked", "fresh", "inactive", "moved_auto", "moved_hand", "on_break", "nobody_left", "waiting", "status"] as const;
+export type WorkflowBox = (typeof WORKFLOW_BOXES)[number];
+const INACTIVE_STAGES = new Set<WorkflowStage>(["moved_auto", "moved_hand", "on_break", "nobody_left", "waiting"]);
+const LIST_CAP = 500;
+
+export interface WorkflowLeadRow {
+  id: string; name: string; phone: string; source: string; status: string; stage: WorkflowStage;
+  owner: { id: string; name: string } | null; team: { id: string; name: string } | null;
+  cameIn: string; assignedAt: string | null;
+  /** The last time it moved in the period. */
+  move: { from: { id: string; name: string }; to: { id: string; name: string }; at: string; kind: "automatic" | "manual"; times: number } | null;
+  /** Inactive now: the minutes it has waited (breaks and calls off). */
+  waitedMinutes: number | null;
+  /** On a break now: since when — never here (no breaks kept). */
+  breakSince: string | null;
+}
+
+/** The leads behind one box, newest first (the first 500), and how many each owner and team holds of all of them. */
+export async function leadWorkflowLeads(
+  q: { from?: string; to?: string; teamId?: string; personId?: string; box: WorkflowBox; status?: string },
+  now: Date = new Date(),
+): Promise<{ box: WorkflowBox; status: string | null; total: number; capped: boolean; rows: WorkflowLeadRow[]; byOwner: Array<{ id: string | null; name: string; count: number }>; byTeam: Array<{ id: string | null; name: string; count: number }> }> {
+  if (!WORKFLOW_BOXES.includes(q.box)) throw fail("Unknown box");
+  if (q.box === "status" && !q.status) throw fail("Say which status");
+  const { leads, movesOf, inactive, stageOf } = await workflowBase(q, now);
+  const inBox = (l: LeadRow): boolean => {
+    const stage = stageOf(l);
+    switch (q.box) {
+      case "came": return true;
+      case "assigned": return stage !== "unassigned";
+      case "inactive": return INACTIVE_STAGES.has(stage);
+      case "status": return l.status === q.status;
+      default: return stage === q.box;
+    }
+  };
+  const chosen = leads.filter(inBox).sort((a, b) => new Date(b.originalCreatedAt ?? b.createdAt).getTime() - new Date(a.originalCreatedAt ?? a.createdAt).getTime());
+  const shown = chosen.slice(0, LIST_CAP);
+
+  const userIds = new Set<string>(), teamIds = new Set<string>();
+  for (const l of chosen) { if (l.assignedTo) userIds.add(String(l.assignedTo)); if (l.team) teamIds.add(String(l.team)); }
+  for (const l of shown) for (const m of movesOf.get(String(l._id)) ?? []) { userIds.add(String(m.from)); userIds.add(String(m.to)); }
+  const [users, teamDocs] = await Promise.all([
+    User.find({ _id: { $in: [...userIds].map((id) => new Types.ObjectId(id)) } }).select("name breakSince").lean<Array<{ _id: Types.ObjectId; name: string; breakSince?: Date | null }>>(),
+    Team.find({ _id: { $in: [...teamIds].map((id) => new Types.ObjectId(id)) } }).select("name").lean<Array<{ _id: Types.ObjectId; name: string }>>(),
+  ]);
+  const userOf = new Map(users.map((u) => [String(u._id), u]));
+  const teamName = new Map(teamDocs.map((t) => [String(t._id), t.name]));
+  const who = (id: unknown) => ({ id: String(id), name: userOf.get(String(id))?.name ?? "Unknown" });
+
+  const count = (key: (l: LeadRow) => string | null, label: (id: string | null) => string) => {
+    const m = new Map<string | null, number>();
+    for (const l of chosen) { const k = key(l); m.set(k, (m.get(k) ?? 0) + 1); }
+    return [...m].map(([id, n]) => ({ id, name: label(id), count: n })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  };
+
+  return {
+    box: q.box,
+    status: q.box === "status" ? q.status ?? null : null,
+    total: chosen.length,
+    capped: chosen.length > LIST_CAP,
+    byOwner: count((l) => (l.assignedTo ? String(l.assignedTo) : null), (id) => (id ? userOf.get(id)?.name ?? "Unknown" : "Not assigned")),
+    byTeam: count((l) => (l.team ? String(l.team) : null), (id) => (id ? teamName.get(id) ?? "Unknown team" : "No team")),
+    rows: shown.map((l) => {
+      const stage = stageOf(l);
+      const mv = movesOf.get(String(l._id)) ?? [];
+      const last = mv[mv.length - 1];
+      const off = inactive.get(String(l._id));
+      const owner = l.assignedTo ? userOf.get(String(l.assignedTo)) : undefined;
+      return {
+        id: String(l._id), name: l.name ?? "", phone: l.phone ?? "", source: l.source ?? "", status: l.status, stage,
+        owner: l.assignedTo ? who(l.assignedTo) : null,
+        team: l.team ? { id: String(l.team), name: teamName.get(String(l.team)) ?? "Unknown team" } : null,
+        cameIn: new Date(l.originalCreatedAt ?? l.createdAt).toISOString(),
+        assignedAt: l.assignedAt ? new Date(l.assignedAt).toISOString() : null,
+        move: last ? { from: who(last.from), to: who(last.to), at: new Date(last.createdAt).toISOString(), kind: last.kind, times: mv.length } : null,
+        waitedMinutes: off ? Math.floor(off.minutes) : null,
+        breakSince: stage === "on_break" && owner?.breakSince ? new Date(owner.breakSince).toISOString() : null,
+      };
+    }),
   };
 }

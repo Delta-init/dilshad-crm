@@ -3,6 +3,7 @@ import { authenticate } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/permissions.js";
 import {
   leadWorkflowHandler,
+  leadWorkflowLeadsHandler,
   listFilterTeamsHandler,
   listInactiveLeadsHandler,
   listLeadMovesHandler,
@@ -21,6 +22,7 @@ router.use(authenticate);
 router.get("/", checkPermission("inactive-leads", "view"), listInactiveLeadsHandler);
 router.get("/moves", checkPermission("inactive-leads", "view"), listLeadMovesHandler);
 router.get("/workflow", checkPermission("inactive-leads", "view"), leadWorkflowHandler);
+router.get("/workflow/leads", checkPermission("inactive-leads", "view"), leadWorkflowLeadsHandler);
 router.get("/teams", checkPermission("inactive-leads", "view"), listFilterTeamsHandler);
 router.get("/people", checkPermission("inactive-leads", "edit"), listMovePeopleHandler);
 router.post("/reassign", checkPermission("inactive-leads", "edit"), reassignInactiveLeadsHandler);

@@ -34,6 +34,12 @@ export const leadWorkflowQuery = z.object({
   personId: optionalQuery(objectId),
 });
 
+// GET /inactive-leads/workflow/leads — the leads behind one box of the map
+export const leadWorkflowLeadsQuery = leadWorkflowQuery.extend({
+  box: z.enum(["came", "assigned", "unassigned", "worked", "fresh", "inactive", "moved_auto", "moved_hand", "on_break", "nobody_left", "waiting", "status"]),
+  status: optionalQuery(z.string().trim().max(40)),
+});
+
 // GET /inactive-leads/people — the Move dialog's people
 export const movePeopleQuery = z.object({
   search: optionalQuery(z.string().trim().max(100)),

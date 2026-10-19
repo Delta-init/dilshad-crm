@@ -11,8 +11,8 @@ import {
 } from "../services/portalService.js";
 import { enrolmentFlowForPortal } from "../services/portalEnrolmentFlow.js";
 import { listInactiveLeads } from "../services/inactiveLeadService.js";
-import { leadWorkflow } from "../services/leadWorkflowService.js";
-import { leadWorkflowQuery } from "../validations/inactiveLeadValidation.js";
+import { leadWorkflow, leadWorkflowLeads } from "../services/leadWorkflowService.js";
+import { leadWorkflowLeadsQuery, leadWorkflowQuery } from "../validations/inactiveLeadValidation.js";
 import { CallFilterError, callsForPortal, recordingLinkForPortal } from "../services/portalCalls.js";
 
 const router = Router();
@@ -173,6 +173,22 @@ router.get(
     if (!parsed.success) return sendError(res, "Use from/to as YYYY-MM-DD and ids for teamId/personId", 400);
     try {
       sendSuccess(res, "Lead workflow", await leadWorkflow(parsed.data));
+    } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode;
+      if (!status) throw err;
+      sendError(res, (err as Error).message, status);
+    }
+  }),
+);
+
+/** The leads behind one box of the workflow map (?box, and ?status for a status), for Root's same map. Read only. */
+router.get(
+  "/lead-workflow/leads",
+  wrap(async (req, res) => {
+    const parsed = leadWorkflowLeadsQuery.safeParse(req.query);
+    if (!parsed.success) return sendError(res, "Say which box (and status), with from/to as YYYY-MM-DD and ids for teamId/personId", 400);
+    try {
+      sendSuccess(res, "Workflow leads", await leadWorkflowLeads(parsed.data));
     } catch (err) {
       const status = (err as { statusCode?: number }).statusCode;
       if (!status) throw err;

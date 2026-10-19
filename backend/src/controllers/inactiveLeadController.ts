@@ -7,8 +7,9 @@ import {
   listMovePeople,
   reassignInactiveLeads,
 } from "../services/inactiveLeadService.js";
-import { leadWorkflow } from "../services/leadWorkflowService.js";
+import { leadWorkflow, leadWorkflowLeads } from "../services/leadWorkflowService.js";
 import {
+  leadWorkflowLeadsQuery,
   leadWorkflowQuery,
   listInactiveLeadsQuery,
   listLeadMovesQuery,
@@ -56,6 +57,25 @@ export async function leadWorkflowHandler(req: AuthenticatedRequest, res: Respon
       return;
     }
     sendSuccess(res, "Lead workflow", await leadWorkflow(parsed.data));
+  } catch (err) {
+    const status = (err as { statusCode?: number }).statusCode;
+    if (status) {
+      sendError(res, (err as Error).message, status);
+      return;
+    }
+    next(err);
+  }
+}
+
+// GET /api/v1/inactive-leads/workflow/leads — the leads behind one box of the Workflow map
+export async function leadWorkflowLeadsHandler(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parsed = leadWorkflowLeadsQuery.safeParse(req.query);
+    if (!parsed.success) {
+      sendError(res, "Validation failed", 400, parsed.error.flatten());
+      return;
+    }
+    sendSuccess(res, "Workflow leads", await leadWorkflowLeads(parsed.data));
   } catch (err) {
     const status = (err as { statusCode?: number }).statusCode;
     if (status) {
