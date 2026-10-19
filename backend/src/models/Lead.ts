@@ -1,5 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 import { handOverOnAssign } from "./leadHandOver.js";
+import { followUpDateOnStatus } from "./leadFollowUpDate.js";
 import type { ILead, ILeadNote, IActivityLog, IReminder, IPayment, IFollowUp } from "../types/index.js";
 
 // ─── Note Sub-Schema ──────────────────────────────────────────────────────────
@@ -407,5 +408,7 @@ leadSchema.index({ nextFollowUpAt: 1 });
 leadSchema.index({ status: 1, assignedAt: 1 });
 
 handOverOnAssign(leadSchema);
+// After the hand-over, so a status it sets clears an old follow-up date too.
+followUpDateOnStatus(leadSchema);
 
 export const Lead = mongoose.model<ILead>("Lead", leadSchema);

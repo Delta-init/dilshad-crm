@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Bell, Clock, CalendarClock, Check, Pencil, Trash2, AlarmClock,
   AlertCircle, CheckCircle2, Timer, ChevronDown, ChevronUp,
-  Plus, ExternalLink, Loader2, RefreshCw, X,
+  Plus, ExternalLink, Loader2, RefreshCw, X, Users, UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useMyReminders, useUpdateReminder, useDeleteReminder } from "@/hooks/useReminders";
+import {
+  useMyReminders, useUpdateReminder, useDeleteReminder,
+  useTeamReminderOptions, useTeamReminders, type TeamReminder,
+} from "@/hooks/useReminders";
+import { FollowupsSection } from "@/components/reminders/FollowupsSection";
 import type { ReminderWithLead } from "@/types/lead";
 
 // ── Types & helpers ───────────────────────────────────────────────────────────
@@ -160,12 +164,14 @@ function EditForm({
 // ── Reminder card ─────────────────────────────────────────────────────────────
 
 function ReminderCard({
-  reminder, editingId, onEditToggle, onRequestDelete,
+  reminder, editingId, onEditToggle, onRequestDelete, readOnly = false,
 }: {
   reminder: ReminderWithLead;
   editingId: string | null;
   onEditToggle: (id: string | null) => void;
   onRequestDelete: (id: string, leadId: string) => void;
+  /** Someone else's reminder (Team / All reminders): shown with who set it, no actions. */
+  readOnly?: boolean;
 }) {
   const state  = getReminderState(reminder.remindAt, reminder.isDone);
   const cfg    = STATE_CFG[state];
@@ -173,6 +179,8 @@ function ReminderCard({
 
   const updateMut = useUpdateReminder(reminder.lead._id);
   const isEditing = editingId === reminder._id;
+  const setBy     = (reminder as Partial<TeamReminder>).owner?.name;
+  const assignee  = reminder.lead.assignedTo && typeof reminder.lead.assignedTo === "object" ? reminder.lead.assignedTo.name : null;
 
   return (
     <motion.div
@@ -198,6 +206,13 @@ function ReminderCard({
             <span className="truncate max-w-[180px] font-medium">{reminder.lead.name}</span>
             <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-70 transition-opacity" />
           </Link>
+          {readOnly && (
+            <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-0.5 flex-wrap">
+              <UserRound className="h-3 w-3" />
+              <span>Set by <span className="font-semibold text-foreground">{setBy ?? "Unknown"}</span></span>
+              {assignee && assignee !== setBy && <span className="text-muted-foreground/70">· lead with {assignee}</span>}
+            </p>
+          )}
 
           {reminder.title ? (
             <p className={cn(
@@ -233,7 +248,7 @@ function ReminderCard({
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-0.5 shrink-0">
+        {!readOnly && <div className="flex items-center gap-0.5 shrink-0">
           {updateMut.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mx-1.5" />
           ) : (
@@ -269,7 +284,7 @@ function ReminderCard({
               </Button>
             </>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* Inline edit form */}
@@ -295,13 +310,14 @@ function ReminderCard({
 // ── Group section ─────────────────────────────────────────────────────────────
 
 function GroupSection({
-  state, items, editingId, onEditToggle, onRequestDelete,
+  state, items, editingId, onEditToggle, onRequestDelete, readOnly = false,
 }: {
   state: ReminderState;
   items: ReminderWithLead[];
   editingId: string | null;
   onEditToggle: (id: string | null) => void;
   onRequestDelete: (id: string, leadId: string) => void;
+  readOnly?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(state === "done");
   const cfg = STATE_CFG[state];
@@ -350,6 +366,7 @@ function GroupSection({
                     editingId={editingId}
                     onEditToggle={onEditToggle}
                     onRequestDelete={onRequestDelete}
+                    readOnly={readOnly}
                   />
                 ))}
               </AnimatePresence>
@@ -397,11 +414,27 @@ function RemindersPageContent() {
   const sp     = useSearchParams();
   const router = useRouter();
 
-  const { data: all = [], isLoading, refetch, isFetching } = useMyReminders();
-
   const [editingId,    setEditingId]    = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; leadId: string } | null>(null);
   const [filter,       setFilter]       = useState<"all" | "active" | "done">(() => (sp.get("filter") as "all" | "active" | "done") ?? "active");
+
+  // Other people's reminders (2026-10-19): a Super Admin / the Sales Manager sees everyone's, a team leader their
+  // teams' — only after clicking the button, and view only.
+  const [view,       setView]       = useState<"mine" | "team">("mine");
+  const [teamPerson, setTeamPerson] = useState("");
+  const [teamTeam,   setTeamTeam]   = useState("");
+  const { data: teamOptions } = useTeamReminderOptions();
+  const teamScope = teamOptions?.scope ?? null;
+  const inTeam    = view === "team" && !!teamScope;
+
+  const mine = useMyReminders();
+  const team = useTeamReminders({ person: teamPerson || undefined, team: teamTeam || undefined, state: filter }, inTeam);
+  const { isLoading, refetch, isFetching } = inTeam ? team : mine;
+  const all: ReminderWithLead[] = useMemo(
+    () => (inTeam ? team.data?.items ?? [] : mine.data ?? []),
+    [inTeam, team.data, mine.data],
+  );
+  const teamLabel = teamScope === "all" ? "All reminders" : "Team reminders";
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -441,7 +474,7 @@ function RemindersPageContent() {
             <Bell className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground">Reminders</h1>
+            <h1 className="text-xl font-bold text-foreground">{inTeam ? teamLabel : "Reminders"}</h1>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="text-sm text-muted-foreground">
                 {activeCount} active reminder{activeCount !== 1 && "s"}
@@ -456,7 +489,15 @@ function RemindersPageContent() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {teamScope && (
+            <Button
+              variant={inTeam ? "default" : "outline"} size="sm" className="gap-1.5 h-9"
+              onClick={() => { setView(inTeam ? "mine" : "team"); setEditingId(null); }}
+            >
+              {inTeam ? <><UserRound className="h-3.5 w-3.5" /> My reminders</> : <><Users className="h-3.5 w-3.5" /> {teamLabel}</>}
+            </Button>
+          )}
           <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
             <SelectTrigger className="h-9 w-32 text-sm">
               <SelectValue />
@@ -476,6 +517,37 @@ function RemindersPageContent() {
           </Button>
         </div>
       </motion.div>
+
+      {/* ── Team / All reminders filters ───────────────────────────────────── */}
+      {inTeam && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-muted/20 p-3">
+          <span className="text-xs text-muted-foreground mr-1">
+            {teamScope === "all" ? "Everyone's reminders" : "Your teams' reminders"} · view only
+          </span>
+          {(teamOptions?.teams.length ?? 0) > 1 && (
+            <Select value={teamTeam || "any"} onValueChange={(v) => { setTeamTeam(v === "any" ? "" : v); setTeamPerson(""); }}>
+              <SelectTrigger className="h-8 w-44 text-xs"><SelectValue placeholder="Team" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">All teams</SelectItem>
+                {teamOptions!.teams.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          <Select value={teamPerson || "any"} onValueChange={(v) => setTeamPerson(v === "any" ? "" : v)}>
+            <SelectTrigger className="h-8 w-48 text-xs"><SelectValue placeholder="Person" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Everyone</SelectItem>
+              {(teamOptions?.people ?? []).map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {team.data?.capped && (
+            <span className="text-[11px] text-amber-400">Showing the first 1,000 — pick a team or a person to see the rest</span>
+          )}
+        </div>
+      )}
+
+      {/* ── Follow-ups due (the leads' follow-up dates, 2026-10-20) ─────────── */}
+      {!inTeam && filter !== "done" && !isLoading && <FollowupsSection reminders={all} />}
 
       {/* ── Stats strip ────────────────────────────────────────────────────── */}
       {!isLoading && all.length > 0 && (
@@ -529,9 +601,9 @@ function RemindersPageContent() {
             </div>
           </div>
           <div className="space-y-1">
-            <p className="text-lg font-semibold text-foreground">No reminders yet</p>
+            <p className="text-lg font-semibold text-foreground">{inTeam ? "No reminders here" : "No reminders yet"}</p>
             <p className="text-sm text-muted-foreground max-w-xs">
-              Open a lead and set a reminder so you never miss a follow-up
+              {inTeam ? "Nobody in this view has a reminder for this filter" : "Open a lead and set a reminder so you never miss a follow-up"}
             </p>
           </div>
           <Link href="/leads">
@@ -570,6 +642,7 @@ function RemindersPageContent() {
               editingId={editingId}
               onEditToggle={setEditingId}
               onRequestDelete={(id, leadId) => setDeleteTarget({ id, leadId })}
+              readOnly={inTeam}
             />
           ))}
         </div>

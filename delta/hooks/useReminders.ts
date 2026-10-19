@@ -89,3 +89,42 @@ export const useDeleteReminder = (leadId: string) => {
     onError: (e: unknown) => toast.error(errMsg(e, "Failed to delete reminder")),
   });
 };
+
+// ─── Other people's reminders (view only, 2026-10-19) ─────────────────────────
+
+/** A reminder someone else set, with who set it. */
+export type TeamReminder = ReminderWithLead & { owner: { _id: string; name: string } };
+
+export interface TeamReminderOptions {
+  /** "all" for a Super Admin or the Sales Manager, "team" for a team leader, null for anyone else. */
+  scope: "all" | "team" | null;
+  people: Array<{ id: string; name: string }>;
+  teams: Array<{ id: string; name: string }>;
+}
+
+export const useTeamReminderOptions = () =>
+  useQuery({
+    queryKey: [...REMINDERS_KEY, "team", "options"],
+    queryFn: async () => {
+      const res = await api.get<ApiResponse<TeamReminderOptions>>("/leads/reminders/team/options");
+      return res.data.data ?? { scope: null, people: [], teams: [] };
+    },
+    staleTime: 5 * 60_000,
+  });
+
+/** Loads only while `enabled` — the page asks once the button is clicked. */
+export const useTeamReminders = (
+  params: { person?: string; team?: string; state: "active" | "done" | "all" },
+  enabled: boolean,
+) =>
+  useQuery({
+    queryKey: [...REMINDERS_KEY, "team", params],
+    queryFn: async () => {
+      const res = await api.get<ApiResponse<{ items: TeamReminder[]; capped: boolean }>>("/leads/reminders/team", {
+        params: { state: params.state, ...(params.person ? { person: params.person } : {}), ...(params.team ? { team: params.team } : {}) },
+      });
+      return res.data.data ?? { items: [], capped: false };
+    },
+    enabled,
+    refetchInterval: enabled ? 60_000 : false,
+  });

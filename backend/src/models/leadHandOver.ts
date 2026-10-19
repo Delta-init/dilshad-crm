@@ -1,4 +1,5 @@
 import type { Schema, Query, Document, Types } from "mongoose";
+import { FOLLOW_UP_DATE_FIELDS } from "./leadFollowUpDate.js";
 
 /**
  * A lead given to someone arrives as a new lead for them (the owner,
@@ -87,7 +88,8 @@ export function handOverOnAssign(schema: Schema): void {
           $set: {
             originalCreatedAt: { $ifNull: ["$originalCreatedAt", "$createdAt"] },
             createdAt: "$$NOW",
-            ...(handOver.owned ? { status: "assigned" } : {}),
+            // A new owner: back to Assigned, and the old owner's follow-up date goes with it (leadFollowUpDate.ts).
+            ...(handOver.owned ? { status: "assigned", ...FOLLOW_UP_DATE_FIELDS } : {}),
           },
         },
       ]);
