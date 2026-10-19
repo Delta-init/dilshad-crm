@@ -341,11 +341,14 @@ const ruleOf = (s: AppSettingsDTO, now: Date): InactiveRuleDTO => ({
 
 // ─── For the Workflow tab (2026-10-17) ───────────────────────────────────────
 
-/** Every lead inactive right now, as the page and the mover count it, with what the mover will do with it. The first 2,000. */
-export async function inactiveNow(now: Date = new Date()): Promise<Map<string, { owner: string; state: AutoMoveState; minutes: number }>> {
+/**
+ * Every lead inactive right now, as the page and the mover count it, with what the mover will do with it. The first 2,000.
+ * `leadIds`: only these leads (the Workflow's own) — far fewer to look at than every inactive lead there is.
+ */
+export async function inactiveNow(now: Date = new Date(), leadIds?: Types.ObjectId[]): Promise<Map<string, { owner: string; state: AutoMoveState; minutes: number }>> {
   const settings = await getAppSettings();
   const cutoff = workingCutoff(settings.workingHours, now, settings.inactiveLeads.limitMinutes);
-  const found = await findInactiveLeads({ cutoff });
+  const found = await findInactiveLeads({ cutoff, ...(leadIds ? { leadIds } : {}) });
   const clock = await pastLimitOffCalls(found.leads, settings, now);
   return new Map(clock.leads.map((l) => [String(l._id), { owner: String(l.assignedTo), state: autoMoveState(l, settings, clock.onCallNow), minutes: clock.minutes.get(String(l._id)) ?? 0 }]));
 }

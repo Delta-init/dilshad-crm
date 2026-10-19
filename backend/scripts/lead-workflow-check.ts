@@ -263,6 +263,21 @@ section("The leads behind each box — always exactly the map's numbers");
     && (await api(`/service/lead-workflow/leads?box=x`, null, { "x-portal-secret": SECRET })).status === 400);
 }
 
+/* ═══ Speed (2026-10-20: counting minutes day by day for thousands of old leads held the server up) ═══ */
+section("Speed — the clock for thousands of old leads");
+{
+  const { workingMinutesBetween } = await import("../src/utils/workingHours.js");
+  const wh = { timezone: "Asia/Dubai", days: [1, 2, 3, 4, 5, 6], start: "10:00", end: "19:00" };
+  const yearAgo = new Date(NOW.getTime() - 365 * 86_400_000);
+  const t0 = performance.now();
+  let sum = 0;
+  for (let i = 0; i < 2000; i++) sum += workingMinutesBetween(wh, new Date(yearAgo.getTime() + i * 60_000), NOW);
+  const ms = performance.now() - t0;
+  check(`2,000 leads a year old: ${Math.round(ms)} ms (under 500)`, ms < 500, ms);
+  // A year of Mon–Sat 10:00–19:00 is about 313 days × 540 min; every lead lands near it.
+  check("…and the minutes still add up (about 313 working days each)", sum / 2000 > 300 * 540 && sum / 2000 < 320 * 540, sum / 2000);
+}
+
 server.close();
 await mongoose.connection.dropDatabase();
 await mongoose.disconnect();

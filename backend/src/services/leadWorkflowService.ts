@@ -149,7 +149,8 @@ async function workflowBase(q: { from?: string; to?: string; teamId?: string; pe
 
   const settings = await getAppSettings();
   const [inactive, acted] = await Promise.all([
-    inactiveNow(now),
+    // Only this period's leads that have an owner — not every inactive lead in the CRM.
+    inactiveNow(now, leads.filter((l) => l.assignedTo).map((l) => l._id)),
     actedOn(leads.filter((l) => l.assignedTo && UNTOUCHED.has(l.status) && !movesOf.has(String(l._id))).map((l) => l._id)),
   ]);
 

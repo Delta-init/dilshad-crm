@@ -98,17 +98,45 @@ function windowOf(wh: WorkingHours, day: CalendarDay): [number, number] | null {
   ];
 }
 
+/*
+ * Each day's window, worked out once (2026-10-20): every window takes four time-zone readings, and the inactive-lead
+ * pages count minutes for thousands of leads over the same days — day by day for each lead, that was seconds of work
+ * that held the server up (2,000 leads a year old: 12 s). Kept per set of working hours, a day at a time; the windows
+ * are the same numbers as before, read again. The arrays are shared — read, never changed.
+ */
+const windowCache = new Map<string, Map<number, [number, number] | null>>();
+function windowsOf(wh: WorkingHours): Map<number, [number, number] | null> {
+  const key = `${wh.timezone}|${wh.days.join(",")}|${wh.start}|${wh.end}`;
+  let days = windowCache.get(key);
+  if (!days) {
+    if (windowCache.size >= 50) windowCache.clear();
+    days = new Map();
+    windowCache.set(key, days);
+  }
+  return days;
+}
+function windowOn(wh: WorkingHours, days: Map<number, [number, number] | null>, n: number): [number, number] | null {
+  let w = days.get(n);
+  if (w === undefined) {
+    w = windowOf(wh, fromDayNumber(n));
+    if (days.size >= 20_000) days.clear();
+    days.set(n, w);
+  }
+  return w;
+}
+
 /** Working minutes between two moments — 0 when `to` is not after `from`. */
 export function workingMinutesBetween(wh: WorkingHours, from: Date, to: Date): number {
   const a = from.getTime();
   const b = to.getTime();
   if (!(b > a) || !wh.days.length) return 0;
 
+  const windows = windowsOf(wh);
   const first = dayNumber(localDay(wh.timezone, a));
   const last = Math.min(dayNumber(localDay(wh.timezone, b)), first + MAX_DAYS);
   let total = 0;
   for (let n = first; n <= last; n++) {
-    const w = windowOf(wh, fromDayNumber(n));
+    const w = windowOn(wh, windows, n);
     if (!w) continue;
     const s = Math.max(w[0], a);
     const e = Math.min(w[1], b);
@@ -129,9 +157,10 @@ export function workingCutoff(wh: WorkingHours, now: Date, minutes: number): Dat
   let remaining = minutes * MINUTE;
   if (remaining <= 0) return new Date(b);
 
+  const windows = windowsOf(wh);
   const today = dayNumber(localDay(wh.timezone, b));
   for (let i = 0; i < MAX_DAYS; i++) {
-    const w = windowOf(wh, fromDayNumber(today - i));
+    const w = windowOn(wh, windows, today - i);
     if (!w) continue;
     const end = Math.min(w[1], b);
     if (end <= w[0]) continue;
