@@ -64,45 +64,31 @@ export async function sendPushToUsers(userIds: string[], payload: PushPayload): 
   await Promise.allSettled(userIds.map((uid) => sendPushToUser(uid, payload)));
 }
 
-/** Notify a user that a lead was assigned to them. Fire-and-forget. */
+/**
+ * Notify a user that a lead was assigned to them. Fire-and-forget.
+ *
+ * Since 2026-10-19 this goes through leadAlertService: kept in the bell (it used to be live only and gone on a
+ * reload), live on the socket and pushed — and inside a bulk action (collectAssignments) one notice per person for
+ * the whole batch. `emitFn` is no longer used; kept so every caller stays as it was.
+ */
 export async function notifyLeadAssignment(
   assignedUserId: string,
   leadId: string,
   leadName: string,
-  emitFn: (userId: string, event: string, payload: object) => void,
+  _emitFn?: (userId: string, event: string, payload: object) => void,
 ): Promise<void> {
-  const payload = {
-    title: "New Lead Assigned",
-    body: `You have been assigned: ${leadName}`,
-    tag: `lead-assigned-${leadId}`,
-    url: `/leads/${leadId}`,
-    data: { type: "lead_assigned", leadId },
-  };
-  emitFn(assignedUserId, "notification", {
-    ...payload,
-    createdAt: new Date().toISOString(),
-  });
-  await sendPushToUser(assignedUserId, payload);
+  const { announceAssignment } = await import("./leadAlertService.js");
+  await announceAssignment(assignedUserId, leadId, leadName);
 }
 
 /** Notify a user about multiple leads assigned to them (bulk). */
 export async function notifyBulkLeadAssignment(
   assignedUserId: string,
   count: number,
-  emitFn: (userId: string, event: string, payload: object) => void,
+  _emitFn?: (userId: string, event: string, payload: object) => void,
 ): Promise<void> {
-  const payload = {
-    title: `${count} Lead${count !== 1 ? "s" : ""} Assigned`,
-    body: `${count} lead${count !== 1 ? "s have" : " has"} been assigned to you`,
-    tag: `bulk-assigned-${assignedUserId}`,
-    url: `/leads`,
-    data: { type: "lead_assigned", count },
-  };
-  emitFn(assignedUserId, "notification", {
-    ...payload,
-    createdAt: new Date().toISOString(),
-  });
-  await sendPushToUser(assignedUserId, payload);
+  const { announceBulkAssignment } = await import("./leadAlertService.js");
+  await announceBulkAssignment(assignedUserId, count);
 }
 
 /**

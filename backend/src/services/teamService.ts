@@ -7,6 +7,7 @@ import { buildPagination } from "../utils/response.js";
 import type { TeamFilters, ITeam, IUser } from "../types/index.js";
 import { emitToUser } from "../socket.js";
 import { notifyLeadAssignment, notifyBulkLeadAssignment } from "./pushService.js";
+import { announceNewLeads } from "./leadAlertService.js";
 
 // ─── Populated query helper ───────────────────────────────────────────────────
 
@@ -961,6 +962,9 @@ export class TeamService {
         return lead.save();
       }),
     );
+    // Nobody holds them now: the new team's leaders, the Super Admins and the Sales Manager hear they came in
+    // (2026-10-19) — not whoever moved them.
+    void announceNewLeads(leads.map((l) => l._id), { by: performedById, movedIn: true });
     return { updated: leads.length };
   }
 

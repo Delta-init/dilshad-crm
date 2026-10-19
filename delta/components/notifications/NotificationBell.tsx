@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Bell, BellOff, X, CheckCircle2, UserCheck,
+  Bell, BellOff, X, CheckCircle2, UserCheck, UserPlus,
   MessageCircle, StickyNote, ExternalLink, Loader2,
   ArrowRightLeft, AlertTriangle, Coffee, CalendarClock, CalendarX2,
 } from "lucide-react";
@@ -53,6 +53,7 @@ const fromStored = (n: AppNotificationDTO): AppNotification => ({ ...n, url: n.u
 
 const TYPE_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
   lead_assigned:  { icon: UserCheck,     color: "text-teal-400",   bg: "bg-teal-500/15"   },
+  new_lead:       { icon: UserPlus,      color: "text-sky-400",    bg: "bg-sky-500/15"    },
   team_message:   { icon: MessageCircle, color: "text-blue-400",   bg: "bg-blue-500/15"   },
   status_changed: { icon: CheckCircle2,  color: "text-violet-400", bg: "bg-violet-500/15" },
   note_added:     { icon: StickyNote,    color: "text-green-400",  bg: "bg-green-500/15"  },

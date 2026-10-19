@@ -110,7 +110,7 @@ function NavLinks({ collapsed = false, onNavigate }: NavLinksProps) {
     function handleNotification(payload: { type?: string; data?: { type?: string } }) {
       // Old-style notices carry data.type; stored ones (notify()) carry type.
       const type = payload?.data?.type ?? payload?.type;
-      if (type === "lead_assigned" || type === "inactive_lead_moved") {
+      if (type === "lead_assigned" || type === "inactive_lead_moved" || type === "new_lead") {
         queryClient.invalidateQueries({ queryKey: ["leads", "stats", userId] });
       }
     }

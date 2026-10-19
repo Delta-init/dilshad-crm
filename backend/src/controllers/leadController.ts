@@ -12,6 +12,8 @@ import { Lead } from "../models/Lead.js";
 import { User } from "../models/User.js";
 import { Team } from "../models/Team.js";
 import mongoose from "mongoose";
+import { notifyLeadAssignment } from "../services/pushService.js";
+import { announceNewLeads, collectAssignments } from "../services/leadAlertService.js";
 
 const leadService = new LeadService();
 const excelService = new ExcelService();
@@ -225,6 +227,12 @@ export const uploadLeads = async (
         // Auto-assign failure should not block the upload
       }
     }
+
+    // The team leaders, Super Admins and the Sales Manager: one notice for the upload (2026-10-19).
+    void announceNewLeads(
+      (createdLeads as Array<{ _id: { toString(): string } }>).map((l) => l._id.toString()),
+      { by: reporterId },
+    );
 
     sendSuccess(
       res,
@@ -648,6 +656,20 @@ export const uploadLegacyLeads = async (
       }
     }
 
+    // The counsellors given open leads by the import hear about them, one notice each (2026-10-19). Old leads coming
+    // back in — not announced as new ones.
+    {
+      const ids = results.filter((r) => r.status === "created" && r.leadId).map((r) => r.leadId as string);
+      if (ids.length) {
+        void Lead.find({ _id: { $in: ids }, assignedTo: { $ne: null }, status: { $nin: ["closed", "lost"] } })
+          .select("name assignedTo").lean()
+          .then((owned) => collectAssignments(async () => {
+            for (const l of owned) if (String(l.assignedTo) !== String(reporterId)) await notifyLeadAssignment(String(l.assignedTo), String(l._id), l.name ?? "");
+          }))
+          .catch(() => null);
+      }
+    }
+
     const created   = results.filter((r) => r.status === "created").length;
     const duplicate = results.filter((r) => r.status === "duplicate").length;
     const invalid   = results.filter((r) => r.status === "invalid").length;
@@ -714,6 +736,18 @@ export const createLead = async (
     if (teamAutoAssign && data.team) {
       const leadId = (lead as unknown as { _id: { toString(): string } })?._id?.toString();
       if (leadId) void autoSplitLeadPublic(data.team, leadId, req.user!.userId);
+    }
+
+    // Tell people (2026-10-19): the person it was given to, when that isn't whoever made it, and the team's leaders,
+    // the Super Admins and the Sales Manager that a lead came in.
+    {
+      const newId = (lead as unknown as { _id?: { toString(): string } })?._id?.toString();
+      if (newId) {
+        if (data.assignedTo && String(data.assignedTo) !== req.user!.userId) {
+          void notifyLeadAssignment(String(data.assignedTo), newId, data.name ?? "");
+        }
+        void announceNewLeads([newId], { by: req.user!.userId });
+      }
     }
 
     sendSuccess(res, "Lead created successfully", lead, 201);
@@ -863,25 +897,9 @@ export const assignLead = async (
       req.user!.userId,
     );
 
-    // ── Notify the assigned user ───────────────────────────────────────────────
-    const assignedUserId = parsed.data.userId;
+    // ── Notify the assigned user — kept in the bell, live and pushed (2026-10-19) ──
     const leadDoc = lead as unknown as { name?: string; _id?: { toString(): string } };
-    const leadId  = leadDoc?._id?.toString() ?? req.params.id;
-    const leadName = leadDoc?.name ?? "a new lead";
-    const notifPayload = {
-      title: "New Lead Assigned",
-      body: `You have been assigned the lead: ${leadName}`,
-      tag: `lead-assigned-${leadId}`,
-      url: `/leads/${leadId}`,
-      data: { type: "lead_assigned", leadId },
-    };
-    // Real-time socket event
-    emitToUser(assignedUserId, "notification", {
-      ...notifPayload,
-      createdAt: new Date().toISOString(),
-    });
-    // Web push (fire-and-forget)
-    sendPushToUser(assignedUserId, notifPayload).catch(() => null);
+    void notifyLeadAssignment(parsed.data.userId, leadDoc?._id?.toString() ?? req.params.id, leadDoc?.name ?? "a new lead");
 
     sendSuccess(res, "Lead assigned successfully", lead);
   } catch (error) {

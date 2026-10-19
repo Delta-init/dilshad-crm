@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { dubaiDayRange } from "../utils/dubaiDay.js";
 import { Lead } from "../models/Lead.js";
 import { User } from "../models/User.js";
@@ -14,6 +15,7 @@ import type {
   ActivityAction,
   IRole,
 } from "../types/index.js";
+import { collectAssignments } from "./leadAlertService.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -222,7 +224,9 @@ async function autoSplitLeadInner(
           activityLogs: {
             action: "lead_assigned",
             description: `Auto-assigned to "${user.name}" via ${splitStrategy === "live" ? "live split (source + total fair)" : team.settings.splitMode === "equal_load" ? "equal load" : "round robin"}`,
-            performedBy: performedById,
+            // The scheduler passes "system": not a person, and an ObjectId field can't hold it — the log failed, and the
+            // notice after it never went (2026-10-19). Left out, the screens show it as "System".
+            ...(Types.ObjectId.isValid(performedById) ? { performedBy: performedById } : {}),
             createdAt: new Date(),
           },
         },
@@ -1112,149 +1116,152 @@ export class LeadService {
     teamIds?: string[],
     memberOverrides?: Record<string, string[]>,
   ): Promise<AutoAssignResult> {
-    // Empty array means "no teams selected → skip auto-assign entirely"
-    if (Array.isArray(teamIds) && teamIds.length === 0) {
-      return { assigned: 0, results: [] };
-    }
-
-    const query =
-      leadIds && leadIds.length > 0
-        ? { _id: { $in: leadIds } }
-        : { status: "new", team: null };
-
-    const leadsToAssign = await Lead.find(query);
-    if (leadsToAssign.length === 0) return { assigned: 0, results: [] };
-
-    // If specific team IDs supplied, restrict to those teams only
-    const teamFilter =
-      teamIds && teamIds.length > 0
-        ? { status: "active", _id: { $in: teamIds } }
-        : { status: "active" };
-
-    const activeTeams = await Team.find(teamFilter);
-    if (activeTeams.length === 0) {
-      // When caller specified specific teams but none matched / inactive, skip silently
-      if (teamIds && teamIds.length > 0) return { assigned: 0, results: [] };
-      throw Object.assign(new Error("No active teams found for assignment"), {
-        statusCode: 404,
-      });
-    }
-
-    // Fair balancing window: the current GST day. The balance is computed from
-    // the ACTUAL leads each participating member received today (assignedAt),
-    // so direct assignments to non-participating people (KSA quota, Hindi
-    // leads) don't count against the team, manual assignments to members do
-    // count, and every participating member across all teams converges to the
-    // same daily lead count.
-    const dayStart = istMidnightUTC();
-
-    const teamLeadCounts = (
-      await Promise.all(
-        activeTeams.map(async (team) => {
-          const allIds = [
-            ...(team.leaders as unknown as { toString(): string }[]),
-            ...(team.members as unknown as { toString(): string }[]),
-          ].map((id) => id.toString());
-          const uniqueIds = [...new Set(allIds)];
-          const inactive = new Set(
-            (team.inactiveMembers as unknown as { toString(): string }[]).map((id) => id.toString()),
-          );
-          // Members marked absent for TODAY receive nothing and are left out of
-          // the day's math so their teammates aren't over-fed on their behalf
-          const tomorrow = new Date(dayStart.getTime() + 86400000);
-          const absent = new Set(
-            (team.absentToday as unknown as { userId: { toString(): string }; date: Date }[])
-              .filter((a) => a.date >= dayStart && a.date < tomorrow)
-              .map((a) => a.userId.toString()),
-          );
-          const included = ((team.settings?.includedMembers ?? []) as unknown as { toString(): string }[])
-            .map((id) => id.toString())
-            .filter((id) => uniqueIds.includes(id));
-          const candidates = (included.length > 0 ? included : uniqueIds)
-            .filter((id) => !inactive.has(id) && !absent.has(id));
-          // Only globally ACTIVE user accounts participate
-          const activeUsers = await User.find({ _id: { $in: candidates }, status: "active" })
-            .select("_id")
-            .lean();
-          const poolIds = activeUsers.map((u) => u._id);
-          if (poolIds.length === 0) return { team, count: 0, memberCount: 0 };
-
-          // Leads the pool members actually received today (any path — auto,
-          // manual, transfer), summed across the pool
-          const count = await Lead.countDocuments({
-            assignedTo: { $in: poolIds },
-            assignedAt: { $gte: dayStart },
-          });
-
-          return { team, count, memberCount: poolIds.length };
-        }),
-      )
-    ).filter((t) => t.memberCount > 0); // teams with nobody to receive leads are skipped
-
-    if (teamLeadCounts.length === 0) {
-      if (teamIds && teamIds.length > 0) return { assigned: 0, results: [] };
-      throw Object.assign(new Error("No active teams with participating members"), {
-        statusCode: 404,
-      });
-    }
-
-    // Each lead goes to the team with the lowest per-member load; ties break
-    // by fewer raw leads, then stable team order — giving a proportional
-    // round-robin across teams of different sizes.
-    const assignedTeams: (typeof teamLeadCounts)[0][] = [];
-    for (let i = 0; i < leadsToAssign.length; i++) {
-      let best = teamLeadCounts[0];
-      for (const t of teamLeadCounts) {
-        const bestLoad = best.count / best.memberCount;
-        const load = t.count / t.memberCount;
-        if (load < bestLoad || (load === bestLoad && t.count < best.count)) best = t;
+    // Everyone's new leads in one notice each, not one per lead (2026-10-19).
+    return collectAssignments(async () => {
+      // Empty array means "no teams selected → skip auto-assign entirely"
+      if (Array.isArray(teamIds) && teamIds.length === 0) {
+        return { assigned: 0, results: [] };
       }
-      assignedTeams.push(best);
-      best.count++;
-    }
-
-    const results: { leadId: string; assignedTo: string }[] = [];
-    const updates: Promise<unknown>[] = [];
-
-    for (let i = 0; i < leadsToAssign.length; i++) {
-      const { team } = assignedTeams[i];
-      const lead = leadsToAssign[i];
-
-      updates.push(
-        Lead.findByIdAndUpdate(lead._id, {
-          $set: { team: team._id, status: "new" },
-          $push: {
-            activityLogs: {
-              action: "team_assigned",
-              description: `Auto-assigned to team "${team.name}"`,
-              performedBy: lead.reporter,
-              createdAt: new Date(),
+  
+      const query =
+        leadIds && leadIds.length > 0
+          ? { _id: { $in: leadIds } }
+          : { status: "new", team: null };
+  
+      const leadsToAssign = await Lead.find(query);
+      if (leadsToAssign.length === 0) return { assigned: 0, results: [] };
+  
+      // If specific team IDs supplied, restrict to those teams only
+      const teamFilter =
+        teamIds && teamIds.length > 0
+          ? { status: "active", _id: { $in: teamIds } }
+          : { status: "active" };
+  
+      const activeTeams = await Team.find(teamFilter);
+      if (activeTeams.length === 0) {
+        // When caller specified specific teams but none matched / inactive, skip silently
+        if (teamIds && teamIds.length > 0) return { assigned: 0, results: [] };
+        throw Object.assign(new Error("No active teams found for assignment"), {
+          statusCode: 404,
+        });
+      }
+  
+      // Fair balancing window: the current GST day. The balance is computed from
+      // the ACTUAL leads each participating member received today (assignedAt),
+      // so direct assignments to non-participating people (KSA quota, Hindi
+      // leads) don't count against the team, manual assignments to members do
+      // count, and every participating member across all teams converges to the
+      // same daily lead count.
+      const dayStart = istMidnightUTC();
+  
+      const teamLeadCounts = (
+        await Promise.all(
+          activeTeams.map(async (team) => {
+            const allIds = [
+              ...(team.leaders as unknown as { toString(): string }[]),
+              ...(team.members as unknown as { toString(): string }[]),
+            ].map((id) => id.toString());
+            const uniqueIds = [...new Set(allIds)];
+            const inactive = new Set(
+              (team.inactiveMembers as unknown as { toString(): string }[]).map((id) => id.toString()),
+            );
+            // Members marked absent for TODAY receive nothing and are left out of
+            // the day's math so their teammates aren't over-fed on their behalf
+            const tomorrow = new Date(dayStart.getTime() + 86400000);
+            const absent = new Set(
+              (team.absentToday as unknown as { userId: { toString(): string }; date: Date }[])
+                .filter((a) => a.date >= dayStart && a.date < tomorrow)
+                .map((a) => a.userId.toString()),
+            );
+            const included = ((team.settings?.includedMembers ?? []) as unknown as { toString(): string }[])
+              .map((id) => id.toString())
+              .filter((id) => uniqueIds.includes(id));
+            const candidates = (included.length > 0 ? included : uniqueIds)
+              .filter((id) => !inactive.has(id) && !absent.has(id));
+            // Only globally ACTIVE user accounts participate
+            const activeUsers = await User.find({ _id: { $in: candidates }, status: "active" })
+              .select("_id")
+              .lean();
+            const poolIds = activeUsers.map((u) => u._id);
+            if (poolIds.length === 0) return { team, count: 0, memberCount: 0 };
+  
+            // Leads the pool members actually received today (any path — auto,
+            // manual, transfer), summed across the pool
+            const count = await Lead.countDocuments({
+              assignedTo: { $in: poolIds },
+              assignedAt: { $gte: dayStart },
+            });
+  
+            return { team, count, memberCount: poolIds.length };
+          }),
+        )
+      ).filter((t) => t.memberCount > 0); // teams with nobody to receive leads are skipped
+  
+      if (teamLeadCounts.length === 0) {
+        if (teamIds && teamIds.length > 0) return { assigned: 0, results: [] };
+        throw Object.assign(new Error("No active teams with participating members"), {
+          statusCode: 404,
+        });
+      }
+  
+      // Each lead goes to the team with the lowest per-member load; ties break
+      // by fewer raw leads, then stable team order — giving a proportional
+      // round-robin across teams of different sizes.
+      const assignedTeams: (typeof teamLeadCounts)[0][] = [];
+      for (let i = 0; i < leadsToAssign.length; i++) {
+        let best = teamLeadCounts[0];
+        for (const t of teamLeadCounts) {
+          const bestLoad = best.count / best.memberCount;
+          const load = t.count / t.memberCount;
+          if (load < bestLoad || (load === bestLoad && t.count < best.count)) best = t;
+        }
+        assignedTeams.push(best);
+        best.count++;
+      }
+  
+      const results: { leadId: string; assignedTo: string }[] = [];
+      const updates: Promise<unknown>[] = [];
+  
+      for (let i = 0; i < leadsToAssign.length; i++) {
+        const { team } = assignedTeams[i];
+        const lead = leadsToAssign[i];
+  
+        updates.push(
+          Lead.findByIdAndUpdate(lead._id, {
+            $set: { team: team._id, status: "new" },
+            $push: {
+              activityLogs: {
+                action: "team_assigned",
+                description: `Auto-assigned to team "${team.name}"`,
+                performedBy: lead.reporter,
+                createdAt: new Date(),
+              },
             },
-          },
-        }),
-      );
-
-      results.push({
-        leadId: lead._id.toString(),
-        assignedTo: team._id.toString(),
-      });
-    }
-
-    await Promise.all(updates);
-
-    // ── Trigger intra-team auto-split for every lead that was just assigned a team
-    await Promise.all(
-      leadsToAssign.map((lead, i) =>
-        autoSplitLead(
-          assignedTeams[i].team._id.toString(),
-          lead._id.toString(),
-          lead.reporter?.toString() ?? "",
-          memberOverrides?.[assignedTeams[i].team._id.toString()],
+          }),
+        );
+  
+        results.push({
+          leadId: lead._id.toString(),
+          assignedTo: team._id.toString(),
+        });
+      }
+  
+      await Promise.all(updates);
+  
+      // ── Trigger intra-team auto-split for every lead that was just assigned a team
+      await Promise.all(
+        leadsToAssign.map((lead, i) =>
+          autoSplitLead(
+            assignedTeams[i].team._id.toString(),
+            lead._id.toString(),
+            lead.reporter?.toString() ?? "",
+            memberOverrides?.[assignedTeams[i].team._id.toString()],
+          ),
         ),
-      ),
-    );
-
-    return { assigned: results.length, results };
+      );
+  
+      return { assigned: results.length, results };
+    });
   }
 
   // ── Assign Lead to Team ───────────────────────────────────────────────────────
@@ -1416,36 +1423,39 @@ export class LeadService {
     teamId: string,
     performedById: string,
   ) {
-    const team = await Team.findById(teamId);
-    if (!team)
-      throw Object.assign(new Error("Team not found"), { statusCode: 404 });
-
-    const leads = await Lead.find({ _id: { $in: leadIds } });
-    await Promise.all(
-      leads.map(async (lead) => {
-        const prevTeam = lead.team?.toString() ?? null;
-        lead.team = team._id;
-        (lead as unknown as Record<string, unknown>).assignedTo = null;
-        lead.status = "new";
-        addLog(
-          lead as never,
-          "team_assigned",
-          `Bulk-assigned to team "${team.name}"`,
-          performedById,
-          { team: { from: prevTeam, to: team._id.toString() } },
-        );
-        return lead.save();
-      }),
-    );
-
-    // ── Trigger intra-team auto-split for each lead moved to this team
-    await Promise.all(
-      leads.map((lead) =>
-        autoSplitLead(teamId, lead._id.toString(), performedById),
-      ),
-    );
-
-    return { updated: leads.length };
+    // Everyone's new leads in one notice each, not one per lead (2026-10-19).
+    return collectAssignments(async () => {
+      const team = await Team.findById(teamId);
+      if (!team)
+        throw Object.assign(new Error("Team not found"), { statusCode: 404 });
+  
+      const leads = await Lead.find({ _id: { $in: leadIds } });
+      await Promise.all(
+        leads.map(async (lead) => {
+          const prevTeam = lead.team?.toString() ?? null;
+          lead.team = team._id;
+          (lead as unknown as Record<string, unknown>).assignedTo = null;
+          lead.status = "new";
+          addLog(
+            lead as never,
+            "team_assigned",
+            `Bulk-assigned to team "${team.name}"`,
+            performedById,
+            { team: { from: prevTeam, to: team._id.toString() } },
+          );
+          return lead.save();
+        }),
+      );
+  
+      // ── Trigger intra-team auto-split for each lead moved to this team
+      await Promise.all(
+        leads.map((lead) =>
+          autoSplitLead(teamId, lead._id.toString(), performedById),
+        ),
+      );
+  
+      return { updated: leads.length };
+    });
   }
 
   // get leads by phonenumber

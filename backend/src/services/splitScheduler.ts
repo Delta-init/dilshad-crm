@@ -12,6 +12,7 @@
 import { Team } from "../models/Team.js";
 import { Lead } from "../models/Lead.js";
 import { autoSplitLeadPublic } from "./leadService.js";
+import { collectAssignments } from "./leadAlertService.js";
 
 const INTERVAL_MS = 60_000; // every 60 seconds
 
@@ -69,11 +70,13 @@ async function tick() {
         { $set: { "settings.lastSplitAt": new Date() } },
       );
 
-      for (const lead of unassignedLeads) {
-        // bypassSplitTime=true: the gate in autoSplitLead that holds leads when
-        // splitTime is configured must be skipped here — we ARE the scheduler.
-        await autoSplitLeadPublic(teamId, lead._id.toString(), "system", undefined, true);
-      }
+      await collectAssignments(async () => {
+        for (const lead of unassignedLeads) {
+          // bypassSplitTime=true: the gate in autoSplitLead that holds leads when
+          // splitTime is configured must be skipped here — we ARE the scheduler.
+          await autoSplitLeadPublic(teamId, lead._id.toString(), "system", undefined, true);
+        }
+      });
 
       console.log(
         `[splitScheduler] ${team.name}: assigned ${unassignedLeads.length} leads at ${nowHHMM} GST`,

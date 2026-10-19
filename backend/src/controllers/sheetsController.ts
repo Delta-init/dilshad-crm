@@ -7,6 +7,7 @@ import { notifyLeadAssignment, notifyBulkLeadAssignment } from "../services/push
 import { emitToUser } from "../socket.js";
 import { sendWelcomeToLead } from "../services/whatsappCloudService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
+import { announceNewLeads } from "../services/leadAlertService.js";
 
 const leadService = new LeadService();
 
@@ -277,6 +278,8 @@ export const syncSheetLead = async (
       }
     }
 
+    void announceNewLeads([lead._id]);
+
     sendSuccess(
       res,
       "Lead created successfully",
@@ -461,6 +464,9 @@ export const syncSheetLeadsBatch = async (
         // No active teams — leads stay unassigned, not a fatal error
       }
     }
+
+    // One notice for the batch to the team leaders, Super Admins and the Sales Manager (2026-10-19).
+    void announceNewLeads(results.filter((r) => r.status === "created" && r.leadId).map((r) => r.leadId as string));
 
     sendSuccess(
       res,

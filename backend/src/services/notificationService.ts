@@ -43,6 +43,8 @@ export interface NotifyInput {
   url?: string;
   /** Collapses repeat pushes about the same thing into one on the phone. */
   tag?: string;
+  /** Extra figures for the live alert and the push (not kept with the record), e.g. a lead's id or a count. */
+  data?: Record<string, unknown>;
   /** Send an email too — only if the Settings switch for this kind of email is on. */
   email?: NotifyEmail & { setting: EmailEventKey };
 }
@@ -83,7 +85,7 @@ export async function notify(input: NotifyInput): Promise<void> {
       userIds.map((user) => ({ user, type: input.type, title, body, url }))
     );
     for (const doc of docs) {
-      emitToUser(String(doc.user), "notification", toNotificationDTO(doc));
+      emitToUser(String(doc.user), "notification", { ...toNotificationDTO(doc), ...(input.data ? { data: { type: input.type, ...input.data } } : {}) });
     }
   } catch (err) {
     console.error(`🔔 Could not store "${input.type}" notifications:`, err instanceof Error ? err.message : err);
@@ -95,7 +97,7 @@ export async function notify(input: NotifyInput): Promise<void> {
     body,
     url: url || undefined,
     tag: input.tag,
-    data: { type: input.type },
+    data: { type: input.type, ...(input.data ?? {}) },
   }).catch((err) => console.error(`🔔 Push for "${input.type}" failed:`, err instanceof Error ? err.message : err));
 
   // 4 — email, when asked for and allowed.

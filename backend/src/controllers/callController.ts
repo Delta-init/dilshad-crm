@@ -5,6 +5,7 @@ import { Lead } from "../models/Lead.js";
 import { CallLog } from "../models/CallLog.js";
 import { isSuperAdmin } from "../services/commissionService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
+import { announceNewLeads } from "../services/leadAlertService.js";
 
 const PROD_URL       = process.env.CRM_API_URL    ?? "https://api-crm.deltainstitutions.com";
 const THREECX_BASE   = process.env.THREECX_URL    ?? "https://deltainstitutions.3cx.ae:5002";
@@ -175,6 +176,10 @@ export const contactCreate = async (req: Request, res: Response): Promise<void> 
     status:    "new",
     reporter:  systemUser._id,
   });
+
+  // A caller nobody had as a lead: the Super Admins and the Sales Manager hear of it (2026-10-19).
+  void announceNewLeads([lead._id]);
+
 
   res.status(201).json({
     contact_id:   lead._id.toString(),
