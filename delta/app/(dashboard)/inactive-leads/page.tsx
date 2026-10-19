@@ -67,6 +67,11 @@ const AUTO_MOVE: Record<AutoMoveState, { label: string; hint: string; variant: B
     variant: "warning",
   },
   no_team: { label: "No team", hint: "It is not in a team, so nobody can take it automatically — pick a person.", variant: "warning" },
+  on_call: {
+    label: "Owner on a call",
+    hint: "Its owner is on a 3CX call right now: it waits until they're off it, and time on calls doesn't count towards the limit. Move it by hand if needed.",
+    variant: "secondary",
+  },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -127,7 +132,7 @@ function limitWords(total: number): string {
 
 function ruleSentence(rule: InactiveRule): string {
   const wh = rule.workingHours;
-  return `${limitWords(rule.limitMinutes)} of working time (${daysLabel(wh.days)}, ${wh.start}–${wh.end} ${zoneLabel(wh.timezone)})`;
+  return `${limitWords(rule.limitMinutes)} of working time (${daysLabel(wh.days)}, ${wh.start}–${wh.end} ${zoneLabel(wh.timezone)}, calls not counted)`;
 }
 
 /** What the automatic mover will do with a lead, as a row and a card both show it. */
@@ -768,7 +773,7 @@ function LeadRow({ lead, rule, canMove, ticked, onTick, onOwner, onMove }: LeadR
 function LeadCard({ lead, rule, canMove, ticked, onTick, onOwner, onMove }: LeadRowProps) {
   const { auto, label, late } = autoMoveOf(lead, rule);
   // Why it won't move on its own, written out — a touch screen has no hover for the tooltip.
-  const explain = lead.autoMove === "before_switch" || lead.autoMove === "stuck" || lead.autoMove === "no_team";
+  const explain = lead.autoMove === "before_switch" || lead.autoMove === "stuck" || lead.autoMove === "no_team" || lead.autoMove === "on_call";
 
   return (
     <motion.li variants={listItemVariants} className={cn("flex gap-3 px-4 py-3", ticked && "bg-primary/5")}>

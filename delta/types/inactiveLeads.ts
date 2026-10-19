@@ -7,7 +7,8 @@ export type AutoMoveState =
   | "off" //           automatic moves are switched off
   | "before_switch" // assigned before they were switched on — move it by hand
   | "stuck" //         nobody left in the team to take it
-  | "no_team"; //      it has no team to move within
+  | "no_team" //      it has no team to move within
+  | "on_call"; //      its owner is on a 3CX call now — it waits, and call time doesn't count
 
 export interface PersonRef {
   id: string;

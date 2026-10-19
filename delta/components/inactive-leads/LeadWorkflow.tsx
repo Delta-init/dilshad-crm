@@ -112,7 +112,7 @@ export function LeadWorkflowBody({ data, personName, onPerson }: { data: LeadWor
   return (
     <div className="space-y-4">
       <WorkflowMap totals={t} statuses={data.statuses} breaks={breaks} title={`${personName ? `${personName}'s leads` : "Leads"} that came in · ${days}`}
-        note={`Inactive = no action from the owner within ${data.rule.limitMinutes} min of the ${breaks ? "moving" : "working"} hours (${data.rule.hours.start}–${data.rule.hours.end})${breaks ? ", breaks not counted" : ""}. ${t.moves} moves in all.`} />
+        note={`Inactive = no action from the owner within ${data.rule.limitMinutes} min of the ${breaks ? "moving" : "working"} hours (${data.rule.hours.start}–${data.rule.hours.end})${breaks ? ", breaks and calls not counted" : ", calls not counted"}. ${t.moves} moves in all.`} />
       <div className="grid gap-4 lg:grid-cols-3">
         <TimelineCard data={data} />
         <StatusCard data={data} />
