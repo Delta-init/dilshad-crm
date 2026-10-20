@@ -5,6 +5,7 @@ import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
 import { getAppSettings } from "./settingsService.js";
 import { actedOn, inactiveNow } from "./inactiveLeadService.js";
+import { breaksOf } from "./breakClock.js";
 
 /*
  * The lead workflow, as the Sales CRM's (brought to the Remote CRM, 2026-10-17) (the user, 2026-10-17: "a map of the workflow — how many
@@ -15,9 +16,9 @@ import { actedOn, inactiveNow } from "./inactiveLeadService.js";
  *   came in      first created in the period (a hand-over keeps the first date)
  *   assigned     has an owner now; the rest wait for a split
  *   moved        moved on at least once since (automatically, or only by hand)
- *   inactive now not moved, inactive right now — nobody left in the team to take
- *                it, or waiting for the mover (this CRM's mover doesn't pause
- *                for breaks: "owner on a break" is always 0 here)
+ *   inactive now not moved, inactive right now — its owner on a break, nobody
+ *                left in the team to take it, or waiting for the mover (breaks
+ *                kept here since 2026-10-20, as the Sales CRM)
  *   worked       its owner acted on it (status, note, follow-up, reminder) or
  *                anyone called it — the Inactive leads page's rules
  *   fresh        none of these yet, and not past the limit
@@ -74,15 +75,15 @@ export interface WorkflowPerson {
   lost: number; got: number;
   /** The status of the ones that are theirs now. */
   statuses: Record<string, number>;
-  /** Minutes on a break in the period — always 0 here (no breaks kept). */
+  /** Minutes on a break in the period. */
   breakMinutes: number;
 }
 
 export interface LeadWorkflow {
   generatedAt: string;
   period: { from: string; to: string; days: number };
-  /** breaks: false — this CRM keeps no breaks, so "owner on a break" never happens here. */
-  rule: { limitMinutes: number; hours: { start: string; end: string }; timezone: string; breaks: false };
+  /** breaks: true — this CRM keeps breaks ("Take break", 2026-10-20), so the page shows "owner on a break". */
+  rule: { limitMinutes: number; hours: { start: string; end: string }; timezone: string; breaks: boolean };
   totals: Counts & { moves: number };
   statuses: Array<{ status: string; count: number }>;
   timeline: { unit: "hour" | "day"; rows: Array<{ key: string; came: number }> };
@@ -159,7 +160,7 @@ async function workflowBase(q: { from?: string; to?: string; teamId?: string; pe
     const mv = movesOf.get(String(l._id));
     if (mv?.length) return mv.some((m) => m.kind === "automatic") ? "moved_auto" : "moved_hand";
     const off = inactive.get(String(l._id));
-    if (off) return off.state === "stuck" ? "nobody_left" : "waiting";
+    if (off) return off.state === "on_break" ? "on_break" : off.state === "stuck" ? "nobody_left" : "waiting";
     if (!UNTOUCHED.has(l.status) || acted.has(String(l._id))) return "worked";
     return "fresh";
   };
@@ -242,8 +243,7 @@ export async function leadWorkflow(
   const [users, teamDocs, breaks] = await Promise.all([
     User.find({ _id: { $in: allPeople.map((id) => new Types.ObjectId(id)) } }).select("name status").lean<Array<{ _id: Types.ObjectId; name: string; status?: string }>>(),
     Team.find({ _id: { $in: teamIds.map((id) => new Types.ObjectId(id)) } }).select("name").lean<Array<{ _id: Types.ObjectId; name: string }>>(),
-    // No breaks kept here: nobody's clock pauses for one.
-    Promise.resolve({ spans: new Map<string, Array<[number, number]>>() }),
+    breaksOf(personIds, start, now),
   ]);
   const userOf = new Map(users.map((u) => [String(u._id), u]));
   const teamName = new Map(teamDocs.map((t) => [String(t._id), t.name]));
@@ -253,7 +253,7 @@ export async function leadWorkflow(
   return {
     generatedAt: now.toISOString(),
     period: { from: fromDay, to: toDay, days },
-    rule: { limitMinutes: settings.inactiveLeads.limitMinutes, hours: { start: settings.workingHours.start, end: settings.workingHours.end }, timezone: settings.workingHours.timezone, breaks: false },
+    rule: { limitMinutes: settings.inactiveLeads.limitMinutes, hours: { start: settings.workingHours.start, end: settings.workingHours.end }, timezone: settings.workingHours.timezone, breaks: true },
     totals: { ...totals, moves: leads.reduce((n, l) => n + (movesOf.get(String(l._id))?.length ?? 0), 0) },
     statuses: [...statuses].map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count),
     timeline: {
@@ -294,7 +294,7 @@ export interface WorkflowLeadRow {
   move: { from: { id: string; name: string }; to: { id: string; name: string }; at: string; kind: "automatic" | "manual"; times: number } | null;
   /** Inactive now: the minutes it has waited (breaks and calls off). */
   waitedMinutes: number | null;
-  /** On a break now: since when — never here (no breaks kept). */
+  /** On a break now: since when. */
   breakSince: string | null;
 }
 

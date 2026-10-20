@@ -5,6 +5,7 @@
  *
  *   - Case 1: a 20-minute call by the owner's account comes off the clock (list and mover);
  *   - Case 2: a call matched only by the extension, unanswered, counts too; two overlapping calls are taken off once;
+ *     a call during a break (2026-10-20, breaks as the Sales CRM) is taken off once too;
  *   - Case 3: the owner on a call right now — listed as on a call, the mover leaves it, a super admin can still move it
  *     by hand; off the call it moves;
  *   - Case 4: 3CX not answering, or not connected — nobody counts as on a call, the mover carries on.
@@ -62,11 +63,12 @@ const { AppSetting } = await import("../src/models/AppSetting.js");
 const { updateAppSettings } = await import("../src/services/settingsService.js");
 const svc = await import("../src/services/inactiveLeadService.js");
 const { forgetLiveCalls } = await import("../src/services/callClock.js");
+const { BreakLog } = await import("../src/models/BreakLog.js");
 
 const ids: Record<string, Types.ObjectId> = {};
 const role = new Types.ObjectId(), admin = new Types.ObjectId();
 await db.collection("roles").insertMany([{ _id: admin, roleName: "Super Admin", isSystemRole: true, permissions: {} }, { _id: role, roleName: "Sales Staff", isSystemRole: false, permissions: {} }]);
-for (const [name, ext, r] of [["Admin", "", admin], ["Ann", "101", role], ["Ben", "102", role], ["Cat", "103", role], ["Dan", "104", role]] as const) {
+for (const [name, ext, r] of [["Admin", "", admin], ["Ann", "101", role], ["Ben", "102", role], ["Cat", "103", role], ["Dan", "104", role], ["Eli", "105", role]] as const) {
   ids[name] = new Types.ObjectId();
   await db.collection("users").insertOne({ _id: ids[name], name, email: `${name.toLowerCase()}@test.local`, password: "x", role: r, status: "active", extension: ext || null });
 }
@@ -117,6 +119,12 @@ const catLead = await lead("Cat Busy", ids.Cat, "11:00");
 await call("11:10", 1200, { user: ids.Cat, extension: "103" });
 await call("11:20", 1200, { user: ids.Cat, extension: "103" });
 check("calls 11:10–11:30 and 11:20–11:40 take off 30, not 40: 75 − 30 = 45 at 12:15", (await listed("12:15")).find((i) => i.id === String(catLead))?.waitingMinutes === 45,
+  (await listed("12:15")).map((i) => [i.name, i.waitingMinutes]));
+
+const eliLead = await lead("Eli Break And Call", ids.Eli, "11:00");
+await BreakLog.create({ user: ids.Eli, start: gst("11:10"), end: gst("11:30") });
+await call("11:20", 1200, { user: ids.Eli, extension: "105" });
+check("break 11:10–11:30 and a call 11:20–11:40 take off 30, not 40: 75 − 30 = 45 at 12:15", (await listed("12:15")).find((i) => i.id === String(eliLead))?.waitingMinutes === 45,
   (await listed("12:15")).map((i) => [i.name, i.waitingMinutes]));
 
 section("Case 3 — on a call right now");

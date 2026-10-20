@@ -13,6 +13,9 @@
  *     limit at once, time zone names, two half-saves at once, the page's own team and people lists;
  *   - Case 3: bad filters, bad move bodies and bad settings — 400 and nothing changed;
  *   - Case 4: who may see the page, move leads, see and change the settings; everyone's notices their own.
+ *   - Breaks (2026-10-20, as the Sales CRM): a break that ended comes off its owner's clock (not anyone else's); on a
+ *     break now — listed as such, the mover leaves it, a super admin can still move it by hand; a break left on from
+ *     an earlier day ends with that day; "Take break" / "End break" over HTTP — written down once, a kind, bad bodies.
  *
  * Run by inactive-leads-check.sh. Scratch database only.
  */
@@ -1042,6 +1045,87 @@ section("Case 4 — signed out, Sales Staff, the Inactive Leads box, the Setting
   check("anyone signed in has their own bell: Sales Staff → 200", (await api("GET", "/notifications", "Ann")).status === 200);
 }
 
+section("Breaks (as the Sales CRM, 2026-10-20: the owner's break doesn't count, and nothing of theirs moves in one)");
+{
+  const { BreakLog } = await import("../src/models/BreakLog.js");
+  await reset();
+  await BreakLog.collection.deleteMany({});
+  await db.collection("users").updateMany({}, { $set: { breakSince: null, breakKind: null } });
+  await settings({ inactiveLeads: { autoReassign: true, limitMinutes: 45 } });
+  await enabledAt(gst(MON, "08:00"));
+  const listAt = (at: Date) => svc.listInactiveLeads({ page: 1, limit: 100 }, at);
+
+  // 1 — a break that ended: Ann's lead from 10:00; she took a break 10:10–10:30. The shift here is 10:00–19:00.
+  const [brk] = await seed(leadDoc({ name: "Break Clock", owner: ids.Ann, assignedAt: gst(MON, "10:00") }));
+  await BreakLog.create({ user: ids.Ann, start: gst(MON, "10:10"), end: gst(MON, "10:30") });
+  let list = await listAt(gst(MON, "10:45"));
+  check("10:45: 45 min less a 20-min break = 25 — not inactive", list.items.length === 0, list.items.map((i) => i.waitingMinutes));
+  check("…and the mover leaves it", (await svc.sweepInactiveLeads(gst(MON, "10:45"))).moved === 0 && (await ownerOf(brk._id)) === String(ids.Ann));
+  list = await listAt(gst(MON, "11:05"));
+  check("11:05: 65 − 20 = 45 — inactive, due", list.items.length === 1 && list.items[0].waitingMinutes === 45 && list.items[0].autoMove === "due", list.items.map((i) => [i.waitingMinutes, i.autoMove]));
+  const [benLead] = await seed(leadDoc({ name: "Ben Unbroken", owner: ids.Ben, assignedAt: gst(MON, "10:00") }));
+  list = await listAt(gst(MON, "11:05"));
+  check("somebody else's break doesn't stop Ben's clock: 65 min", list.items.find((i) => i.id === String(benLead._id))?.waitingMinutes === 65, list.items.map((i) => [i.name, i.waitingMinutes]));
+
+  // 2 — on a break now: past the limit, listed, never moved by the mover while it lasts; the time in it doesn't count.
+  await reset();
+  await BreakLog.collection.deleteMany({});
+  const [onBrk] = await seed(leadDoc({ name: "On Break", owner: ids.Ann, assignedAt: gst(MON, "10:00") }));
+  const [benDue] = await seed(leadDoc({ name: "Ben Due", owner: ids.Ben, assignedAt: gst(MON, "10:00") }));
+  await db.collection("users").updateOne({ _id: ids.Ann }, { $set: { breakSince: gst(MON, "11:30"), breakKind: "lunch" } });
+  list = await listAt(gst(MON, "11:50"));
+  const annRow = list.items.find((i) => i.id === String(onBrk._id));
+  check("on a break since 11:30, at 11:50: 90 min counted (the break's 20 not), shown as on a break", annRow?.waitingMinutes === 90 && annRow?.autoMove === "on_break", annRow);
+  const during = await svc.sweepInactiveLeads(gst(MON, "11:50"));
+  check("…the mover leaves it while the break lasts", (await ownerOf(onBrk._id)) === String(ids.Ann), during);
+  check("…others' due leads still move", during.moved === 1 && (await ownerOf(benDue._id)) !== String(ids.Ben), during);
+  const byHand = await svc.reassignInactiveLeads({ leadIds: [String(onBrk._id)], to: String(ids.Cat) }, String(ids.Admin), gst(MON, "11:50"));
+  check("…a super admin can still move it by hand", byHand.moved.length === 1 && (await ownerOf(onBrk._id)) === String(ids.Cat), byHand);
+  await db.collection("users").updateOne({ _id: ids.Ann }, { $set: { breakSince: null, breakKind: null } });
+
+  // 3 — a break left on from Saturday and never ended counts to Saturday's end, not on into Monday.
+  await reset();
+  const [weekend] = await seed(leadDoc({ name: "Left On", owner: ids.Ann, assignedAt: gst(SAT, "18:30") }));
+  await db.collection("users").updateOne({ _id: ids.Ann }, { $set: { breakSince: gst(SAT, "18:40") } });
+  list = await listAt(gst(MON, "10:35"));
+  const left = list.items.find((i) => i.id === String(weekend._id));
+  check("a break left on Saturday ends with Saturday: 30 − 20 = 10 min Sat + 35 Mon = 45, not on a break now", left?.waitingMinutes === 45 && left?.autoMove !== "on_break", left);
+  await db.collection("users").updateOne({ _id: ids.Ann }, { $set: { breakSince: null } });
+  await settings({ inactiveLeads: { autoReassign: false } });
+
+  // 4 — the Take break button: everyone's own, each ended break written down once.
+  await BreakLog.collection.deleteMany({});
+  const g0 = await api<{ onBreak: boolean; since: string | null; kind: string | null }>("GET", "/break", "Ben");
+  check("GET /break: not on one", g0.status === 200 && g0.body.data.onBreak === false && g0.body.data.since === null && g0.body.data.kind === null, g0.body);
+  const on1 = await api<{ onBreak: boolean; since: string | null; kind: string | null }>("POST", "/break", "Ben", { on: true, kind: "tea" });
+  const on2 = await api<{ onBreak: boolean; since: string | null; kind: string | null }>("POST", "/break", "Ben", { on: true, kind: "lunch" });
+  check("Take break (tea) → on a break, none written yet", on1.status === 200 && on1.body.data.onBreak === true && on1.body.data.kind === "tea" && (await BreakLog.countDocuments({ user: ids.Ben })) === 0, on1.body);
+  check("…pressed again: still the first one — same start, same kind", on2.status === 200 && on2.body.data.since === on1.body.data.since && on2.body.data.kind === "tea", on2.body);
+  const g1 = await api<{ onBreak: boolean; since: string | null; kind: string | null }>("GET", "/break", "Ben");
+  check("GET /break: on one since then, tea", g1.body.data.onBreak === true && g1.body.data.since === on1.body.data.since && g1.body.data.kind === "tea", g1.body);
+  check("…nobody else's: Cat isn't on one", (await api<{ onBreak: boolean }>("GET", "/break", "Cat")).body.data.onBreak === false);
+  await Bun.sleep(1100);
+  const offs = await Promise.all([api("POST", "/break", "Ben", { on: false }), api("POST", "/break", "Ben", { on: false })]);
+  const logs = await BreakLog.find({ user: ids.Ben }).lean();
+  check("End break (pressed twice at once) → written once, start before end, its kind", offs.every((o) => o.status === 200) && logs.length === 1 && logs[0].end > logs[0].start && logs[0].kind === "tea", logs);
+  const ben = await db.collection("users").findOne({ _id: ids.Ben });
+  check("…and Ben is off it", ben?.breakSince === null && ben?.breakKind === null, ben);
+  const leftDay = new Date(gstMidnight(new Date()).getTime() - 3 * 3_600_000);
+  await db.collection("users").updateOne({ _id: ids.Ben }, { $set: { breakSince: leftDay } });
+  const stale = await api<{ onBreak: boolean }>("GET", "/break", "Ben");
+  check("a break left on from yesterday: not on one today", stale.body.data.onBreak === false, stale.body);
+  await api("POST", "/break", "Ben", { on: true });
+  const leftLog = await BreakLog.findOne({ user: ids.Ben, start: leftDay }).lean();
+  check("…then a new one → yesterday's written to its midnight", leftLog?.end.getTime() === gstMidnight(new Date()).getTime(), leftLog);
+  await api("POST", "/break", "Ben", { on: false });
+  for (const [label, body] of [["no on", {}], ["on not a boolean", { on: "yes" }], ["a kind it doesn't know", { on: true, kind: "nap" }]] as const) {
+    const b = await api("POST", "/break", "Ann", body);
+    check(`POST /break with ${label} → 400`, b.status === 400, b.status);
+  }
+  check("…nothing started", (await db.collection("users").findOne({ _id: ids.Ann }))?.breakSince == null);
+  check("signed out → 401", (await api("GET", "/break", null)).status === 401 && (await api("POST", "/break", null, { on: true })).status === 401);
+}
+
 section("Wiring");
 {
   const index = await Bun.file(new URL("../src/index.ts", import.meta.url)).text();
@@ -1049,7 +1133,7 @@ section("Wiring");
   const call = index.indexOf("startInactiveLeadScheduler()");
   check("the mover starts with the other schedulers, only where they run", gate >= 0 && call > gate, { gate, call });
   const routesText = await Bun.file(new URL("../src/routes/index.ts", import.meta.url)).text();
-  check("/settings, /notifications and /inactive-leads are mounted", ['"/settings"', '"/notifications"', '"/inactive-leads"'].every((p) => routesText.includes(p)));
+  check("/settings, /notifications, /inactive-leads and /break are mounted", ['"/settings"', '"/notifications"', '"/inactive-leads"', '"/break"'].every((p) => routesText.includes(p)));
 }
 
 /* ── Done ────────────────────────────────────────────────────────────────── */

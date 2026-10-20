@@ -1,5 +1,6 @@
 import { Router } from "express";
 import authRoutes from "./authRoutes.js";
+import breakRoutes from "./breakRoutes.js";
 import myTrackerRoutes from "./myTrackerRoutes.js";
 import userRoutes from "./userRoutes.js";
 import roleRoutes from "./roleRoutes.js";
@@ -61,6 +62,8 @@ router.use("/settings", settingsRoutes);
 router.use("/inactive-leads", inactiveLeadRoutes);
 // Heartbeats from everyone; the Activity page for the super admin — see activityRoutes.
 router.use("/activity", activityRoutes);
+// My own break ("Take break") — the inactive-lead clock stops for its owner — see breakRoutes.
+router.use("/break", breakRoutes);
 // Meetings between colleagues, clients and mentors, and each person's calendar — see meetingRoutes.
 router.use("/meetings", meetingRoutes);
 // The office's meeting rooms, booked through the HRMS — see meetingRoomRoutes.

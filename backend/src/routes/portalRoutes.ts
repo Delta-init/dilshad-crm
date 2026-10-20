@@ -14,6 +14,7 @@ import { listInactiveLeads } from "../services/inactiveLeadService.js";
 import { leadWorkflow, leadWorkflowLeads } from "../services/leadWorkflowService.js";
 import { leadWorkflowLeadsQuery, leadWorkflowQuery } from "../validations/inactiveLeadValidation.js";
 import { CallFilterError, callsForPortal, recordingLinkForPortal } from "../services/portalCalls.js";
+import { salesTv } from "../services/salesTvService.js";
 
 const router = Router();
 
@@ -53,6 +54,19 @@ const wrap =
   (req: Request, res: Response, next: NextFunction) => {
     fn(req, res).catch(next);
   };
+
+/**
+ * The Root portal's Sales TV (2026-10-20): the sales staff's closings and calls, who is on a break, and the closes
+ * after `after` (an instant) — services/salesTvService.ts. `parts=live`: only the breaks and the closes. Read-only.
+ */
+router.get(
+  "/sales-tv",
+  wrap(async (req, res) => {
+    const after = typeof req.query.after === "string" ? req.query.after.slice(0, 40) : undefined;
+    const parts = req.query.parts === "live" ? "live" : undefined;
+    sendSuccess(res, "Sales TV", await salesTv({ after, parts }));
+  }),
+);
 
 /** The roles this CRM has, and what each one permits. */
 router.get(

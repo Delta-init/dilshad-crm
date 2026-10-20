@@ -18,6 +18,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
+import { BreakButton } from "@/components/shared/BreakButton";
 import { navItems } from "@/components/layout/Sidebar";
 import { CommandPalette } from "@/components/shared/CommandPalette";
 import { ImpersonationBanner } from "@/components/shared/ImpersonationBanner";
@@ -97,6 +98,8 @@ export function Header() {
             ⌘K
           </kbd>
         </button>
+
+        <BreakButton />
 
         <NotificationBell />
 

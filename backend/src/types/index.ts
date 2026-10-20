@@ -116,6 +116,8 @@ export interface IUser extends Document {
   /** Where the extension came from: typed on the Users screen ("manual", never overwritten) or 3CX's users by email. */
   extensionSource?: "manual" | "3cx" | null;
   status: "active" | "inactive";
+  breakSince?: Date | null;     // on a break since ("Take break", 2026-10-20)
+  breakKind?: BreakKind | null; // what the break is for
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -926,3 +928,7 @@ export interface IMeeting {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/** What a break is for — picked when "Take break" is pressed (as the Sales CRM, 2026-10-20). Every kind counts the same. */
+export const BREAK_KINDS = ["meeting", "lunch", "tea", "washroom"] as const;
+export type BreakKind = (typeof BREAK_KINDS)[number];

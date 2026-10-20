@@ -1,6 +1,6 @@
 /**
  * Checks the lead workflow (Inactive Leads → Workflow, and /service/lead-workflow for Root) on a scratch database —
- * as the Sales CRM's, but this Remote CRM keeps no breaks, so a lead whose owner is on a break just waits:
+ * as the Sales CRM's, breaks included (kept here since 2026-10-20), in this CRM's working hours:
  *
  *   - Case 1: one Monday's leads — came in (first created that day, a hand-over keeps the first day), assigned or
  *     not, worked (status, note, a call by anyone), fresh, moved automatically or only by hand, inactive now with
@@ -155,13 +155,13 @@ same("came in: 11 (Sunday's, and the one first created Sunday, left out)", t.cam
 same("assigned 10, not assigned 1", [t.assigned, t.unassigned], [10, 1]);
 same("worked 4 — status, note, a colleague's call, closed", t.worked, 4);
 same("fresh 1 — 20 minutes in, under the limit", t.fresh, 1);
-same("went inactive 5: moved auto 1, by hand 1, nobody left 1, waiting 2 (no break pause in this CRM)",
-  [t.inactive, t.movedAuto, t.movedHand, t.onBreak, t.nobodyLeft, t.waiting], [5, 1, 1, 0, 1, 2]);
+same("went inactive 5: moved auto 1, by hand 1, on a break 1, nobody left 1, waiting 1",
+  [t.inactive, t.movedAuto, t.movedHand, t.onBreak, t.nobodyLeft, t.waiting], [5, 1, 1, 1, 1, 1]);
 check("every assigned lead is in exactly one place", t.worked + t.fresh + t.inactive === t.assigned, t);
 same("two moves", t.moves, 2);
 same("statuses now, most first", w.statuses.map((s) => `${s.status}:${s.count}`).sort(), ["assigned:7", "closed:1", "followup:2", "new:1"]);
 const wh = (await AppSetting.findOne({ key: "app" }).lean())!.workingHours;
-same("the rule: 45 min, in the working hours, no breaks here", [w.rule.limitMinutes, w.rule.hours.start, w.rule.hours.end, w.rule.breaks], [45, wh.start, wh.end, false]);
+same("the rule: 45 min, in the working hours, breaks kept", [w.rule.limitMinutes, w.rule.hours.start, w.rule.hours.end, w.rule.breaks], [45, wh.start, wh.end, true]);
 same("hours: one day → 24 hours", [w.timeline.unit, w.timeline.rows.length], ["hour", 24]);
 same("…by the hour they came in: 09 1, 10 1, 13 7, 16 1, 18 1", Object.fromEntries(w.timeline.rows.filter((r) => r.came).map((r) => [r.key, r.came])), { "09": 1, "10": 1, "13": 7, "16": 1, "18": 1 });
 const alpha = w.teams.find((x) => x.name === "Alpha"), beta = w.teams.find((x) => x.name === "Beta");
@@ -172,8 +172,8 @@ same("Ann: held 6 (5 hers now + 1 moved away), lost 1, worked 3, fresh 1, inacti
   [P("Ann")?.held, P("Ann")?.now, P("Ann")?.lost, P("Ann")?.worked, P("Ann")?.fresh, P("Ann")?.inactiveNow], [6, 5, 1, 3, 1, 1]);
 same("Ben: held 3, his now 2, lost 1, got 1, worked 1 (the call), the moved one inactive with him now",
   [P("Ben")?.held, P("Ben")?.now, P("Ben")?.lost, P("Ben")?.got, P("Ben")?.worked, P("Ben")?.inactiveNow], [3, 2, 1, 1, 1, 1]);
-same("Cat: 2 now, got 1, no break minutes kept here, one lead inactive with her",
-  [P("Cat")?.now, P("Cat")?.got, P("Cat")?.breakMinutes, P("Cat")?.inactiveNow], [2, 1, 0, 1]);
+same("Cat: 2 now, got 1, on a break since 16:30 — 30 break minutes, one lead inactive with her",
+  [P("Cat")?.now, P("Cat")?.got, P("Cat")?.breakMinutes, P("Cat")?.inactiveNow], [2, 1, 30, 1]);
 same("Cat's statuses", P("Cat")?.statuses, { followup: 1, assigned: 1 });
 same("people: with a team each", [P("Ann")?.team, P("Dan")?.team], ["Alpha", "Beta"]);
 same("moves map: Ann → Ben (automatic), Ben → Cat (by hand)",
@@ -240,7 +240,7 @@ section("The leads behind each box — always exactly the map's numbers");
   const auto = await B("moved_auto");
   check("a moved lead says from whom to whom, when, how", auto.rows[0]?.move?.from.name === "Ann" && auto.rows[0]?.move?.to.name === "Ben" && auto.rows[0]?.move?.kind === "automatic", auto.rows[0]?.move);
   const brk = await B("on_break");
-  check("on a break: none here (no breaks kept)", brk.total === 0, brk.total);
+  check("on a break: since when, and how long it has waited", brk.rows[0]?.breakSince === gst(MON, "16:30").toISOString() && brk.rows[0]?.waitedMinutes === 210, brk.rows[0]);
   const wait = await B("waiting");
   check("still waiting: its minutes", wait.rows[0]?.waitedMinutes === 240, wait.rows[0]);
   const came = await B("came");
