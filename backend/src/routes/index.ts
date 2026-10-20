@@ -22,6 +22,7 @@ import settingsRoutes from "./settingsRoutes.js";
 import inactiveLeadRoutes from "./inactiveLeadRoutes.js";
 import activityRoutes from "./activityRoutes.js";
 import meetingRoutes from "./meetingRoutes.js";
+import meetingRoomRoutes from "./meetingRoomRoutes.js";
 import commissionRoutes from "./commissionRoutes.js";
 import leaderboardRoutes from "./leaderboardRoutes.js";
 import publicRoutes from "./publicRoutes.js";
@@ -62,6 +63,8 @@ router.use("/inactive-leads", inactiveLeadRoutes);
 router.use("/activity", activityRoutes);
 // Meetings between colleagues, clients and mentors, and each person's calendar — see meetingRoutes.
 router.use("/meetings", meetingRoutes);
+// The office's meeting rooms, booked through the HRMS — see meetingRoomRoutes.
+router.use("/meeting-rooms", meetingRoomRoutes);
 
 // Health check
 router.get("/health", (_req, res) => {

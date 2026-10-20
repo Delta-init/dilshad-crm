@@ -27,6 +27,7 @@ import {
   CalendarDays,
   TimerOff,
   Activity,
+  DoorOpen,
   CalendarClock,
   Coins,
   Trophy,
@@ -80,6 +81,8 @@ export const navItems: { href: string; label: string; icon: React.ElementType; p
      (everyone's for a Super Admin and the Sales Manager). */
   { href: "/my-pay",    label: "My Pay",             icon: Wallet,          permModule: "pay"       },
   { href: "/mentors",   label: "Mentors",            icon: CalendarDays,    permModule: "mentors"   },
+  /* The office's meeting rooms, booked through the HRMS (2026-10-19) — open to everyone signed in. */
+  { href: "/meeting-rooms", label: "Meeting rooms", icon: DoorOpen, permModule: null },
   { href: "/calendar",  label: "Calendar",           icon: CalendarClock,   permModule: "calendar"  },
   { href: "/students",  label: "Students",           icon: GraduationCap,   permModule: "students"  },
   { href: "/roles",     label: "Roles & Permissions",icon: Shield,          permModule: "roles"     },

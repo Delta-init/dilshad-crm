@@ -97,6 +97,20 @@ const envSchema = z.object({
       secret are set — the LMS refuses to guess among more than one. */
   LMS_REMOTE_ORG_ID: z.string().default(""),
 
+  /*
+   * The HRMS, for the Meeting rooms page (2026-10-19): the office's meeting
+   * rooms are kept there, and this CRM shows and books them through its signed
+   * integration API, as the Root portal and the Sales CRM call it —
+   * HRMS_CLIENT_ID / HRMS_INTEGRATION_SECRET are the HRMS's
+   * INTEGRATION_CLIENT_ID / INTEGRATION_SECRET, HRMS_ORG_ID the organization
+   * whose rooms these are. Unset, the page says meeting rooms aren't set up
+   * here, and nothing else changes.
+   */
+  HRMS_API_URL:            z.string().default(""),
+  HRMS_CLIENT_ID:          z.string().default(""),
+  HRMS_INTEGRATION_SECRET: z.string().default(""),
+  HRMS_ORG_ID:             z.string().default(""),
+
   /**
    * Object storage for payment receipts.
    *
