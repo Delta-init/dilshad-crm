@@ -119,7 +119,11 @@ type Counted = { _id: Types.ObjectId | null; n: number };
 const byId = (rows: Counted[]) => new Map(rows.filter((r) => r._id).map((r) => [String(r._id), r.n]));
 
 export class LeaderboardService {
-  async getLeaderboard(month?: string, rankBy: RankBy = "revenue"): Promise<Leaderboard> {
+  /**
+   * `opts.withSuperAdmins` keeps Super Admins in (the Root Sales TV, 2026-10-20: a Super Admin who leads or sits in
+   * a sales team — dilshad in Remote — is shown there with their figures; the CRM's own board still leaves them out).
+   */
+  async getLeaderboard(month?: string, rankBy: RankBy = "revenue", opts: { withSuperAdmins?: boolean } = {}): Promise<Leaderboard> {
     const range = dubaiMonthRange(month);
     const inMonth = { $gte: range.from, $lt: range.to };
 
@@ -149,7 +153,7 @@ export class LeaderboardService {
     ]);
 
     const excluded = new Set((settings?.excludedUsers ?? []).map(String));
-    const staff = people.filter((p) => !(p.role?.isSystemRole && p.role.roleName === "Super Admin") && !excluded.has(String(p._id)));
+    const staff = people.filter((p) => (opts.withSuperAdmins || !(p.role?.isSystemRole && p.role.roleName === "Super Admin")) && !excluded.has(String(p._id)));
 
     // A call is theirs when it was taken or made on their 3CX extension (the sync links it to them).
     const callsOf = new Map(calls.map((c) => [String(c._id), c]));

@@ -13,11 +13,12 @@ import { ACADEMY_CURRENCY } from "../types/index.js";
  * with the amount and the sound, and who is on a break"). What this CRM tells
  * it, over GET /api/v1/service/sales-tv — the same shape as the Sales CRM's:
  *
- *   people    the sales staff — members and leaders of an active team, active,
- *             no Super Admins, not excluded from commission (the Leaderboard
- *             leaves those out) — with this month's and today's (the Dubai
- *             day) closings, this month's revenue, and today's 3CX calls,
- *             connected and talk time (the Leaderboard's own counts)
+ *   people    the sales staff — members and leaders of an active team,
+ *             active, a Super Admin too when in one (the CRM's own
+ *             Leaderboard leaves them out), not excluded from commission —
+ *             with this month's and today's (the Dubai day) closings, this
+ *             month's revenue, and today's 3CX calls, connected and talk
+ *             time (the Leaderboard's own counts)
  *   onBreak   who pressed "Take break" today and hasn't ended it
  *   closes    closes after `after` (an instant; else the last two hours; never
  *             more than a day back), the newest 20 — what the sale-closed
@@ -100,7 +101,8 @@ export async function salesTv(q: { after?: string; parts?: string }): Promise<Sa
   const base: SalesTv = { crm: SALES_TV_CRM, generatedAt: new Date(now).toISOString(), onBreak, closes };
   if (q.parts === "live") return base;
 
-  const board = await new LeaderboardService().getLeaderboard();
+  // Super Admins too, but only those in an active team (filtered below) — dilshad leads Remote's team (2026-10-20).
+  const board = await new LeaderboardService().getLeaderboard(undefined, "revenue", { withSuperAdmins: true });
   const todayClosings = await Student.aggregate<{ _id: Types.ObjectId | null; n: number }>([
     { $match: { enrollmentDate: { $gte: midnight, $lt: new Date(midnight.getTime() + DAY_MS) }, status: { $ne: "dropped" } } },
     { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
