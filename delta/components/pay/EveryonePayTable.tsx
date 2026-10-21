@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { PayoutBadge } from "@/components/pay/PayoutBadge";
 import { aed, ROLE_SHORT } from "@/lib/commission";
 import { basisOf } from "@/components/pay/PayMonthCard";
 import type { PayRow, PayView } from "@/types/commission";
@@ -10,6 +11,8 @@ import type { PayRow, PayView } from "@/types/commission";
 interface EveryonePayTableProps {
   people: PayRow[];
   totals: NonNullable<PayView["totals"]>;
+  /** Finance answered: show where it stands on each person's commission (2026-10-21). */
+  payoutsKnown?: boolean;
 }
 
 const ROLE_TONE = {
@@ -18,7 +21,7 @@ const ROLE_TONE = {
   sales: "border-border/60 bg-muted/40 text-muted-foreground",
 } as const;
 
-export function EveryonePayTable({ people, totals }: EveryonePayTableProps) {
+export function EveryonePayTable({ people, totals, payoutsKnown = false }: EveryonePayTableProps) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border/50 bg-card">
       <table className="w-full min-w-[760px] text-sm">
@@ -72,6 +75,7 @@ export function EveryonePayTable({ people, totals }: EveryonePayTableProps) {
                   {p.percent}% of {aed(p.commission.earned)}
                   {p.commission.notCountedYet > 0 ? ` · ${p.commission.notCountedYet} not counted yet` : ""}
                 </p>
+                {payoutsKnown && <div className="mt-1"><PayoutBadge payout={p.payout} payable={p.commission.payable} compact /></div>}
               </td>
               <td className="whitespace-nowrap px-4 py-2.5 text-right font-semibold tabular-nums text-primary">{aed(p.total)}</td>
             </motion.tr>

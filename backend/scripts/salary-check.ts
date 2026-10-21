@@ -33,6 +33,9 @@ const section = (s: string) => console.log(`\n${s}`);
 // ── A stand-in for finance's enrolment status call ──────────────────────────
 type Answer = { approval: string; status: string; totalMinor: number; currency?: string; lms?: unknown; commission?: unknown };
 const finance = new Map<string, Answer>();
+// Finance's commission payouts for My Pay (2026-10-21), and who asked for them.
+const payouts: Array<Record<string, unknown>> = [];
+const payoutAsks: Array<{ crm: string | null; month: string | null; signed: boolean }> = [];
 const fake = Bun.serve({
   port: 0,
   async fetch(req) {
@@ -50,6 +53,10 @@ const fake = Bun.serve({
       });
       return Response.json({ data });
     }
+    if (req.method === "GET" && url.pathname === "/api/v1/integrations/crm-commission/payouts") {
+      payoutAsks.push({ crm: url.searchParams.get("crm"), month: url.searchParams.get("month"), signed: !!req.headers.get("x-delta-signature") && req.headers.get("x-delta-client") === "salary-check" });
+      return Response.json({ data: payouts });
+    }
     return new Response("not here", { status: 404 });
   },
 });
@@ -66,6 +73,7 @@ Object.assign(process.env, {
   FINANCE_CLIENT_ID: "salary-check",
   FINANCE_INTEGRATION_SECRET: "salary-check-secret",
   FINANCE_ORG_ID: "000000000000000000000001",
+  ROOT_ERP_SECRET: "salary-check-portal-secret",
 });
 
 const mongoose = (await import("mongoose")).default;
@@ -204,6 +212,11 @@ finance.set(s1, { ...finance.get(s1)!, totalMinor: 4_800_000 });
 await reverseVoidedSales();
 check("…and back", (await saleOf(s1))?.fee === 48_000);
 
+payouts.push(
+  { userId: String(people.Ria), state: "approved", amount: 600, currency: "AED", approvedByName: "Mona Manager", approvedAt: "2026-10-21T08:00:00.000Z" },
+  { userId: String(people.Theertha), state: "paid", amount: 115, currency: "AED", approvedByName: "Mona Manager", approvedAt: "2026-10-21T08:00:00.000Z",
+    paidOn: "2026-11-02", paymentMethod: "bank_transfer", reference: "TRX-9" },
+);
 const pay = await salary.getPay({ userId: String(people.Owner), role: { roleName: "Super Admin", isSystemRole: true } as never }, MONTH);
 const row = (name: string) => pay.people?.find((p) => p.name === name);
 const brief = (name: string) => {
@@ -253,6 +266,16 @@ again = await salary.getPay({ userId: String(people.Theertha) }, MONTH);
 check("a sale recorded before the fee was kept counts the student's fee (5,500)", again.me?.sales.value === 21_500, String(again.me?.sales.value));
 await CommissionSale.updateOne({ student: new Types.ObjectId(t2) }, { $set: { fee: 5_000 } });
 
+section("My Pay shows finance's approval and payment (2026-10-21)");
+check("finance was asked, signed, for this CRM and month", payoutAsks.some((a) => a.crm === "remote" && a.month === MONTH && a.signed), JSON.stringify(payoutAsks));
+check("the payouts are known", (pay as { payoutsKnown?: boolean }).payoutsKnown === true);
+check("Ria: approved, 600, by the manager", row("Ria")?.payout?.state === "approved" && row("Ria")?.payout?.amount === 600 && row("Ria")?.payout?.approvedByName === "Mona Manager", JSON.stringify(row("Ria")?.payout));
+check("Theertha: paid on 2 November by bank transfer, with the reference", row("Theertha")?.payout?.state === "paid" && row("Theertha")?.payout?.paidOn === "2026-11-02" && row("Theertha")?.payout?.reference === "TRX-9");
+check("nobody else has one", row("Idle")?.payout === null && row("Shahana")?.payout === null);
+const own = await salary.getPay({ userId: String(people.Theertha) }, MONTH);
+check("…and her own My Pay says so too", own.me?.payout?.state === "paid");
+
+
 section("Slab versions: a change holds from its month on");
 await saveSlab("sales", [
   { name: "Base", target: 0, salary: 2_100, percent: 0 },
@@ -286,6 +309,21 @@ async function call(method: string, path: string, who?: string, body?: unknown) 
   return { status: res.status, body: (await res.json().catch(() => ({}))) as { data?: Record<string, unknown>; message?: string } };
 }
 type PayBody = { me: { name: string; total: number; percent: number; commission: { payable: number } } | null; people: unknown[] | null; totals: unknown };
+section("The Root portal's My Pay figures (2026-10-21)");
+{
+  const ask = (secret?: string) => fetch(`http://127.0.0.1:${port}/api/v1/service/pay?month=${MONTH}`, { headers: secret ? { "x-portal-secret": secret } : {} });
+  let r = await ask("salary-check-portal-secret");
+  const data = (await r.json()) as { data?: { people?: Array<{ user: string; payable: number; percent: number; earned: number; level: string }> } };
+  const t = data.data?.people?.find((p) => p.user === String(people.Theertha));
+  const mine = row("Theertha");
+  check("the Root portal's /service/pay: everyone's payable, percent, earned and level, as My Pay works them out",
+    r.status === 200 && !!t && t.payable === mine?.commission.payable && t.percent === mine?.percent && t.earned === mine?.commission.earned && t.level === mine?.level.name, JSON.stringify(t));
+  r = await ask("wrong");
+  check("…only with the portal's secret", r.status === 401, String(r.status));
+  r = await fetch(`http://127.0.0.1:${port}/api/v1/service/pay?month=2026-13`, { headers: { "x-portal-secret": "salary-check-portal-secret" } });
+  check("…and a real month", r.status === 400, String(r.status));
+}
+
 let h = await call("GET", "/commission/pay");
 check("no token: 401", h.status === 401, `${h.status}`);
 h = await call("GET", "/commission/pay", "Gone");
@@ -326,6 +364,7 @@ check("Theertha's month follows it: D now pays 60% — 21,000 → 2,500 + 138", 
 h = await call("GET", "/commission/plan", "Theertha");
 const plan = h.body.data as { slabs?: { sales: unknown[]; sm: unknown[]; tl?: unknown[] }; slabsFrom?: string; slabsMonth?: string };
 check("the plan carries this month's slabs, and when they were set", h.status === 200 && plan.slabs?.sales.length === 3 && plan.slabs.sm.length === 3 && !plan.slabs.tl && plan.slabsFrom === MONTH && plan.slabsMonth === MONTH);
+
 
 server.close();
 fake.stop(true);

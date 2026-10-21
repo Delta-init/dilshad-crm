@@ -376,3 +376,53 @@ export async function sendSalesNote(externalId: string, salesNote: string, orgId
     clearTimeout(timer);
   }
 }
+
+// ── Commission payouts (2026-10-21) ─────────────────────────────────────────────────────────────────────────────
+
+/** This CRM as finance knows it — the code its commission is kept under there. */
+export const FINANCE_CRM_CODE = "remote";
+
+/** Where finance stands on a person's month of commission: a manager approved it, then accounts paid it. */
+export interface CommissionPayout {
+  userId: string;
+  state: "approved" | "paid";
+  /** What was approved — the month's commission payable, frozen then. */
+  amount: number;
+  currency: string;
+  approvedByName: string;
+  approvedAt: string;
+  paidOn?: string | null;
+  paymentMethod?: string | null;
+  reference?: string | null;
+}
+
+/**
+ * This CRM's commission payouts for a month, from finance (signed like everything else) — for My Pay's
+ * "Approved / Paid" (the user, 2026-10-21). Throws when finance can't be asked; My Pay shows the month without them.
+ */
+export async function fetchCommissionPayouts(month: string): Promise<CommissionPayout[]> {
+  if (!financeConfigured()) throw new Error("Finance is not configured");
+  const path = `/api/v1/integrations/crm-commission/payouts?crm=${FINANCE_CRM_CODE}&month=${encodeURIComponent(month)}`;
+  const timestamp = String(Date.now());
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const signature = signRequest(env.FINANCE_INTEGRATION_SECRET, "GET", path, timestamp, nonce, "");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${baseUrl()}${path}`, {
+      headers: {
+        "x-delta-client": env.FINANCE_CLIENT_ID,
+        "x-delta-timestamp": timestamp,
+        "x-delta-nonce": nonce,
+        "x-delta-signature": signature,
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Finance returned ${res.status}`);
+    const body = (await res.json()) as { data?: CommissionPayout[] };
+    return body.data ?? [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+

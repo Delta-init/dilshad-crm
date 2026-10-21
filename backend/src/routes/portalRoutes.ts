@@ -15,6 +15,8 @@ import { leadWorkflow, leadWorkflowLeads } from "../services/leadWorkflowService
 import { leadWorkflowLeadsQuery, leadWorkflowQuery } from "../validations/inactiveLeadValidation.js";
 import { CallFilterError, callsForPortal, recordingLinkForPortal } from "../services/portalCalls.js";
 import { salesTv } from "../services/salesTvService.js";
+import { PAY_FROM_MONTH, payRows } from "../services/salaryService.js";
+import { slabsFor } from "../services/salarySlabs.js";
 
 const router = Router();
 
@@ -65,6 +67,34 @@ router.get(
     const after = typeof req.query.after === "string" ? req.query.after.slice(0, 40) : undefined;
     const parts = req.query.parts === "live" ? "live" : undefined;
     sendSuccess(res, "Sales TV", await salesTv({ after, parts }));
+  }),
+);
+
+/**
+ * The Root portal, for finance's CRM commission page (2026-10-21): a month's My Pay figures, everyone's — the
+ * commission earned, the slab level's percent and what it pays ("payable"), which is what finance approves and pays.
+ */
+router.get(
+  "/pay",
+  wrap(async (req, res) => {
+    const month = typeof req.query.month === "string" ? req.query.month : "";
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      sendError(res, "month is YYYY-MM", 400);
+      return;
+    }
+    if (month < PAY_FROM_MONTH) {
+      sendSuccess(res, "Pay", { month, people: [] });
+      return;
+    }
+    const { slabs } = await slabsFor(month);
+    const rows = await payRows(month, slabs);
+    sendSuccess(res, "Pay", {
+      month,
+      people: rows.map((r) => ({
+        user: r.user, name: r.name, role: r.role, level: r.level.name, percent: r.percent,
+        earned: r.commission.earned, payable: r.commission.payable, notCountedYet: r.commission.notCountedYet,
+      })),
+    });
   }),
 );
 

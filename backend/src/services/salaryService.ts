@@ -7,6 +7,7 @@ import { User } from "../models/User.js";
 import { COUNT_FROM, feeOf, idOf, isSuperAdmin, loadConfig, uaeMonthOf } from "./commissionService.js";
 import { slabsFor, TL_SLAB } from "./salarySlabs.js";
 import type { CommissionSaleState, IRole, ISlabRow, ISlabs, SlabRole } from "../types/index.js";
+import { fetchCommissionPayouts, type CommissionPayout } from "./financeClient.js";
 
 /*
  * A month's salary and commission on the salary slabs (the user, 2026-10-05,
@@ -53,6 +54,8 @@ export interface PayRow {
   next: (Level & { more: number }) | null;
   salary: number;
   percent: number;
+  /** Where finance stands on the month's commission: approved by a manager, then paid (2026-10-21); null when neither. */
+  payout?: CommissionPayout | null;
   commission: {
     /** Earned on sales counted this month, in every role. */
     earned: number;
@@ -197,6 +200,21 @@ export async function payRows(month: string, slabs: ISlabs): Promise<PayRow[]> {
   return rows.sort((a, b) => rank[a.role] - rank[b.role] || b.total - a.total || a.name.localeCompare(b.name));
 }
 
+/** Finance's payouts for a month, a minute at a time — My Pay is opened often; null when finance can't be asked. */
+const payoutCache = new Map<string, { at: number; rows: CommissionPayout[] | null }>();
+async function payoutsFor(month: string): Promise<CommissionPayout[] | null> {
+  const hit = payoutCache.get(month);
+  if (hit && Date.now() - hit.at < 60_000) return hit.rows;
+  let rows: CommissionPayout[] | null;
+  try {
+    rows = await fetchCommissionPayouts(month);
+  } catch {
+    rows = null;
+  }
+  payoutCache.set(month, { at: Date.now(), rows });
+  return rows;
+}
+
 export class SalaryService {
   /**
    * A month's pay as the viewer may see it: their own, and — for a Super
@@ -206,13 +224,17 @@ export class SalaryService {
    */
   async getPay(viewer: { userId: string; role?: IRole }, month: string) {
     const { slabs, from } = await slabsFor(month);
-    const rows = await payRows(month, slabs);
+    const payouts = await payoutsFor(month);
+    const byUser = new Map((payouts ?? []).map((p) => [p.userId, p]));
+    const rows = (await payRows(month, slabs)).map((r) => ({ ...r, payout: byUser.get(r.user) ?? null }));
     const me = rows.find((r) => r.user === viewer.userId) ?? null;
     const everyone = isSuperAdmin(viewer.role) || me?.role === "sm";
     return {
       month,
       slabs,
       slabsFrom: from,
+      /** False when finance couldn't be asked: the payouts aren't shown, not "none". */
+      payoutsKnown: payouts !== null,
       me,
       people: everyone ? rows : null,
       totals: everyone

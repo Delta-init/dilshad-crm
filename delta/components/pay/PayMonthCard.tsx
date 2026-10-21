@@ -6,6 +6,7 @@ import { ArrowRight, Hourglass, Landmark, Trophy, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { aed, monthLabel, ROLE_LABEL } from "@/lib/commission";
 import { LadderBar } from "@/components/pay/SlabLadder";
+import { PayoutBadge } from "@/components/pay/PayoutBadge";
 import type { PayRow, SlabRow } from "@/types/commission";
 
 /*
@@ -21,6 +22,8 @@ interface PayMonthCardProps {
   month: string;
   /** The dashboard's version: fewer words, a link to the page. */
   compact?: boolean;
+  /** Finance answered: show where it stands on the commission (2026-10-21). */
+  payoutsKnown?: boolean;
 }
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -32,7 +35,7 @@ export function basisOf(row: PayRow, own = true): string {
   return own ? "Your own sales" : "Their own sales";
 }
 
-export function PayMonthCard({ row, slab, month, compact = false }: PayMonthCardProps) {
+export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown = false }: PayMonthCardProps) {
   const { level, next } = row;
 
   return (
@@ -75,6 +78,11 @@ export function PayMonthCard({ row, slab, month, compact = false }: PayMonthCard
         <Figure label="Commission earned" value={aed(row.commission.earned)} />
         <Figure label={`Paid at ${row.percent}%`} value={aed(row.commission.payable)} />
       </div>
+      {payoutsKnown && (
+        <div className="mt-2 flex justify-end">
+          <PayoutBadge payout={row.payout} payable={row.commission.payable} compact={compact} />
+        </div>
+      )}
 
       {/* The sales behind it, and the next level */}
       <div className="mt-4 space-y-2">

@@ -67,7 +67,7 @@ export default function MyPayPage() {
         <>
           {data.me ? (
             <>
-              <PayMonthCard row={data.me} slab={data.slabs[data.me.role]} month={data.month} />
+              <PayMonthCard row={data.me} slab={data.slabs[data.me.role]} month={data.month} payoutsKnown={!!data.payoutsKnown} />
               <section className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Your slab · {ROLE_LABEL[data.me.role]}
@@ -102,7 +102,7 @@ export default function MyPayPage() {
                 <Users className="h-3.5 w-3.5" /> Everyone · {monthLabel(data.month)}
               </p>
               {data.people.length ? (
-                <EveryonePayTable people={data.people} totals={data.totals} />
+                <EveryonePayTable people={data.people} totals={data.totals} payoutsKnown={!!data.payoutsKnown} />
               ) : (
                 <p className="rounded-xl border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">
                   Nobody is on the slabs yet — they cover the Sales Manager and everyone in an active team.
