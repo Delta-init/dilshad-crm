@@ -496,6 +496,27 @@ export const useAddFollowUp = (leadId: string) => {
   });
 };
 
+/** Change the next follow-up date (2026-10-22); the API moves its "Follow-up due" reminder with it. */
+export const useChangeFollowUpDate = (leadId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { nextFollowUpAt: string; note?: string }) => {
+      const { data } = await api.patch(`/leads/${leadId}/followup-date`, payload);
+      return data.data as { nextFollowUpAt: string; previous: string | null };
+    },
+    onSuccess: () => {
+      // The lead, its follow-ups, Today's Follow-ups — and the reminder that moved.
+      queryClient.invalidateQueries({ queryKey: LEADS_KEY });
+      queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      toast.success("Follow-up date changed");
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Couldn't change the follow-up date";
+      toast.error(msg);
+    },
+  });
+};
+
 // ─── Today's follow-ups (daily dashboard pop-up) ──────────────────────────────
 
 export interface TodayFollowupLead {

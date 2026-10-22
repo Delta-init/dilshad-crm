@@ -35,6 +35,7 @@ import {
   getLeadSources,
   addFollowUp,
   getFollowUps,
+  changeLeadFollowUpDate,
 } from "../controllers/leadController.js";
 import { getTeamReminders, getTeamReminderOptions } from "../controllers/teamReminderController.js";
 import { authenticate } from "../middleware/auth.js";
@@ -112,5 +113,6 @@ router.delete("/:id/payments/:paymentId",       checkPermission("leads", "edit")
 // ─── Follow-Ups (nested under lead) ──────────────────────────────────────────
 router.get("/:id/followups",  checkPermission("leads", "view"), getFollowUps);
 router.post("/:id/followups", checkPermission("leads", "edit"), addFollowUp);
+router.patch("/:id/followup-date", checkPermission("leads", "edit"), changeLeadFollowUpDate);
 
 export default router;

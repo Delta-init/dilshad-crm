@@ -14,6 +14,7 @@ import { Team } from "../models/Team.js";
 import mongoose from "mongoose";
 import { notifyLeadAssignment } from "../services/pushService.js";
 import { announceNewLeads, collectAssignments } from "../services/leadAlertService.js";
+import { changeFollowUpDate, syncFollowUpDateWithReminder } from "../services/followUpDateService.js";
 
 const leadService = new LeadService();
 const excelService = new ExcelService();
@@ -1483,7 +1484,15 @@ export const updateReminder = async (
 
     if (parsed.data.title    !== undefined) reminder.title    = parsed.data.title;
     if (parsed.data.note     !== undefined) reminder.note     = parsed.data.note;
-    if (parsed.data.remindAt !== undefined) reminder.remindAt = new Date(parsed.data.remindAt);
+    if (parsed.data.remindAt !== undefined) {
+      const from = reminder.remindAt, to = new Date(parsed.data.remindAt);
+      if (!from || from.getTime() !== to.getTime()) {
+        // A new time is a new alert: the scheduler sends one only while these are empty (2026-10-22).
+        syncFollowUpDateWithReminder(lead, reminder, from, to);
+        reminder.remindAt = to;
+        Object.assign(reminder, { notifiedAt: null, warnedAt: null });
+      }
+    }
     if (parsed.data.isDone   !== undefined) reminder.isDone   = parsed.data.isDone;
 
     await lead.save();
@@ -1657,6 +1666,28 @@ export const addFollowUp = async (
     });
 
     sendSuccess(res, "Follow-up logged", entry, 201);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** PATCH /leads/:id/followup-date — change the next follow-up date (moves its "Follow-up due" reminder too). */
+export const changeLeadFollowUpDate = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const parsed = z.object({
+      nextFollowUpAt: z.string().datetime({ offset: true }),
+      note:           z.string().max(1000).optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) {
+      sendError(res, "Pick a valid date and time", 400, parsed.error.flatten().fieldErrors);
+      return;
+    }
+    const result = await changeFollowUpDate(req.params.id, req.user!.userId, new Date(parsed.data.nextFollowUpAt), parsed.data.note);
+    sendSuccess(res, "Follow-up date changed", result);
   } catch (err) {
     next(err);
   }

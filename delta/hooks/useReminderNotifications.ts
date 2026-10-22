@@ -10,8 +10,17 @@ import { useSocket } from "@/hooks/useSocket";
 const LS_KEY = "crm_notified_reminders";
 const TTL_MS = 25 * 60 * 60 * 1000; // 25 hours
 
+/*
+ * One alert per reminder per time: the key carries the time it was due, so a reminder moved to a new time alerts again
+ * at that time (2026-10-22 — moved ones used to stay silent).
+ */
+const alertKey = (id: string, remindAt: string | Date | undefined, kind: "now" | "soon") => {
+  const at = remindAt ? new Date(remindAt).getTime() : NaN;
+  return Number.isFinite(at) ? `${id}@${at}:${kind}` : `${id}:${kind}`;
+};
+
 interface NotifRecord {
-  key: string;   // "<id>:now" | "<id>:soon"
+  key: string;   // "<id>@<due ms>:now" | "<id>@<due ms>:soon"
   ts:  number;   // Date.now() when it was stored
 }
 
@@ -98,8 +107,9 @@ export function useReminderNotifications() {
       leadName:   string;
       title:      string;
       body:       string;
+      remindAt?:  string;
     }) => {
-      const key = `${payload.reminderId}:now`;
+      const key = alertKey(payload.reminderId, payload.remindAt, "now");
       if (notified.current.has(key)) return;
       notified.current.add(key);
       markNotified(key);
@@ -119,8 +129,9 @@ export function useReminderNotifications() {
       title:      string;
       body:       string;
       minsLeft:   number;
+      remindAt?:  string;
     }) => {
-      const key = `${payload.reminderId}:soon`;
+      const key = alertKey(payload.reminderId, payload.remindAt, "soon");
       if (notified.current.has(key)) return;
       notified.current.add(key);
       markNotified(key);
@@ -158,8 +169,9 @@ export function useReminderNotifications() {
       const leadName = (r as { lead?: { name?: string } }).lead?.name ?? "";
 
       // Overdue
-      if (diff <= 0 && !notified.current.has(`${r._id}:now`)) {
-        const key  = `${r._id}:now`;
+      const nowKey = alertKey(r._id, r.remindAt, "now"), soonKey = alertKey(r._id, r.remindAt, "soon");
+      if (diff <= 0 && !notified.current.has(nowKey)) {
+        const key  = nowKey;
         notified.current.add(key);
         markNotified(key);
 
@@ -172,8 +184,8 @@ export function useReminderNotifications() {
       }
 
       // Due within 30 min
-      if (diff > 0 && diff <= THIRTY_MIN_MS && !notified.current.has(`${r._id}:soon`)) {
-        const key  = `${r._id}:soon`;
+      if (diff > 0 && diff <= THIRTY_MIN_MS && !notified.current.has(soonKey)) {
+        const key  = soonKey;
         notified.current.add(key);
         markNotified(key);
 

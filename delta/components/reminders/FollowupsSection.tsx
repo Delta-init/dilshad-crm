@@ -7,11 +7,13 @@ import { AlertCircle, CalendarClock, ChevronDown, PhoneCall } from "lucide-react
 import { cn } from "@/lib/utils";
 import { useMyTodayFollowups, type TodayFollowupLead } from "@/hooks/useLeads";
 import type { ReminderWithLead } from "@/types/lead";
+import { ChangeFollowUpDate } from "@/components/leads/ChangeFollowUpDate";
 
 /*
  * Follow-ups on the Reminders page (the user, 2026-10-20: "why is it not showing in the reminders?"): the follow-up
  * dates on the leads — the same list as the daily Today's Follow-ups pop-up — beside the reminders, so everything
  * pending is in one place. A follow-up that already has the same reminder (one made with it) isn't shown twice.
+ * Each one's date can be changed here (2026-10-22) — its reminder moves with it.
  */
 
 const fmt = (iso: string) =>
@@ -37,11 +39,13 @@ export function FollowupsSection({ reminders }: { reminders: ReminderWithLead[] 
 
   if (isLoading || overdue.length + today.length + untimed.length === 0) return null;
 
-  const Row = ({ lead, late }: { lead: TodayFollowupLead; late?: boolean }) => {
+  // A plain function, not a component made in render: a refresh of the list must not remount a row (and close its
+  // Change dialog mid-edit).
+  const row = (lead: TodayFollowupLead, late?: boolean) => {
     const missed = !!lead.missedFollowUpWarnedAt && !!lead.nextFollowUpAt && new Date(lead.missedFollowUpWarnedAt) >= new Date(lead.nextFollowUpAt);
     return (
-      <Link href={`/leads/${lead._id}`}
-        className={cn("flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/30", late ? "border-red-500/30 bg-red-500/5" : "border-border bg-card")}>
+      <div key={lead._id} className={cn("flex items-center gap-2 rounded-xl border pr-3 transition-colors hover:bg-accent/30", late ? "border-red-500/30 bg-red-500/5" : "border-border bg-card")}>
+      <Link href={`/leads/${lead._id}`} className="flex min-w-0 flex-1 items-center gap-3 p-3 pr-0">
         <PhoneCall className={cn("h-4 w-4 shrink-0", late ? "text-red-400" : "text-muted-foreground")} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{lead.name || "Unnamed lead"}</p>
@@ -52,6 +56,8 @@ export function FollowupsSection({ reminders }: { reminders: ReminderWithLead[] 
           {missed && <span className="mt-0.5 inline-block rounded-full border border-red-500/30 bg-red-500/10 px-1.5 text-[10px] text-red-400">missed</span>}
         </div>
       </Link>
+      <ChangeFollowUpDate compact leadId={lead._id} leadName={lead.name} current={lead.nextFollowUpAt} className="shrink-0" />
+      </div>
     );
   };
 
@@ -66,12 +72,12 @@ export function FollowupsSection({ reminders }: { reminders: ReminderWithLead[] 
           </span>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">From your leads&apos; follow-up dates — the same list as the Today&apos;s Follow-ups pop-up. Update the lead to clear one.</p>
-      {overdue.length > 0 && <div className="space-y-2">{overdue.map((l) => <Row key={l._id} lead={l} late />)}</div>}
+      <p className="text-xs text-muted-foreground">From your leads&apos; follow-up dates — the same list as the Today&apos;s Follow-ups pop-up. Change a date here, or update the lead to clear one.</p>
+      {overdue.length > 0 && <div className="space-y-2">{overdue.map((l) => row(l, true))}</div>}
       {today.length > 0 && (
         <div className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground">Later today</p>
-          {today.map((l) => <Row key={l._id} lead={l} />)}
+          {today.map((l) => row(l))}
         </div>
       )}
       {untimed.length > 0 && (
@@ -80,7 +86,7 @@ export function FollowupsSection({ reminders }: { reminders: ReminderWithLead[] 
             <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showUntimed && "rotate-180")} />
             {untimed.length} in Follow Up with no time set
           </button>
-          {showUntimed && untimed.map((l) => <Row key={l._id} lead={l} />)}
+          {showUntimed && untimed.map((l) => row(l))}
         </div>
       )}
     </motion.section>

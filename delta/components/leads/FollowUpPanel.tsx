@@ -14,22 +14,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useFollowUps, useAddFollowUp } from "@/hooks/useLeads";
 import type { FollowUpEntry } from "@/hooks/useLeads";
+import { ChangeFollowUpDate, toGstInput, fromGstInput } from "@/components/leads/ChangeFollowUpDate";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function toDatetimeLocal(iso: string): string {
-  return new Date(iso)
-    .toLocaleString("sv-SE", { timeZone: "Asia/Kolkata" })
-    .slice(0, 16)
-    .replace(" ", "T");
-}
+// Dubai time, as every other date in the CRM (2026-10-22: this panel read and wrote India time, so a next follow-up
+// typed as 3:00 pm was saved for 2:30 pm GST).
+const toDatetimeLocal = toGstInput;
 
-function formatIST(iso: string) {
-  return new Date(iso).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
+function formatGST(iso: string) {
+  return new Date(iso).toLocaleString("en-GB", {
+    timeZone: "Asia/Dubai",
     day: "2-digit", month: "short", year: "numeric",
     hour: "2-digit", minute: "2-digit", hour12: true,
-  }) + " IST";
+  }) + " GST";
 }
 
 function relativeTime(iso: string): string {
@@ -65,9 +63,9 @@ function LogForm({ leadId, onCancel }: LogFormProps) {
     mutate(
       {
         note:           note.trim() || undefined,
-        followedUpAt:   new Date(`${followedUpAt}:00+05:30`).toISOString(),
+        followedUpAt:   fromGstInput(followedUpAt).toISOString(),
         nextFollowUpAt: nextFollowUpAt
-          ? new Date(`${nextFollowUpAt}:00+05:30`).toISOString()
+          ? fromGstInput(nextFollowUpAt).toISOString()
           : null,
       },
       { onSuccess: onCancel },
@@ -151,7 +149,7 @@ function FollowUpItem({ entry }: { entry: FollowUpEntry }) {
       </div>
       <div className="pb-4 min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium text-foreground">{formatIST(entry.followedUpAt)}</span>
+          <span className="text-xs font-medium text-foreground">{formatGST(entry.followedUpAt)}</span>
           <span className="text-xs text-muted-foreground">{relativeTime(entry.followedUpAt)}</span>
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">
@@ -173,7 +171,7 @@ function FollowUpItem({ entry }: { entry: FollowUpEntry }) {
             {isOverdue(entry.nextFollowUpAt)
               ? <AlertTriangle className="h-3 w-3 flex-shrink-0" />
               : <Clock className="h-3 w-3 flex-shrink-0" />}
-            <span>Next: {formatIST(entry.nextFollowUpAt)}</span>
+            <span>Next: {formatGST(entry.nextFollowUpAt)}</span>
             {isOverdue(entry.nextFollowUpAt) && (
               <Badge variant="destructive" className="text-[10px] px-1 py-0 ml-auto">Overdue</Badge>
             )}
@@ -189,9 +187,11 @@ function FollowUpItem({ entry }: { entry: FollowUpEntry }) {
 interface FollowUpPanelProps {
   leadId: string;
   canEdit: boolean;
+  /** In Follow Up with no date yet: the date can still be set from here. */
+  leadInFollowUp?: boolean;
 }
 
-export function FollowUpPanel({ leadId, canEdit }: FollowUpPanelProps) {
+export function FollowUpPanel({ leadId, canEdit, leadInFollowUp = false }: FollowUpPanelProps) {
   const [showForm,    setShowForm]    = useState(false);
   const [showAll,     setShowAll]     = useState(false);
 
@@ -227,15 +227,19 @@ export function FollowUpPanel({ leadId, canEdit }: FollowUpPanelProps) {
                 : "bg-blue-500/10 text-blue-400 border-blue-500/20",
             )}>
               <Clock className="h-3 w-3" />
-              {overdue ? "Overdue" : "Due"}: {formatIST(nextDue)}
+              {overdue ? "Overdue" : "Due"}: {formatGST(nextDue)}
             </span>
+          )}
+
+          {canEdit && (nextDue || leadInFollowUp) && (
+            <ChangeFollowUpDate leadId={leadId} current={nextDue} className={nextDue ? "" : "ml-auto"} />
           )}
 
           {canEdit && !showForm && (
             <Button
               size="sm"
               variant="outline"
-              className="ml-auto gap-1.5 text-xs h-7"
+              className={cn("gap-1.5 text-xs h-7", !nextDue && !leadInFollowUp && "ml-auto")}
               onClick={() => setShowForm(true)}
             >
               <Plus className="h-3 w-3" />

@@ -7,6 +7,7 @@ import { BellRing, CalendarClock, ChevronRight, AlarmClockOff } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { useMyTodayFollowups, type TodayFollowupLead } from "@/hooks/useLeads";
 import { useAuthStore } from "@/lib/store/authStore";
+import { ChangeFollowUpDate } from "@/components/leads/ChangeFollowUpDate";
 
 // Today's date in GST as YYYY-MM-DD
 function todayGST(): string {
@@ -40,7 +41,7 @@ function isOverdue(iso: string | null): boolean {
 /**
  * Daily pop-up on the dashboard listing the user's follow-up leads due today
  * (plus overdue ones). Shows automatically once per day per user; the row
- * links straight to the lead.
+ * links straight to the lead, and its date can be changed from it (2026-10-22).
  */
 export function DailyFollowupsPopup() {
   const { user } = useAuthStore();
@@ -67,13 +68,15 @@ export function DailyFollowupsPopup() {
   const today       = followups.filter((f) => f.nextFollowUpAt && !isOverdue(f.nextFollowUpAt));
   const unscheduled = followups.filter((f) => !f.nextFollowUpAt);
 
-  function Row({ lead }: { lead: TodayFollowupLead }) {
+  // A plain function, not a component made in render: a refresh must not remount a row (and close its Change dialog).
+  function row(lead: TodayFollowupLead) {
     const late = isOverdue(lead.nextFollowUpAt);
     return (
+      <div key={lead._id} className="flex items-center gap-2 rounded-xl border border-border/40 bg-muted/10 pr-2.5 hover:border-primary/40 hover:bg-primary/5 transition-all group">
       <Link
         href={`/leads/${lead._id}`}
         onClick={() => setOpen(false)}
-        className="flex items-center gap-3 rounded-xl border border-border/40 bg-muted/10 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-all group"
+        className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-3"
       >
         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${late ? "bg-red-500/10" : lead.nextFollowUpAt ? "bg-blue-500/10" : "bg-amber-500/10"}`}>
           <CalendarClock className={`h-4 w-4 ${late ? "text-red-500" : lead.nextFollowUpAt ? "text-blue-500" : "text-amber-500"}`} />
@@ -111,6 +114,8 @@ export function DailyFollowupsPopup() {
         </div>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
       </Link>
+      <ChangeFollowUpDate compact leadId={lead._id} leadName={lead.name} current={lead.nextFollowUpAt} className="shrink-0" />
+      </div>
     );
   }
 
@@ -177,7 +182,7 @@ export function DailyFollowupsPopup() {
                       <p className="flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-red-500">
                         <AlarmClockOff className="h-3 w-3" /> Overdue
                       </p>
-                      {overdue.map((l) => <Row key={l._id} lead={l} />)}
+                      {overdue.map((l) => row(l))}
                     </>
                   )}
                   {today.length > 0 && (
@@ -185,7 +190,7 @@ export function DailyFollowupsPopup() {
                       <p className="px-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                         Due today
                       </p>
-                      {today.map((l) => <Row key={l._id} lead={l} />)}
+                      {today.map((l) => row(l))}
                     </>
                   )}
                   {unscheduled.length > 0 && (
@@ -193,7 +198,7 @@ export function DailyFollowupsPopup() {
                       <p className="px-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-amber-500">
                         Follow-up leads — no time set
                       </p>
-                      {unscheduled.map((l) => <Row key={l._id} lead={l} />)}
+                      {unscheduled.map((l) => row(l))}
                     </>
                   )}
                 </div>
