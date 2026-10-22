@@ -14,8 +14,9 @@ import { ACADEMY_CURRENCY } from "../types/index.js";
  * it, over GET /api/v1/service/sales-tv — the same shape as the Sales CRM's:
  *
  *   people    the sales staff — members and leaders of an active team,
- *             active, a Super Admin too when in one (the CRM's own
- *             Leaderboard leaves them out), not excluded from commission —
+ *             active, not a Super Admin (as the CRM's own Leaderboard; the
+ *             user, 2026-10-22: "remove dilshad from the Sales TV"), not
+ *             excluded from commission —
  *             with this month's and today's (the Dubai day) closings, this
  *             month's revenue, and today's 3CX calls, connected and talk
  *             time (the Leaderboard's own counts)
@@ -101,8 +102,9 @@ export async function salesTv(q: { after?: string; parts?: string }): Promise<Sa
   const base: SalesTv = { crm: SALES_TV_CRM, generatedAt: new Date(now).toISOString(), onBreak, closes };
   if (q.parts === "live") return base;
 
-  // Super Admins too, but only those in an active team (filtered below) — dilshad leads Remote's team (2026-10-20).
-  const board = await new LeaderboardService().getLeaderboard(undefined, "revenue", { withSuperAdmins: true });
+  // No Super Admins, as on the CRM's own Leaderboard: dilshad (who leads Remote's team) was shown from 2026-10-20 until the
+  // user asked for him off the TV (2026-10-22).
+  const board = await new LeaderboardService().getLeaderboard(undefined, "revenue");
   const todayClosings = await Student.aggregate<{ _id: Types.ObjectId | null; n: number }>([
     { $match: { enrollmentDate: { $gte: midnight, $lt: new Date(midnight.getTime() + DAY_MS) }, status: { $ne: "dropped" } } },
     { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
