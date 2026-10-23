@@ -37,6 +37,9 @@ export interface Payment {
   addedBy: User | string;
   createdAt?: string;
   updatedAt?: string;
+  /** How it was paid and its receipt (2026-10-23); absent on payments from before. */
+  method?: string;
+  receipt?: { name?: string; url: string; key: string; size?: number; mimeType?: string };
   /** Sent to finance as a balance payment (2026-10-23). */
   finance?: { externalId: string; method: string; sentAt: string };
 }

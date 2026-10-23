@@ -172,6 +172,8 @@ const link = (l: { leadId: string }, who = "Sally") => call("GET", `/leads/${l.l
 const stateOf = (a: Answer, id: string) => a.body.data?.payments?.find((p: any) => p.id === id);
 const leadDoc = async (l: { leadId: string }) => (await db.collection("leads").findOne({ _id: new Types.ObjectId(l.leadId) }))!;
 const receipt = { name: "pos.jpg", url: "https://files.test.local/balance-receipts/pos.jpg", key: "balance-receipts/pos.jpg", size: 1200, mimeType: "image/jpeg" };
+/** A receipt as the lead page uploads it, for that lead (enrolment-receipts/<lead>/…). */
+const leadReceipt = (l: { leadId: string }, name = "slip.jpg") => ({ name, url: `https://files.test.local/enrolment-receipts/${l.leadId}/${name}`, key: `enrolment-receipts/${l.leadId}/${name}`, mimeType: "image/jpeg" });
 
 try {
   section("Case 1 — which payments finance has");
@@ -194,10 +196,10 @@ try {
   section("Case 2 — no payment on a closed lead without finance");
   r = await call("POST", `/leads/${jasheer.leadId}/payments`, "Sally", { amount: 100, note: "Cash", paidAt: today });
   check("refused on a lead whose close is in finance, saying where to send it", r.status === 409 && /send the payment to finance/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
-  r = await call("POST", `/leads/${open.leadId}/payments`, "Sally", { amount: 100, note: "Cash", paidAt: today });
-  check("a lead not closed takes one as before", r.status === 201);
-  r = await call("POST", `/leads/${notSent.leadId}/payments`, "Sally", { amount: 100, note: "Cash", paidAt: today });
-  check("…and one not in finance yet", r.status === 201);
+  r = await call("POST", `/leads/${open.leadId}/payments`, "Sally", { amount: 100, note: "Cash", paidAt: today, method: "cash", receipt: leadReceipt(open) });
+  check("a lead not closed takes one, with its method and receipt", r.status === 201, `${r.status} ${r.body.message}`);
+  r = await call("POST", `/leads/${notSent.leadId}/payments`, "Sally", { amount: 100, note: "Cash", paidAt: today, method: "cash", receipt: leadReceipt(notSent) });
+  check("…and one not in finance yet", r.status === 201, `${r.status} ${r.body.message}`);
 
   section("Case 3 — sending the POS payment that never went");
   const pos = jasheer.pays[1]!;
@@ -246,6 +248,31 @@ try {
   check("not in finance yet: refused", r.status === 409 && /isn't in finance/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
   r = await call("POST", `/leads/${fresh.leadId}/payments/finance`, "Root", { ...nw, key: "kroot1234567", amount: 100 });
   check("a Super Admin may send one", r.status === 201, `${r.status} ${r.body.message}`);
+
+  section("Case 5 — a payment on the lead asks its method and receipt, as at the close (2026-10-23)");
+  const bare = await lead({ close: false, payments: [] });
+  r = await call("POST", `/leads/${bare.leadId}/payments`, "Sally", { amount: 250, paidAt: today });
+  check("without how it was paid or the receipt: refused", r.status === 400 && /how it was paid and attach the receipt/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
+  r = await call("POST", `/leads/${bare.leadId}/payments`, "Sally", { amount: 250, paidAt: today, method: "card" });
+  check("…the receipt is needed too", r.status === 400, `${r.status} ${r.body.message}`);
+  r = await call("POST", `/leads/${bare.leadId}/payments`, "Sally", { amount: 250, paidAt: today, method: "bitcoin", receipt: leadReceipt(bare) });
+  check("…a method the close doesn't take: refused", r.status === 400, `${r.status} ${r.body.message}`);
+  r = await call("POST", `/leads/${bare.leadId}/payments`, "Sally", { amount: 250, paidAt: today, method: "card", receipt: leadReceipt(jasheer) });
+  check("…a receipt uploaded for another lead: refused", r.status === 400 && /uploaded for this lead/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
+  r = await call("POST", `/leads/${bare.leadId}/payments`, "Sally", { amount: 250, paidAt: today, note: "Advance", method: "card", receipt: leadReceipt(bare) });
+  let bareDoc = await leadDoc(bare);
+  const card = (bareDoc.payments as any[])[0];
+  check("with both: kept on the lead, method and receipt", r.status === 201 && card?.method === "card" && card.receipt?.key === `enrolment-receipts/${bare.leadId}/slip.jpg` && card.receipt.name === "slip.jpg", `${r.status} ${JSON.stringify(card)}`);
+  r = await call("POST", `/leads/${bare.leadId}/payments`, "Sally", { amount: 300, paidAt: today, note: "Collected at enrolment — Market Breakout · Cash" });
+  check("the close's own payment is taken without them (the close carries them)", r.status === 201, `${r.status} ${r.body.message}`);
+  r = await call("PUT", `/leads/${bare.leadId}/payments/${String(card._id)}`, "Sally", { method: "bank_transfer", receipt: leadReceipt(bare, "transfer.pdf") });
+  bareDoc = await leadDoc(bare);
+  const changed = (bareDoc.payments as any[]).find((x) => String(x._id) === String(card._id));
+  check("its method and receipt can be corrected", r.status === 200 && changed?.method === "bank_transfer" && changed.receipt?.name === "transfer.pdf", `${r.status} ${JSON.stringify(changed)}`);
+  r = await call("PUT", `/leads/${bare.leadId}/payments/${String(card._id)}`, "Sally", { receipt: leadReceipt(jasheer, "x.jpg") });
+  check("…not to another lead's receipt", r.status === 400, `${r.status} ${r.body.message}`);
+  r = await call("PUT", `/leads/${jasheer.leadId}/payments/${jasheer.pays[1]}`, "Sally", { method: "cash" });
+  check("a payment sent to finance keeps its method", r.status === 409, `${r.status} ${r.body.message}`);
 } finally {
   server.close();
   fin.stop(true);

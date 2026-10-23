@@ -393,6 +393,9 @@ export interface IPayment {
   note?: string;
   paidAt: Date;
   addedBy: Types.ObjectId | IUser;
+  /** How it was paid and its receipt (2026-10-23); absent on payments from before. */
+  method?: EnrolmentPaymentMethod;
+  receipt?: { name?: string; url: string; key: string; size?: number; mimeType?: string; uploadedAt?: Date };
   /** Sent to finance as a balance payment (2026-10-23). */
   finance?: { externalId: string; method: string; sentAt: Date };
   createdAt?: Date;

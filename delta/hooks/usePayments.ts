@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/toast";
 import api from "@/lib/axios";
 import type { RecordInput, RecordedPayment } from "@/hooks/useBalancePayments";
+import type { StoredReceipt } from "@/types/student";
 
 function errMsg(e: unknown, fallback: string) {
   return (
@@ -13,7 +14,7 @@ function errMsg(e: unknown, fallback: string) {
 export const useAddPayment = (leadId: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { amount: number; note?: string; paidAt: string }) => {
+    mutationFn: async (data: { amount: number; note?: string; paidAt: string; method?: string; receipt?: StoredReceipt | null }) => {
       const res = await api.post(`/leads/${leadId}/payments`, data);
       return res.data.data;
     },
@@ -33,7 +34,7 @@ export const useUpdatePayment = (leadId: string) => {
       data,
     }: {
       paymentId: string;
-      data: { amount?: number; note?: string; paidAt?: string };
+      data: { amount?: number; note?: string; paidAt?: string; method?: string; receipt?: StoredReceipt };
     }) => {
       const res = await api.put(`/leads/${leadId}/payments/${paymentId}`, data);
       return res.data.data;

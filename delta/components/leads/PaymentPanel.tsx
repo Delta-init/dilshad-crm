@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   DollarSign, Plus, Pencil, Trash2,
-  TrendingUp, CircleDollarSign, Wallet, Calendar, AlertTriangle, Send, Landmark,
+  TrendingUp, CircleDollarSign, Wallet, Calendar, AlertTriangle, Send, Landmark, Paperclip, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,9 @@ import { useAddPayment, useUpdatePayment, useDeletePayment, useLeadPaymentFinanc
 import { BalancePaymentDialog } from "@/components/students/BalancePaymentDialog";
 import { fmtMinor } from "@/hooks/useBalancePayments";
 import { toast } from "@/lib/toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { uploadReceipt } from "@/hooks/useStudents";
+import { ENROLMENT_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type EnrolmentPaymentMethod, type StoredReceipt } from "@/types/student";
 import { useCurrencyStore } from "@/lib/store/currencyStore";
 import { fmtCurrency, getCurrencySymbol } from "@/lib/currency";
 import { toGstDateISO } from "@/lib/utils";
@@ -40,22 +43,45 @@ function formatDate(iso: string) {
 
 // ── Payment Form ─────────────────────────────────────────────────────────────
 
-interface FormData { amount: string; note: string; paidAt: string }
+interface FormData { amount: string; note: string; paidAt: string; method: string; receipt: StoredReceipt | null }
 
 interface PaymentFormProps {
+  leadId: string;
   initial?: FormData;
+  /** How it was paid and the receipt are asked, as at the close (2026-10-23) — not of the close's own payments. */
+  requireProof: boolean;
   onSave: (d: FormData) => void;
   onCancel: () => void;
   saving: boolean;
 }
 
-function PaymentForm({ initial, onSave, onCancel, saving }: PaymentFormProps) {
+const methodName = (m?: string) => (m ? PAYMENT_METHOD_LABELS[m as EnrolmentPaymentMethod] ?? m.replace(/_/g, " ") : "");
+
+function PaymentForm({ leadId, initial, requireProof, onSave, onCancel, saving }: PaymentFormProps) {
   const today = toGstDateISO(new Date());
   const [amount, setAmount] = useState(initial?.amount ?? "");
   const [note,   setNote]   = useState(initial?.note   ?? "");
   const [paidAt, setPaidAt] = useState(initial?.paidAt ?? today);
+  const [method, setMethod] = useState(initial?.method ?? "");
+  const [receipt, setReceipt] = useState<StoredReceipt | null>(initial?.receipt ?? null);
+  const [uploading, setUploading] = useState(false);
 
-  const valid = !!amount && Number(amount) > 0;
+  // The receipt goes up as it is picked, as at the close, so saving only names it.
+  async function pick(file: File | null) {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { toast.error("A receipt can be at most 10 MB"); return; }
+    setUploading(true);
+    try {
+      setReceipt(await uploadReceipt(leadId, file));
+    } catch (err) {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "The receipt could not be uploaded");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const valid = !!amount && Number(amount) > 0 && !uploading && (!requireProof || (!!method && !!receipt));
+  const missing = [!method && "how it was paid", !receipt && "the receipt"].filter(Boolean).join(" and ");
 
   return (
     <motion.div
@@ -90,6 +116,29 @@ function PaymentForm({ initial, onSave, onCancel, saving }: PaymentFormProps) {
           />
         </div>
       </div>
+      <div className="flex gap-2">
+        <div className="flex-1 space-y-1">
+          <p className="text-xs text-muted-foreground">How it was paid{requireProof ? " *" : ""}</p>
+          <Select value={method || undefined} onValueChange={setMethod}>
+            <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Choose a method" /></SelectTrigger>
+            <SelectContent>
+              {ENROLMENT_PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{PAYMENT_METHOD_LABELS[m]}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex-1 space-y-1">
+          <p className="text-xs text-muted-foreground">Receipt{requireProof ? " *" : ""}</p>
+          <label className={cn(
+            "flex h-8 cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-2 text-xs text-muted-foreground hover:border-primary",
+            uploading && "pointer-events-none opacity-60",
+          )}>
+            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+            <span className="truncate">{uploading ? "Uploading…" : receipt ? receipt.name : "Attach a photo or PDF"}</span>
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,application/pdf" className="hidden"
+              onChange={(e) => { void pick(e.target.files?.[0] ?? null); e.target.value = ""; }} />
+          </label>
+        </div>
+      </div>
       <Textarea
         placeholder="Note (optional)"
         value={note}
@@ -102,7 +151,8 @@ function PaymentForm({ initial, onSave, onCancel, saving }: PaymentFormProps) {
         <Button
           size="sm"
           disabled={!valid || saving}
-          onClick={() => onSave({ amount, note, paidAt })}
+          onClick={() => onSave({ amount, note, paidAt, method, receipt })}
+          title={requireProof && missing ? `Still needed: ${missing}` : undefined}
         >
           {saving ? "Saving…" : initial ? "Update" : "Add Payment"}
         </Button>
@@ -297,9 +347,11 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
         <AnimatePresence>
           {adding && (
             <PaymentForm
+              leadId={leadId}
+              requireProof
               onSave={(d) =>
                 addMut.mutate(
-                  { amount: Number(d.amount), note: d.note || undefined, paidAt: new Date(d.paidAt).toISOString() },
+                  { amount: Number(d.amount), note: d.note || undefined, paidAt: new Date(d.paidAt).toISOString(), method: d.method, receipt: d.receipt },
                   { onSuccess: () => setAdding(false) },
                 )
               }
@@ -340,16 +392,25 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
               >
                 {isEditing ? (
                   <PaymentForm
+                    leadId={leadId}
+                    // A payment from before keeps working; once it has them, its method and receipt stay asked.
+                    requireProof={Boolean(p.method || p.receipt)}
                     initial={{
                       amount: String(p.amount),
                       note:   p.note ?? "",
                       paidAt: toDateInput(p.paidAt),
+                      method: p.method ?? "",
+                      receipt: p.receipt ? { name: p.receipt.name || "Receipt", url: p.receipt.url, key: p.receipt.key, ...(p.receipt.size ? { size: p.receipt.size } : {}), ...(p.receipt.mimeType ? { mimeType: p.receipt.mimeType } : {}) } : null,
                     }}
                     onSave={(d) =>
                       updateMut.mutate(
                         {
                           paymentId: p._id,
-                          data: { amount: Number(d.amount), note: d.note || undefined, paidAt: new Date(d.paidAt).toISOString() },
+                          data: {
+                            amount: Number(d.amount), note: d.note || undefined, paidAt: new Date(d.paidAt).toISOString(),
+                            ...(d.method ? { method: d.method } : {}),
+                            ...(d.receipt ? { receipt: d.receipt } : {}),
+                          },
                         },
                         { onSuccess: () => setEditingId(null) },
                       )
@@ -375,7 +436,13 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
                         <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                           <Calendar className="h-3 w-3" />
                           {formatDate(p.paidAt)}
+                          {p.method && <span>· {methodName(p.method)}</span>}
                         </p>
+                        {p.receipt?.url && (
+                          <a href={p.receipt.url} target="_blank" rel="noreferrer" className="mt-0.5 inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                            <Paperclip className="h-3 w-3" /> {p.receipt.name || "Receipt"}
+                          </a>
+                        )}
                         <FinanceTag state={stateOf(p._id)} />
                         {canEdit && stateOf(p._id)?.state === "not_sent" && link?.invoice?.currency === "AED" && (
                           <Button variant="outline" size="sm" className="mt-1.5 h-7 gap-1 text-xs" onClick={() => startSend(p)}>
@@ -420,7 +487,11 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
           name={leadName || "this client"}
           invoice={link.invoice}
           waitingMinor={link.waitingMinor}
-          preset={sending.preset ? { amount: sending.preset.amount, paidOn: toGstDateISO(new Date(sending.preset.paidAt)), note: sending.preset.note } : undefined}
+          preset={sending.preset ? {
+            amount: sending.preset.amount, paidOn: toGstDateISO(new Date(sending.preset.paidAt)), note: sending.preset.note,
+            method: sending.preset.method,
+            receipt: sending.preset.receipt ? { name: sending.preset.receipt.name || "Receipt", url: sending.preset.receipt.url, key: sending.preset.receipt.key } : null,
+          } : undefined}
           sending={sendMut.isPending}
           send={(input, done) => sendMut.mutate({ ...input, ...(sending.preset ? { paymentId: sending.preset._id } : {}) }, { onSuccess: done })}
           onClose={() => setSending(null)}

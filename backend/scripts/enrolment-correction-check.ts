@@ -336,7 +336,9 @@ await refused("a payment without its receipt: 422", correction({ payments: [pay(
 await refused("no payments at all: 422", correction({ payments: undefined }), 422, /needs its payments/);
 await refused("the lead's own 200 left out: 422", correction({ paidAmount: 600, payments: [pay("card", 500), pay("tabby", 100)] }), 422, /holds 200 of its own/);
 await refused("the lead's own money at another figure: 409, open it again", correction({ paidAmount: 750, payments: [pay("cash", 150, "own", { collectedBefore: true }), pay("card", 500), pay("tabby", 100)] }), 409, /changed while this was open/);
-await refused("two payments both the lead's own: 422", correction({ paidAmount: 900, payments: [pay("cash", 200, "a", { collectedBefore: true }), pay("cash", 200, "b", { collectedBefore: true }), pay("card", 500)] }), 422, /Only one payment/);
+// Several rows may be the lead's own now — one per lead payment with its method and receipt (2026-10-23) — but together
+// they must be what the lead holds.
+await refused("two of the lead's own coming to more than it holds: 409", correction({ paidAmount: 900, payments: [pay("cash", 200, "a", { collectedBefore: true }), pay("cash", 200, "b", { collectedBefore: true }), pay("card", 500)] }), 409, /changed while this was open/);
 await refused("a bonus without its amount: 422", correction({ bonusAmount: 0 }), 422, /the bonus amount/);
 await refused("not said whether a bonus was given: 422", correction({ hasBonus: undefined }), 422, /whether a bonus was given/);
 
@@ -365,6 +367,17 @@ const fresh = await closedSale();
 approvalOf.set(fresh.id, "returned"); // the outbox still says "pending"
 r = await call("PUT", `/students/${fresh.id}/correction`, "Theertha", correction({ name: "Fresh Client" }));
 check("corrected all the same: 200", r.status === 200 && (await Student.findById(fresh.id).lean())?.name === "Fresh Client", `${r.status} ${r.body.message}`);
+
+section("Case 5b — the lead's own money as two payments, each with its method and receipt (2026-10-23)");
+const split = await closedSale();
+approvalOf.set(split.id, "returned");
+r = await call("PUT", `/students/${split.id}/correction`, "Theertha", correction({
+  payments: [pay("cash", 120, "own-cash", { collectedBefore: true }), pay("card", 80, "own-card", { collectedBefore: true }), pay("card", 500, "card-new"), pay("tabby", 100, "tabby-new")],
+}));
+const splitDoc = await Student.findById(split.id).lean();
+const ownKept = (splitDoc?.payments ?? []).filter((p) => p.collectedBefore);
+check("corrected with the lead's 200 as cash 120 + card 80: 200, both kept as the lead's own", r.status === 200 && ownKept.length === 2
+  && ownKept.map((p) => `${p.method}:${p.amount}`).join(",") === "cash:120,card:80", `${r.status} ${r.body.message} ${JSON.stringify(ownKept)}`);
 
 section("Case 6 — an enrolment from before payments were listed; \"Send again\"; the receipt upload");
 const oldLead = new Types.ObjectId();

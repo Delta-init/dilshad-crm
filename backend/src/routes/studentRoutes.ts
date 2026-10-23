@@ -53,7 +53,8 @@ router.get("/closings/daily", authenticate, checkPermission("closings", "view"),
 router.post(
   "/receipts/:leadId",
   authenticate,
-  checkAnyPermission(["students", "create"], ["enrolments", "edit"]),
+  // …and with every payment added on a lead (2026-10-23), so whoever may edit the lead.
+  checkAnyPermission(["students", "create"], ["enrolments", "edit"], ["leads", "edit"]),
   receiptUpload.single("file"),
   uploadPaymentReceipt,
 );

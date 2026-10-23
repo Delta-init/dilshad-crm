@@ -1,7 +1,7 @@
 import type { Response, NextFunction } from "express";
 import { z } from "zod";
 import * as XLSX from "xlsx";
-import type { AuthenticatedRequest, IRole } from "../types/index.js";
+import { ENROLMENT_PAYMENT_METHODS, type AuthenticatedRequest, type IRole } from "../types/index.js";
 import { LeadService, autoSplitLeadPublic } from "../services/leadService.js";
 import { sendWelcomeToLead } from "../services/whatsappCloudService.js";
 import { ExcelService } from "../services/excelService.js";
@@ -1530,7 +1530,26 @@ const paymentBodySchema = z.object({
   amount: z.number().min(0, "Amount cannot be negative"),
   note:   z.string().max(500).optional(),
   paidAt: z.string().min(1, "paidAt is required"),
+  // How it was paid and its receipt, as at the close (2026-10-23).
+  method: z.enum(ENROLMENT_PAYMENT_METHODS).optional(),
+  receipt: z.object({
+    name: z.string().max(200).optional(),
+    url: z.string().regex(/^https?:\/\//, "The receipt has no link"),
+    key: z.string().min(1).max(500),
+    size: z.number().optional(),
+    mimeType: z.string().max(100).optional(),
+  }).optional(),
 });
+
+/** A payment the close itself puts on the lead — "Collected at enrolment — …": its method and receipt are on the close. */
+const fromTheClose = (note?: string | null) => /^Collected at enrolment\b/.test(note ?? "");
+
+/** The receipt as kept on the lead — only one uploaded for this lead (enrolment-receipts/<lead>/…). */
+function leadReceipt(leadId: string, r: z.infer<typeof paymentBodySchema>["receipt"]) {
+  if (!r) return undefined;
+  if (!r.key.startsWith(`enrolment-receipts/${leadId}/`)) return null;
+  return { name: r.name || "Receipt", url: r.url, key: r.key, ...(r.size ? { size: r.size } : {}), ...(r.mimeType ? { mimeType: r.mimeType } : {}), uploadedAt: new Date() };
+}
 
 /** POST /leads/:id/payments */
 export const addPayment = async (
@@ -1553,11 +1572,22 @@ export const addPayment = async (
       return;
     }
 
+    // How it was paid and its receipt are asked, as at the close (2026-10-23) — but not of the close's own payments,
+    // whose method and receipt the close itself carries.
+    const receipt = leadReceipt(String(lead._id), parsed.data.receipt);
+    if (receipt === null) { sendError(res, "That receipt wasn't uploaded for this lead — attach it again.", 400); return; }
+    if (!fromTheClose(parsed.data.note) && (!parsed.data.method || !receipt)) {
+      sendError(res, "Say how it was paid and attach the receipt, as at the close.", 400);
+      return;
+    }
+
     lead.payments.push({
       amount:  parsed.data.amount,
       note:    parsed.data.note,
       paidAt:  new Date(parsed.data.paidAt),
       addedBy: new mongoose.Types.ObjectId(req.user!.userId),
+      ...(parsed.data.method ? { method: parsed.data.method } : {}),
+      ...(receipt ? { receipt } : {}),
     } as never);
 
     await lead.save();
@@ -1586,11 +1616,17 @@ export const updatePayment = async (
     const payment = lead.payments.id(req.params.paymentId);
     if (!payment) { sendError(res, "Payment not found", 404); return; }
     // Sent to finance: it is finance's now — a change here would not reach the invoice.
-    if (payment.finance?.externalId && (parsed.data.amount !== undefined || parsed.data.paidAt !== undefined)) {
+    if (payment.finance?.externalId && (parsed.data.amount !== undefined || parsed.data.paidAt !== undefined || parsed.data.method !== undefined || parsed.data.receipt !== undefined)) {
       sendError(res, "This payment was sent to finance — ask accounts to change it there.", 409);
       return;
     }
 
+    if (parsed.data.receipt !== undefined) {
+      const receipt = leadReceipt(String(lead._id), parsed.data.receipt);
+      if (!receipt) { sendError(res, "That receipt wasn't uploaded for this lead — attach it again.", 400); return; }
+      payment.receipt = receipt;
+    }
+    if (parsed.data.method !== undefined) payment.method = parsed.data.method;
     if (parsed.data.amount !== undefined) payment.amount = parsed.data.amount;
     if (parsed.data.note   !== undefined) payment.note   = parsed.data.note;
     if (parsed.data.paidAt !== undefined) payment.paidAt = new Date(parsed.data.paidAt);

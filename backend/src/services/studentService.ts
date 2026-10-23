@@ -1550,16 +1550,18 @@ export class StudentService {
     // INR, with the AED it came from beside it — that is what is compared.
     const ownAed = (p: IStudentPayment) => (academy === "bangalore" ? p.amountInCurrency ?? 0 : p.amount);
     const inAed = academy === "bangalore" ? ` ${BASE_CURRENCY}` : "";
-    if (ownRows.length > 1) throw createError("Only one payment can be the money already on the lead.", 422);
+    // One row per lead payment with its method and receipt (2026-10-23), so there may be several — together, what the
+    // lead holds.
+    const ownGiven = ownRows.reduce((sum, p) => sum + ownAed(p), 0);
     if (own > 0 && !ownRows.length) {
       throw createError(
         `This lead already holds ${money(own / 100)}${inAed} of its own — it stays as a payment of its own, with its method and receipt.`,
         422,
       );
     }
-    if (ownRows.length && minor(ownAed(ownRows[0]!)) !== own) {
+    if (ownRows.length && minor(ownGiven) !== own) {
       throw createError(
-        `The lead's own payments come to ${money(own / 100)}${inAed} now, not ${money(ownAed(ownRows[0]!))}${inAed} — they changed while this was open. Close the correction and open it again.`,
+        `The lead's own payments come to ${money(own / 100)}${inAed} now, not ${money(ownGiven)}${inAed} — they changed while this was open. Close the correction and open it again.`,
         409,
       );
     }

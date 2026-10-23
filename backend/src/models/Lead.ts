@@ -1,7 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 import { handOverOnAssign } from "./leadHandOver.js";
 import { followUpDateOnStatus } from "./leadFollowUpDate.js";
-import type { ILead, ILeadNote, IActivityLog, IReminder, IPayment, IFollowUp } from "../types/index.js";
+import { ENROLMENT_PAYMENT_METHODS, type ILead, type ILeadNote, type IActivityLog, type IReminder, type IPayment, type IFollowUp } from "../types/index.js";
 
 // ─── Note Sub-Schema ──────────────────────────────────────────────────────────
 const leadNoteSchema = new Schema<ILeadNote & { createdAt: Date; updatedAt: Date }>(
@@ -130,6 +130,24 @@ const paymentSchema = new Schema<IPayment>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+    },
+    /**
+     * How it was paid and its receipt (the user, 2026-10-23: "the same as the
+     * closing time — the payment upload"), asked whenever a payment is added
+     * here. The close takes each one over as a payment of its own, method and
+     * receipt filled in. Absent on payments from before.
+     */
+    method: { type: String, enum: ENROLMENT_PAYMENT_METHODS },
+    receipt: {
+      type: new Schema({
+        name: { type: String },
+        url: { type: String, required: true },
+        key: { type: String, required: true },
+        size: { type: Number },
+        mimeType: { type: String },
+        uploadedAt: { type: Date },
+      }, { _id: false }),
+      default: undefined,
     },
     /**
      * Sent to finance as a balance payment (the user, 2026-10-23): a payment

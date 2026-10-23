@@ -14,7 +14,7 @@ import {
   ResponsiveDialogDescription, ResponsiveDialogFooter,
 } from "@/components/ui/responsive-dialog";
 import { toast } from "@/lib/toast";
-import { ENROLMENT_PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "@/types/student";
+import { ENROLMENT_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type StoredReceipt } from "@/types/student";
 import { uploadBalanceReceipt, fmtMinor, type RecordInput } from "@/hooks/useBalancePayments";
 
 export const dubaiToday = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Dubai" });
@@ -31,7 +31,8 @@ export function BalancePaymentDialog({ studentId, name, course, invoice, waiting
   course?: string;
   invoice: { number: string; currency: string; balanceMinor: number };
   waitingMinor: number;
-  preset?: { amount: number; paidOn: string; note?: string };
+  /** With its method and receipt when the lead payment has them (2026-10-23): sent as they are, unless changed. */
+  preset?: { amount: number; paidOn: string; note?: string; method?: string; receipt?: StoredReceipt | null };
   sending: boolean;
   /** Sends it; `done` closes the dialog once finance has it. Refused, the dialog stays open to fix it. */
   send: (input: RecordInput, done: () => void) => void;
@@ -41,7 +42,7 @@ export function BalancePaymentDialog({ studentId, name, course, invoice, waiting
   // One id for this payment while the dialog is open: Save pressed twice is one payment.
   const [key] = useState(newKey);
   const [amount, setAmount] = useState(preset ? String(preset.amount) : "");
-  const [method, setMethod] = useState<string>("bank_transfer");
+  const [method, setMethod] = useState<string>(preset?.method || "bank_transfer");
   const [paidOn, setPaidOn] = useState(preset?.paidOn && preset.paidOn <= dubaiToday() ? preset.paidOn : dubaiToday());
   const [note, setNote] = useState(preset?.note ?? "");
   const [file, setFile] = useState<File | null>(null);
@@ -51,21 +52,24 @@ export function BalancePaymentDialog({ studentId, name, course, invoice, waiting
   const problem = !amount ? "" : !(value > 0) ? "Enter the amount paid"
     : Math.abs(value * 100 - Math.round(value * 100)) > 1e-6 ? "At most 2 decimals"
     : value > room + 1e-9 ? `More than the ${fmtMinor(Math.round(room * 100), invoice.currency)} left` : "";
-  const ready = value > 0 && !problem && method && paidOn && paidOn <= dubaiToday() && file;
+  const kept = preset?.receipt ?? null;
+  const ready = value > 0 && !problem && method && paidOn && paidOn <= dubaiToday() && (file || kept);
 
   async function submit() {
-    if (!ready || !file) return;
-    setUploading(true);
-    let receipt;
-    try {
-      receipt = await uploadBalanceReceipt(studentId, file);
-    } catch (err) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? "The receipt could not be uploaded");
-      return;
-    } finally {
-      setUploading(false);
-    }
+    if (!ready) return;
+    let receipt: StoredReceipt;
+    if (file) {
+      setUploading(true);
+      try {
+        receipt = await uploadBalanceReceipt(studentId, file);
+      } catch (err) {
+        const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+        toast.error(msg ?? "The receipt could not be uploaded");
+        return;
+      } finally {
+        setUploading(false);
+      }
+    } else receipt = kept!;
     send({ key: key.replace(/[^A-Za-z0-9_-]/g, ""), amount: value, method, paidOn, receipt, ...(note.trim() ? { note: note.trim() } : {}) }, onClose);
   }
 
@@ -108,7 +112,7 @@ export function BalancePaymentDialog({ studentId, name, course, invoice, waiting
             <Label htmlFor="bp-receipt">Receipt (required)</Label>
             <label htmlFor="bp-receipt" className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary">
               <Paperclip className="h-4 w-4" />
-              {file ? file.name : "Attach a photo or PDF of the receipt"}
+              {file ? file.name : kept ? `${kept.name} (from the lead) — tap to replace` : "Attach a photo or PDF of the receipt"}
             </label>
             <input id="bp-receipt" type="file" accept="image/jpeg,image/png,image/webp,image/heic,application/pdf" className="hidden"
               onChange={(e) => {

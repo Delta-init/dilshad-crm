@@ -56,6 +56,35 @@ export interface PaymentRow {
 
 export const MAX_PAYMENTS = 10;
 
+/**
+ * The money already on the lead, as the close's first rows (2026-10-23): each payment added with its method and
+ * receipt is a row of its own, filled in — finance records each with its proof — and any from before, which carry
+ * neither, one row together that asks for them, as before. A Bangalore close (INR) keeps one row, its rate asked, and
+ * so does a lead with more payments than a close can take.
+ */
+export function leadPaymentRows(
+  payments: { amount: number; method?: string; receipt?: { name?: string; url: string; key: string; size?: number; mimeType?: string } | null }[],
+  base: PaymentBase = BASE_CURRENCY as PaymentBase,
+): PaymentRow[] {
+  const total = Math.round(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
+  if (!(total > 0)) return [];
+  const whole = (p: (typeof payments)[number]) => Boolean(p.method && (ENROLMENT_PAYMENT_METHODS as readonly string[]).includes(p.method) && p.receipt?.url && p.receipt.key);
+  const recorded = payments.filter((p) => whole(p) && Number(p.amount) > 0);
+  if (base !== BASE_CURRENCY || !recorded.length || recorded.length > MAX_PAYMENTS - 1) {
+    return [newPaymentRow({ collectedBefore: true, amountInput: String(total) })];
+  }
+  const rest = Math.round((total - recorded.reduce((s, p) => s + Number(p.amount), 0)) * 100) / 100;
+  return [
+    ...recorded.map((p) => newPaymentRow({
+      collectedBefore: true,
+      amountInput: String(p.amount),
+      method: p.method!,
+      receipt: { name: p.receipt!.name || "Receipt", url: p.receipt!.url, key: p.receipt!.key, ...(p.receipt!.size ? { size: p.receipt!.size } : {}), ...(p.receipt!.mimeType ? { mimeType: p.receipt!.mimeType } : {}) },
+    })),
+    ...(rest > 0 ? [newPaymentRow({ collectedBefore: true, amountInput: String(rest) })] : []),
+  ];
+}
+
 /** What a close's money is in: AED (Dubai — the CRM's own) or INR (Bangalore). */
 export type PaymentBase = "AED" | "INR";
 
