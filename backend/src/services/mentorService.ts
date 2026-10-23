@@ -38,6 +38,20 @@ export interface MentorMeeting {
   bookedByEmail: string;
 }
 
+/**
+ * When the mentor can't be booked (the LMS, 2026-10-23) — marked by the mentor in the LMS or the commission portal.
+ * The LMS refuses any booking inside it; the calendar draws it as "Not available". The reason never comes here.
+ */
+export interface MentorTimeOff {
+  id: string;
+  mentorId: string;
+  startsAt: string;
+  endsAt: string;
+  allDay: boolean;
+  reason: string | null;
+  createdByName: string;
+}
+
 export interface Mentor {
   id: string;
   name: string;
@@ -50,6 +64,8 @@ export interface Mentor {
   classes: MentorClass[];
   /** Time booked with them that is not a class. */
   meetings: MentorMeeting[];
+  /** Their time off — empty from an LMS that has none to tell. */
+  timeOff: MentorTimeOff[];
 }
 
 export interface MentorSchedule {
@@ -109,7 +125,7 @@ export const mentorService = {
       timezone: data.timezone || "",
       from: data.from || from.toISOString(),
       to: data.to || to.toISOString(),
-      mentors: (data.mentors ?? []).map((m) => ({ ...m, meetings: m.meetings ?? [] })),
+      mentors: (data.mentors ?? []).map((m) => ({ ...m, meetings: m.meetings ?? [], timeOff: m.timeOff ?? [] })),
     };
   },
 

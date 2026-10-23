@@ -6,6 +6,8 @@
  *   Case 2  edge         booking passes allAcademies, so a Bangalore mentor can be booked from here
  *   Case 3  errors       a window past 62 days and to before from: refused before asking the LMS
  *   Case 4  permission   the LMS refusing the secret surfaces as an error, not an empty week
+ *   Case 5  time off     each mentor's time off is passed on (none from an older LMS: []), and a booking the LMS
+ *                        refuses over it comes back as a 409 with the LMS's own words (2026-10-23)
  *
  *   bun --no-env-file run scripts/mentor-calendar-check.ts
  */
@@ -29,9 +31,13 @@ const lms = Bun.serve({
     if (url.pathname === "/api/v1/service/mentors") {
       return Response.json({ success: true, data: { timezone: "Asia/Dubai", from: url.searchParams.get("from"), to: url.searchParams.get("to"), mentors: [
         { id: "m1", name: "Haffisullah Khan", email: "haff@lms.test", shared: false, academy: { id: ORG, name: "Dubai Academy" }, slots: [],
-          classes: [{ id: "c1", title: "MBT 1", startsAt: new Date().toISOString(), durationMins: 60, status: "cancelled", booked: 0, capacity: 20, mine: true }] },
+          classes: [{ id: "c1", title: "MBT 1", startsAt: new Date().toISOString(), durationMins: 60, status: "cancelled", booked: 0, capacity: 20, mine: true }],
+          timeOff: [{ id: "t1", mentorId: "m1", startsAt: new Date(Date.now() + 2 * 864e5).toISOString(), endsAt: new Date(Date.now() + 2 * 864e5 + 4 * 3600e3).toISOString(), allDay: false, reason: null, createdByName: "Haffisullah Khan" }] },
         { id: "m2", name: "Blr Mentor", email: "blr@lms.test", shared: true, academy: { id: "blr", name: "Bangalore Academy" }, slots: [], classes: [] },
       ] } });
+    }
+    if (url.pathname === "/api/v1/service/mentor-meetings" && body?.title === "Over time off") {
+      return Response.json({ success: false, error: { code: "MENTOR_NOT_AVAILABLE", message: "Haffisullah Khan is not available then — time off Fri 24 Oct, 14:00–18:00 (Dubai time)" } }, { status: 409 });
     }
     if (url.pathname === "/api/v1/service/mentor-meetings") {
       return Response.json({ success: true, data: { meeting: { id: "mt1", title: body?.title, kind: body?.kind, startsAt: body?.scheduledStart, durationMins: 30, attendeeNames: [], bookedByEmail: body?.bookedByEmail, meetingUrl: "" }, linkNote: null } });
@@ -75,6 +81,15 @@ try {
   refuse = true;
   const refused = await err(mentorService.schedule({ from: new Date().toISOString() }));
   check("an error, not an empty week", !!refused && !!refused.message, String(refused));
+
+  console.log("\nCase 5 — time off");
+  refuse = false;
+  const again = await mentorService.schedule({ from: new Date().toISOString() });
+  check("a mentor's time off is passed on", (again.mentors[0] as any)?.timeOff?.[0]?.id === "t1" && (again.mentors[0] as any).timeOff[0].allDay === false, JSON.stringify((again.mentors[0] as any)?.timeOff));
+  check("…and none from an LMS that sends none: []", Array.isArray((again.mentors[1] as any)?.timeOff) && (again.mentors[1] as any).timeOff.length === 0);
+  const over = await err(mentorService.scheduleMeeting({ mentorEmail: "haff@lms.test", title: "Over time off", kind: "client", scheduledStart: new Date(Date.now() + 2 * 864e5 + 3600e3).toISOString(),
+    durationMins: 30, attendees: [{ name: "A client" }], bookedByEmail: "rep@crm.test" }));
+  check("a booking refused over it: 409 with the LMS's words", over?.statusCode === 409 && /not available then/.test(String(over?.message)), `${over?.statusCode} ${over?.message}`);
 } finally {
   lms.stop(true);
 }
