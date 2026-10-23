@@ -2,7 +2,8 @@
  * Checks the Root portal's Sales TV feed — GET /api/v1/service/sales-tv (2026-10-20) — on a scratch database:
  *
  *   - the shape, exactly the Sales CRM's: { crm: "remote", generatedAt, month, onBreak, closes, people };
- *   - people: only the sales staff — members and leaders of an active team, active — no Super Admin, even one leading a team; not someone
+ *   - people: only the sales staff — members and leaders of an active team, active — a Super Admin only when in a team (sent again
+ *     2026-10-23: Root hides them on its Sales TV, shows them on its Manager TV); not someone
  *     in no team, not a deactivated person, not someone in an inactive team only, not the commission plan's excluded;
  *     their team; closings this month and today (the Dubai day; a dropped one and last month's left out); revenue this
  *     month; today's 3CX calls, connected and talk time (yesterday's left out);
@@ -87,7 +88,7 @@ async function person(name: string, r: Types.ObjectId, extra: Record<string, unk
   ids[name] = new Types.ObjectId();
   await db.collection("users").insertOne({ _id: ids[name], name, email: `${name.toLowerCase()}@test.local`, password: "x", role: r, status: "active", breakSince: null, breakKind: null, ...extra });
 }
-await person("Admin", role.superAdmin); // leads Alpha (as dilshad leads REMOTE TEAM): not on the TV since 2026-10-22
+await person("Admin", role.superAdmin); // leads Alpha (as dilshad leads REMOTE TEAM): sent (Root decides where he shows, 2026-10-23)
 await person("Root", role.superAdmin); // in no team: not
 await person("Ann", role.staff, { breakSince: ago(10), breakKind: "tea" });
 await person("Ben", role.staff, { breakSince: YESTERDAY, breakKind: "lunch" });
@@ -172,7 +173,7 @@ same("a close's keys", Object.keys(d.closes[0] ?? {}).sort(), ["academy", "amoun
 
 section("People — only the sales staff");
 const names = (d.people ?? []).map((p) => p.name).sort();
-same("Ann, Ben, Cal — no Super Admin (not even Admin, who leads a team: dilshad, 2026-10-22), nobody in no team, nobody deactivated, nobody in an inactive team only, not the excluded", names, ["Ann", "Ben", "Cal"]);
+same("Admin (a Super Admin leading a team — dilshad, sent again 2026-10-23), Ann, Ben, Cal — not the Super Admin in no team, nobody in no team, nobody deactivated, nobody in an inactive team only, not the excluded", names, ["Admin", "Ann", "Ben", "Cal"]);
 {
   const { LeaderboardService } = await import("../src/services/leaderboardService.js");
   const own = (await new LeaderboardService().getLeaderboard()).rows.map((r) => r.name);
