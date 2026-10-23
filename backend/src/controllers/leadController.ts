@@ -15,6 +15,7 @@ import mongoose from "mongoose";
 import { notifyLeadAssignment } from "../services/pushService.js";
 import { announceNewLeads, collectAssignments } from "../services/leadAlertService.js";
 import { changeFollowUpDate, syncFollowUpDateWithReminder } from "../services/followUpDateService.js";
+import { closeIsInFinance, leadFinanceLink, sendLeadPayment } from "../services/leadFinancePaymentService.js";
 
 const leadService = new LeadService();
 const excelService = new ExcelService();
@@ -1545,6 +1546,12 @@ export const addPayment = async (
     }
     const lead = await Lead.findById(req.params.id);
     if (!lead) { sendError(res, "Lead not found", 404); return; }
+    // Once the close is in finance a payment here must reach finance, or the invoice, the LMS and Tetra Commission
+    // never hear of it (2026-10-23) — it goes through POST /leads/:id/payments/finance, with its receipt.
+    if (await closeIsInFinance(String(lead._id))) {
+      sendError(res, "This lead's enrolment is in finance — send the payment to finance with its receipt, so the invoice, the LMS and Tetra Commission get it.", 409);
+      return;
+    }
 
     lead.payments.push({
       amount:  parsed.data.amount,
@@ -1578,6 +1585,11 @@ export const updatePayment = async (
 
     const payment = lead.payments.id(req.params.paymentId);
     if (!payment) { sendError(res, "Payment not found", 404); return; }
+    // Sent to finance: it is finance's now — a change here would not reach the invoice.
+    if (payment.finance?.externalId && (parsed.data.amount !== undefined || parsed.data.paidAt !== undefined)) {
+      sendError(res, "This payment was sent to finance — ask accounts to change it there.", 409);
+      return;
+    }
 
     if (parsed.data.amount !== undefined) payment.amount = parsed.data.amount;
     if (parsed.data.note   !== undefined) payment.note   = parsed.data.note;
@@ -1616,6 +1628,29 @@ export const updateCallNotConnected = currentCallCounts;
 /** PATCH /leads/:id/call-count — no longer changes anything (counts from 3CX). */
 export const updateCallCount = currentCallCounts;
 
+/** GET /leads/:id/payments/finance — the close in finance, and which of the lead's payments finance has (2026-10-23). */
+export const getLeadPaymentFinance = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const link = await leadFinanceLink({ userId: req.user!.userId, role: req.user!.role ?? null }, String(req.params.id));
+    if (!link) { sendError(res, "Lead not found", 404); return; }
+    sendSuccess(res, "Payments in finance", link);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** POST /leads/:id/payments/finance — a payment on a closed lead, sent to finance with its receipt (2026-10-23). */
+export const sendLeadPaymentToFinance = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const sent = await sendLeadPayment({ userId: req.user!.userId, role: req.user!.role ?? null }, String(req.params.id), (req.body ?? {}) as Record<string, unknown>);
+    sendSuccess(res, "Sent to finance for approval", sent, 201);
+  } catch (error) {
+    const e = error as { statusCode?: number; message?: string };
+    if (e?.statusCode) { sendError(res, e.message ?? "Could not send it", e.statusCode); return; }
+    next(error);
+  }
+};
+
 /** DELETE /leads/:id/payments/:paymentId */
 export const deletePayment = async (
   req: AuthenticatedRequest,
@@ -1628,6 +1663,10 @@ export const deletePayment = async (
 
     const payment = lead.payments.id(req.params.paymentId);
     if (!payment) { sendError(res, "Payment not found", 404); return; }
+    if (payment.finance?.externalId) {
+      sendError(res, "This payment was sent to finance — ask accounts to remove it there.", 409);
+      return;
+    }
 
     payment.deleteOne();
     await lead.save();

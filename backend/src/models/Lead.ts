@@ -131,6 +131,20 @@ const paymentSchema = new Schema<IPayment>(
       ref: "User",
       required: true,
     },
+    /**
+     * Sent to finance as a balance payment (the user, 2026-10-23): a payment
+     * after the close only counts once finance has it — on the invoice, in the
+     * LMS's access and in Tetra Commission's balance. `externalId` is the one
+     * finance knows it by ("bp-…"); what became of it is asked of finance.
+     */
+    finance: {
+      type: new Schema({
+        externalId: { type: String, required: true },
+        method: { type: String, required: true },
+        sentAt: { type: Date, required: true },
+      }, { _id: false }),
+      default: undefined,
+    },
   },
   { _id: true, timestamps: true }
 );

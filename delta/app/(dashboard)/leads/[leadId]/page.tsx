@@ -1315,6 +1315,8 @@ export default function LeadDetailPage() {
           />
           <PaymentPanel
             leadId={lead._id}
+            leadName={lead.name}
+            closed={lead.status === "closed"}
             payments={lead.payments ?? []}
             sellingAmount={lead.sellingAmount ?? undefined}
             courseAmount={

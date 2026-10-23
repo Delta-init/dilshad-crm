@@ -37,6 +37,8 @@ export interface Payment {
   addedBy: User | string;
   createdAt?: string;
   updatedAt?: string;
+  /** Sent to finance as a balance payment (2026-10-23). */
+  finance?: { externalId: string; method: string; sentAt: string };
 }
 
 export interface Reminder {

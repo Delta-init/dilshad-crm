@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   DollarSign, Plus, Pencil, Trash2,
-  TrendingUp, CircleDollarSign, Wallet, Calendar, AlertTriangle,
+  TrendingUp, CircleDollarSign, Wallet, Calendar, AlertTriangle, Send, Landmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import type { Payment } from "@/types/lead";
-import { useAddPayment, useUpdatePayment, useDeletePayment } from "@/hooks/usePayments";
+import { useAddPayment, useUpdatePayment, useDeletePayment, useLeadPaymentFinance, useSendLeadPayment, type LeadFinanceLink } from "@/hooks/usePayments";
+import { BalancePaymentDialog } from "@/components/students/BalancePaymentDialog";
+import { fmtMinor } from "@/hooks/useBalancePayments";
+import { toast } from "@/lib/toast";
 import { useCurrencyStore } from "@/lib/store/currencyStore";
 import { fmtCurrency, getCurrencySymbol } from "@/lib/currency";
 import { toGstDateISO } from "@/lib/utils";
@@ -110,15 +113,32 @@ function PaymentForm({ initial, onSave, onCancel, saving }: PaymentFormProps) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+/** Where a payment stands with finance, once the lead's close is there (2026-10-23). */
+function FinanceTag({ state }: { state?: LeadFinanceLink["payments"][number] }) {
+  if (!state || state.state === "with_close") return null;
+  const tag = state.state === "not_sent"
+    ? { text: "Not sent to finance", cls: "border-amber-500/40 bg-amber-500/10 text-amber-500" }
+    : state.financeStatus === "approved"
+      ? { text: `Approved by finance${state.receiptNumber ? ` · ${state.receiptNumber}` : ""}`, cls: "border-green-500/40 bg-green-500/10 text-green-500" }
+      : state.financeStatus === "rejected"
+        ? { text: `Rejected by finance${state.reason ? `: ${state.reason}` : ""}`, cls: "border-red-500/40 bg-red-500/10 text-red-400" }
+        : { text: "With finance — waiting for approval", cls: "border-blue-500/40 bg-blue-500/10 text-blue-400" };
+  return <span className={cn("mt-1 inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium", tag.cls)}><Landmark className="h-3 w-3" />{tag.text}</span>;
+}
+
 interface PaymentPanelProps {
   leadId: string;
+  /** For the send-to-finance dialog's title. */
+  leadName?: string;
+  /** Closed: its close may be in finance, and then payments go there (2026-10-23). */
+  closed?: boolean;
   payments: Payment[];
   sellingAmount?: number;  // negotiated price for this lead (preferred)
   courseAmount?: number;   // fallback: total fee from the linked course
   canEdit: boolean;
 }
 
-export function PaymentPanel({ leadId, payments, sellingAmount, courseAmount, canEdit }: PaymentPanelProps) {
+export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount, courseAmount, canEdit }: PaymentPanelProps) {
   useCurrencyStore(); // subscribe so component re-renders on currency change
   const [adding,    setAdding]    = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -127,6 +147,23 @@ export function PaymentPanel({ leadId, payments, sellingAmount, courseAmount, ca
   const addMut    = useAddPayment(leadId);
   const updateMut = useUpdatePayment(leadId);
   const deleteMut = useDeletePayment(leadId);
+
+  // Once the close is in finance, a payment here goes to finance with its receipt (2026-10-23) — a payment kept only
+  // on the lead never reached the invoice, the LMS or Tetra Commission.
+  const { data: link } = useLeadPaymentFinance(leadId, !!closed);
+  const inFinance = !!link?.inFinance;
+  const sendMut = useSendLeadPayment(leadId);
+  const [sending, setSending] = useState<{ preset?: Payment } | null>(null);
+  const stateOf = (id: string) => link?.payments.find((x) => x.id === id);
+  const startAdd = () => {
+    if (!inFinance) { setAdding(true); return; }
+    if (!link?.canRecord) { toast.error(link?.whyNot || "A payment can't be sent to finance right now"); return; }
+    setSending({});
+  };
+  const startSend = (p: Payment) => {
+    if (!link?.canRecord) { toast.error(link?.whyNot || "It can't be sent to finance right now"); return; }
+    setSending({ preset: p });
+  };
 
   const sorted = [...payments].sort(
     (a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime(),
@@ -167,7 +204,8 @@ export function PaymentPanel({ leadId, payments, sellingAmount, courseAmount, ca
             <Button
               variant="ghost" size="icon"
               className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              onClick={() => setAdding(true)}
+              onClick={startAdd}
+              title={inFinance ? "Send a payment to finance" : "Add a payment"}
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -242,6 +280,19 @@ export function PaymentPanel({ leadId, payments, sellingAmount, courseAmount, ca
           </div>
         )}
 
+        {/* In finance: what it says, and where new payments go */}
+        {inFinance && link?.invoice && (
+          <p className="flex items-start gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-[11px] text-muted-foreground">
+            <Landmark className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-400" />
+            <span>
+              In finance as {link.invoice.number}: {fmtMinor(link.invoice.paidMinor, link.invoice.currency)} paid,{" "}
+              {fmtMinor(link.invoice.balanceMinor, link.invoice.currency)} left
+              {link.waitingMinor > 0 ? ` (${fmtMinor(link.waitingMinor, link.invoice.currency)} waiting for approval)` : ""}.
+              New payments go to finance with their receipt.
+            </span>
+          </p>
+        )}
+
         {/* Add form */}
         <AnimatePresence>
           {adding && (
@@ -268,7 +319,7 @@ export function PaymentPanel({ leadId, payments, sellingAmount, courseAmount, ca
             <DollarSign className="h-8 w-8 text-muted-foreground/30" />
             <p className="text-xs text-muted-foreground">No payments recorded yet</p>
             {canEdit && (
-              <Button variant="outline" size="sm" className="mt-1 h-7 text-xs" onClick={() => setAdding(true)}>
+              <Button variant="outline" size="sm" className="mt-1 h-7 text-xs" onClick={startAdd}>
                 <Plus className="h-3.5 w-3.5 mr-1" /> Add payment
               </Button>
             )}
@@ -325,9 +376,16 @@ export function PaymentPanel({ leadId, payments, sellingAmount, courseAmount, ca
                           <Calendar className="h-3 w-3" />
                           {formatDate(p.paidAt)}
                         </p>
+                        <FinanceTag state={stateOf(p._id)} />
+                        {canEdit && stateOf(p._id)?.state === "not_sent" && link?.invoice?.currency === "AED" && (
+                          <Button variant="outline" size="sm" className="mt-1.5 h-7 gap-1 text-xs" onClick={() => startSend(p)}>
+                            <Send className="h-3 w-3" /> Send to finance
+                          </Button>
+                        )}
                       </div>
 
-                      {canEdit && (
+                      {/* Sent to finance: it is finance's to change now. */}
+                      {canEdit && !p.finance && (
                         <div className="flex items-center gap-0.5 shrink-0">
                           <Button
                             variant="ghost" size="icon"
@@ -355,6 +413,19 @@ export function PaymentPanel({ leadId, payments, sellingAmount, courseAmount, ca
           })}
         </AnimatePresence>
       </CardContent>
+
+      {sending && link?.studentId && link.invoice && (
+        <BalancePaymentDialog
+          studentId={link.studentId}
+          name={leadName || "this client"}
+          invoice={link.invoice}
+          waitingMinor={link.waitingMinor}
+          preset={sending.preset ? { amount: sending.preset.amount, paidOn: toGstDateISO(new Date(sending.preset.paidAt)), note: sending.preset.note } : undefined}
+          sending={sendMut.isPending}
+          send={(input, done) => sendMut.mutate({ ...input, ...(sending.preset ? { paymentId: sending.preset._id } : {}) }, { onSuccess: done })}
+          onClose={() => setSending(null)}
+        />
+      )}
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>

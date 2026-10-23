@@ -393,6 +393,8 @@ export interface IPayment {
   note?: string;
   paidAt: Date;
   addedBy: Types.ObjectId | IUser;
+  /** Sent to finance as a balance payment (2026-10-23). */
+  finance?: { externalId: string; method: string; sentAt: Date };
   createdAt?: Date;
   updatedAt?: Date;
 }
