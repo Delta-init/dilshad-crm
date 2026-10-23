@@ -40,6 +40,7 @@ import {
   sendLeadPaymentToFinance,
 } from "../controllers/leadController.js";
 import { getTeamReminders, getTeamReminderOptions } from "../controllers/teamReminderController.js";
+import { getRepeatLeads, getRepeatLeadCount, giveRepeat } from "../controllers/repeatLeadController.js";
 import { authenticate } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/permissions.js";
 
@@ -83,6 +84,9 @@ router.get("/reminders/mine",  checkPermission("reminders", "view"), getMyRemind
 router.get("/reminders/count", checkPermission("reminders", "view"), getMyReminderCount);
 router.get("/reminders/team/options", checkPermission("reminders", "view"), getTeamReminderOptions);
 router.get("/reminders/team",  checkPermission("reminders", "view"), getTeamReminders);
+// Repeat leads: the same number in again, with its team leader to verify and give out (2026-10-23)
+router.get("/repeats",         checkPermission("leads", "view"), getRepeatLeads);
+router.get("/repeats/count",   checkPermission("leads", "view"), getRepeatLeadCount);
 
 // ─── Lead CRUD ────────────────────────────────────────────────────────────────
 router.post("/", checkPermission("leads", "create"), createLead);
@@ -91,6 +95,7 @@ router.get("/:id", checkPermission("leads", "view"), getLeadById);
 router.put("/:id", checkPermission("leads", "edit"), updateLead);
 router.patch("/:id/status",              checkPermission("leads", "edit"), updateLeadStatus);
 router.patch("/:id/assign",              checkPermission("leads", "edit"), assignLead);
+router.post("/:id/repeat/give",          checkPermission("leads", "view"), giveRepeat);
 router.patch("/:id/team",                checkPermission("leads", "edit"), assignLeadToTeam);
 router.patch("/:id/transfer",            checkPermission("leads", "edit"), transferLeadToTeam);
 router.patch("/:id/call-not-connected",  checkPermission("leads", "edit"), updateCallNotConnected);

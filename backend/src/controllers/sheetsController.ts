@@ -8,6 +8,7 @@ import { emitToUser } from "../socket.js";
 import { sendWelcomeToLead } from "../services/whatsappCloudService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import { announceNewLeads } from "../services/leadAlertService.js";
+import { holdRepeatLead, announceRepeats, type RepeatOutcome } from "../services/repeatLeadService.js";
 
 const leadService = new LeadService();
 
@@ -147,6 +148,17 @@ function buildNote(row: SheetRow): string {
   return lines.join("\n");
 }
 
+/** What a repeat keeps of the row that brought it in again. */
+function repeatRowOf(row: SheetRow) {
+  return {
+    name: row.full_name?.trim(),
+    source: row.source?.trim() || mapPlatformToSource(row.platform),
+    platform: row.platform?.trim() || null,
+    campaign: row.campaign_name?.trim() || null,
+    note: buildNote(row),
+  };
+}
+
 // ─── Controller ───────────────────────────────────────────────────────────────
 
 /**
@@ -155,7 +167,8 @@ function buildNote(row: SheetRow): string {
  * Accepts a single row from the Google Sheet (one object per call).
  * - Maps core fields → Lead document
  * - Stores extra metadata as a Note on the lead
- * - Skips silently if a lead with the same phone already exists (returns existing lead ID)
+ * - A phone the CRM already has is a repeat (2026-10-23): kept on that lead and held by its team leader to verify
+ *   (services/repeatLeadService.ts) — no new lead; the answer still says duplicate, with repeat: true
  * - The Super Admin user is used as the system reporter
  */
 export const syncSheetLead = async (
@@ -179,17 +192,6 @@ export const syncSheetLead = async (
     const phone = cleanPhone(row.phone_number);
     const email = sanitizeEmail(row.email);
 
-    // ── Duplicate check on phone ───────────────────────────────────────────
-    const existing = await Lead.findOne({ phone });
-    if (existing) {
-      sendSuccess(res, "Lead already exists — skipped", {
-        leadId: existing._id.toString(),
-        duplicate: true,
-        phone,
-      });
-      return;
-    }
-
     // ── Find Super Admin as system reporter ────────────────────────────────
     const superAdmin = await User.findOne({
       email: process.env.SUPER_ADMIN_EMAIL,
@@ -203,6 +205,21 @@ export const syncSheetLead = async (
       return;
     }
     const reporterId = row?.reporter ? row.reporter : superAdmin._id.toString();
+
+    // ── A phone we already have: a repeat, for its team leader to verify ──
+    const existing = await Lead.findOne({ phone });
+    if (existing) {
+      const outcome = await holdRepeatLead(existing._id.toString(), repeatRowOf(row), superAdmin._id.toString());
+      if (outcome.kind === "split") await leadService.autoAssignLeads([outcome.leadId]).catch(() => null);
+      else void announceRepeats([outcome]);
+      sendSuccess(res, "Lead already exists — came in again, with its team leader to verify", {
+        leadId: existing._id.toString(),
+        duplicate: true,
+        repeat: true,
+        phone,
+      });
+      return;
+    }
 
     // ── Build note from extra fields ───────────────────────────────────────
     const noteContent = buildNote(row);
@@ -303,7 +320,8 @@ export const syncSheetLead = async (
  * POST /api/sheets/sync/batch
  *
  * Accepts an array of rows (bulk import from App Script).
- * Processes each row independently — duplicates are skipped, not errored.
+ * Processes each row independently — a phone we already have is a repeat for its team leader (see syncSheetLead),
+ * never an error.
  */
 export const syncSheetLeadsBatch = async (
   req: Request,
@@ -338,6 +356,9 @@ export const syncSheetLeadsBatch = async (
       phone?: string;
       reason?: string;
     }> = [];
+    // Repeats held for their team leaders — told once, at the end; and repeats with no owner or team, for the split.
+    const held: Array<Extract<RepeatOutcome, { kind: "held" }>> = [];
+    const repeatsToSplit: string[] = [];
     // counselor id → leads directly assigned to them in this batch
     const directByUser = new Map<string, { count: number; first: { id: string; name: string } }>();
 
@@ -357,9 +378,16 @@ export const syncSheetLeadsBatch = async (
       const phone = cleanPhone(row.phone_number);
       const email = sanitizeEmail(row.email);
 
-      // Check duplicate
+      // A phone we already have: a repeat, for its team leader to verify
       const exists = await Lead.findOne({ phone });
       if (exists) {
+        try {
+          const outcome = await holdRepeatLead(exists._id.toString(), repeatRowOf(row), reporterId);
+          if (outcome.kind === "split") repeatsToSplit.push(outcome.leadId);
+          else held.push(outcome);
+        } catch (repeatErr) {
+          console.error("[sheets] repeat not held:", repeatErr instanceof Error ? repeatErr.message : repeatErr);
+        }
         results.push({
           index: i,
           status: "duplicate",
@@ -465,12 +493,15 @@ export const syncSheetLeadsBatch = async (
       }
     }
 
+    if (repeatsToSplit.length) await leadService.autoAssignLeads(repeatsToSplit).catch(() => null);
+    if (held.length) void announceRepeats(held);
+
     // One notice for the batch to the team leaders, Super Admins and the Sales Manager (2026-10-19).
     void announceNewLeads(results.filter((r) => r.status === "created" && r.leadId).map((r) => r.leadId as string));
 
     sendSuccess(
       res,
-      `Batch processed: ${created} created, ${duplicate} skipped (duplicate), ${invalid} invalid`,
+      `Batch processed: ${created} created, ${duplicate} came in again (repeats, with their team leaders), ${invalid} invalid`,
       {
         summary: {
           total: rows.length,

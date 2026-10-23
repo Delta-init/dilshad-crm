@@ -19,7 +19,9 @@ export type ActivityAction =
   | "note_deleted"
   | "whatsapp_welcome"
   | "followup_missed"
-  | "inactive_reassigned";
+  | "inactive_reassigned"
+  | "repeat_enquiry"
+  | "repeat_verified";
 
 export interface LeadNote {
   _id: string;

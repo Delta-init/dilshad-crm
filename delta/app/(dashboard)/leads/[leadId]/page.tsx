@@ -9,7 +9,7 @@ import {
   X, ChevronDown, Activity, Clock, UserCheck, FilePlus2,
   MessageSquarePlus, PencilLine, Minus, UsersRound, ArrowRightLeft, BookOpen,
   MessageSquare, AlertTriangle, Target, TrendingUp, CircleDollarSign,
-  MessageCircle, XCircle,
+  MessageCircle, XCircle, Repeat2,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -80,6 +80,8 @@ const ACTION_CONFIG: Record<ActivityAction, { icon: React.ElementType; color: st
   whatsapp_welcome: { icon: MessageCircle, color: "text-green-400", bg: "bg-green-500/15" },
   followup_missed: { icon: AlertTriangle, color: "text-red-400", bg: "bg-red-500/15" },
   inactive_reassigned: { icon: ArrowRightLeft, color: "text-amber-400", bg: "bg-amber-500/15" },
+  repeat_enquiry: { icon: Repeat2, color: "text-violet-400", bg: "bg-violet-500/15" },
+  repeat_verified: { icon: UserCheck, color: "text-violet-400", bg: "bg-violet-500/15" },
 };
 
 const noteSchema = z.object({ content: z.string().min(1, "Note cannot be empty").max(2000) });
