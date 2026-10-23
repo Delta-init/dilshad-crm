@@ -48,8 +48,9 @@ export function SlabsCard({ plan }: { plan: CommissionPlanView }) {
         </p>
       </div>
       <div className="grid gap-4 p-4 lg:grid-cols-2 2xl:grid-cols-3">
-        {ROLES.map((role) => (
-          <SlabEditor key={role} role={role} rows={plan.slabs![role]} canEdit={plan.canEdit} />
+        {/* Only the roles this viewer may see are sent (2026-10-23). */}
+        {ROLES.filter((role) => plan.slabs![role]).map((role) => (
+          <SlabEditor key={role} role={role} rows={plan.slabs![role]!} canEdit={plan.canEdit} />
         ))}
       </div>
       <p className="border-t border-border/40 px-4 py-2.5 text-[11px] text-muted-foreground">

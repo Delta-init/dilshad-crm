@@ -379,19 +379,21 @@ e = await service.getEarnings(view("Anfas", superRole), "2026-11");
 check("an empty month is empty, not an error", e.sales.length === 0 && e.people.length === 0 && e.totals.amount === 0);
 
 section("Preview for the closing dialog");
-let p = await service.preview({ course: String(c1._id), team: String(teams["TEAM TITAN"]), closer: String(people.Theertha) });
+// The preview answers what its viewer may see (2026-10-23): asked here as a Super Admin, who sees every line.
+const asAdmin = { userId: String(people["Root user"] ?? Object.values(people)[0]), role: { roleName: "Super Admin", isSystemRole: true } as never };
+let p = await service.preview({ course: String(c1._id), team: String(teams["TEAM TITAN"]), closer: String(people.Theertha) }, asAdmin);
 check("a BDE closing Course 1 earns 230", p.state === "counted" && p.closerTotal === 230 && p.lines.length === LINES);
-p = await service.preview({ course: String(c1._id), team: String(teams["TEAM TITAN"]), closer: String(people.Ria) });
+p = await service.preview({ course: String(c1._id), team: String(teams["TEAM TITAN"]), closer: String(people.Ria) }, asAdmin);
 check(`the team's leader closing it earns ${PAYS_TL ? 330 : 230}`, p.closerTotal === (PAYS_TL ? 330 : 230));
-p = await service.preview({ course: String(c1._id), team: String(teams["Team Legacy"]), closer: String(people.Abrar) });
+p = await service.preview({ course: String(c1._id), team: String(teams["Team Legacy"]), closer: String(people.Abrar) }, asAdmin);
 const smOwn = RULE === "always" ? 415 : 315;
 check(`the Sales Manager closing in his own team earns ${smOwn}`, p.closerTotal === smOwn, `${p.closerTotal}`);
-p = await service.preview({ course: String(c1._id), closer: String(people["Root user"]) });
+p = await service.preview({ course: String(c1._id), closer: String(people["Root user"]) }, asAdmin);
 check("an excluded login earns nothing", p.state === "excluded" && p.closerTotal === 0);
-p = await service.preview({ course: String(c2._id), team: String(teams["Team Headless"]), closer: String(people.Nobody) });
+p = await service.preview({ course: String(c2._id), team: String(teams["Team Headless"]), closer: String(people.Nobody) }, asAdmin);
 check(PAYS_TL ? "on a team with no leader the closer's 500 shows, on hold" : "with no TL paid, a team with no leader is no hold",
   p.closerTotal === 500 && (PAYS_TL ? p.state === "waiting" && /no leader/.test(p.reason) : p.state === "counted"));
-p = await service.preview({ course: String(old._id), team: String(teams["TEAM TITAN"]), closer: String(people.Theertha) });
+p = await service.preview({ course: String(old._id), team: String(teams["TEAM TITAN"]), closer: String(people.Theertha) }, asAdmin);
 check("a course with no plan previews 0", p.closerTotal === 0 && p.plan.sales === 0);
 
 section("Case 3/4 — the API: bad input and who may change the plan");

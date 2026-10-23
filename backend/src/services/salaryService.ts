@@ -4,7 +4,7 @@ import { FinanceHandover } from "../models/FinanceHandover.js";
 import { Student } from "../models/Student.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
-import { COUNT_FROM, feeOf, idOf, isSuperAdmin, loadConfig, uaeMonthOf } from "./commissionService.js";
+import { COUNT_FROM, commissionScope, feeOf, idOf, isSuperAdmin, loadConfig, slabsForScope, uaeMonthOf } from "./commissionService.js";
 import { slabsFor, TL_SLAB } from "./salarySlabs.js";
 import type { CommissionSaleState, IRole, ISlabRow, ISlabs, SlabRole } from "../types/index.js";
 import { fetchCommissionPayouts, type CommissionPayout } from "./financeClient.js";
@@ -228,21 +228,27 @@ export class SalaryService {
     const byUser = new Map((payouts ?? []).map((p) => [p.userId, p]));
     const rows = (await payRows(month, slabs)).map((r) => ({ ...r, payout: byUser.get(r.user) ?? null }));
     const me = rows.find((r) => r.user === viewer.userId) ?? null;
-    const everyone = isSuperAdmin(viewer.role) || me?.role === "sm";
+    // Everyone's pay: Super Admins and the Sales Manager. A team leader: their own active teams' people (the user,
+    // 2026-10-23 — they used to see only their own). Others: their own.
+    const scope = await commissionScope(viewer);
+    const everyone = scope.all || me?.role === "sm";
+    const team = !everyone && scope.ledTeamIds.length > 0;
+    const people = everyone ? rows : team ? rows.filter((r) => scope.teamPeople.has(r.user)) : null;
     return {
       month,
-      slabs,
+      view: everyone ? "all" : team ? "team" : "own",
+      slabs: everyone ? slabs : slabsForScope(slabs as unknown as Record<string, unknown>, scope),
       slabsFrom: from,
       /** False when finance couldn't be asked: the payouts aren't shown, not "none". */
       payoutsKnown: payouts !== null,
       me,
-      people: everyone ? rows : null,
-      totals: everyone
+      people,
+      totals: people
         ? {
-            people: rows.length,
-            salary: round2(rows.reduce((s, r) => s + r.salary, 0)),
-            payable: round2(rows.reduce((s, r) => s + r.commission.payable, 0)),
-            total: round2(rows.reduce((s, r) => s + r.total, 0)),
+            people: people.length,
+            salary: round2(people.reduce((s, r) => s + r.salary, 0)),
+            payable: round2(people.reduce((s, r) => s + r.commission.payable, 0)),
+            total: round2(people.reduce((s, r) => s + r.total, 0)),
           }
         : null,
     };

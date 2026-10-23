@@ -40,16 +40,20 @@ export function PlanTab() {
     );
   }
 
+  const view = data.view ?? "all";
   return (
     <div className="flex flex-col gap-5">
-      <HowItsPaid />
+      {view === "all" ? <HowItsPaid /> : <YourPlanNote plan={data} />}
       <PlanTable plan={data} />
       <SlabsCard plan={data} />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <SalesManagerCard plan={data} />
-        <ExcludedCard plan={data} />
-      </div>
-      {TL_PAID && <TeamsCard plan={data} />}
+      {view === "all" && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <SalesManagerCard plan={data} />
+          <ExcludedCard plan={data} />
+        </div>
+      )}
+      {TL_PAID && view === "all" && <TeamsCard plan={data} />}
+      {view === "team" && <MyTeamsCard plan={data} />}
       {data.seesHeld && <OnHoldCard plan={data} />}
     </div>
   );
@@ -71,6 +75,51 @@ const RULES = {
     "The Sales Manager who closes a sale also earns the Sales Staff amount.",
   ],
 } as const;
+
+
+/** For a team leader or a salesperson: whose plan this is, instead of the full rules (2026-10-23). */
+function YourPlanNote({ plan }: { plan: CommissionPlanView }) {
+  const team = plan.view === "team";
+  const names = plan.teams.map((t) => t.name).join(", ");
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-xl border border-primary/20 bg-primary/5 p-4"
+    >
+      <p className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+        <Info className="h-4 w-4 text-primary" /> {team ? `${names || "Your team"}'s plan` : "Your plan"}
+      </p>
+      <ul className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
+        {team ? (
+          <li>{TL_PAID ? "What each course pays the Sales Staff who closes it in your team, and you as its leader." : "What each course pays the Sales Staff who closes it in your team."}</li>
+        ) : (
+          <li>What each course pays you when you close a sale.</li>
+        )}
+        <li>A sale counts once every step after the close is done — finance approved, LMS account, CS, onboarded, and the MT5 bonus approved (or no bonus promised).</li>
+        <li>Each sale keeps the amounts of the day it counted.</li>
+      </ul>
+    </motion.div>
+  );
+}
+
+/** A team leader's own teams, with who is in them. */
+function MyTeamsCard({ plan }: { plan: CommissionPlanView }) {
+  return (
+    <Card icon={UsersRound} title={plan.teams.length === 1 ? "Your team" : "Your teams"}>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {plan.teams.map((t) => (
+          <div key={t._id} className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+            <p className="text-sm font-medium text-foreground">{t.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {(t.members ?? []).map((m) => m.name).join(", ") || "No members"}
+            </p>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 function HowItsPaid() {
   return (
@@ -119,8 +168,8 @@ function PlanTable({ plan }: { plan: CommissionPlanView }) {
 }
 
 type Draft = Record<keyof CoursePlan, string>;
-const draftOf = (p: CoursePlan): Draft => ({
-  sales: String(p.sales), tl: String(p.tl), sm: String(p.sm), creditUsd: String(p.creditUsd),
+const draftOf = (p: Partial<CoursePlan>): Draft => ({
+  sales: String(p.sales ?? 0), tl: String(p.tl ?? 0), sm: String(p.sm ?? 0), creditUsd: String(p.creditUsd ?? 0),
 });
 
 function PlanRow({ course, canEdit, index }: {
@@ -141,7 +190,10 @@ function PlanRow({ course, canEdit, index }: {
   const invalid = Object.values(values).some((v) => !Number.isFinite(v) || v < 0);
   const dirty = (Object.keys(draft) as (keyof CoursePlan)[]).some((k) => values[k] !== course.commission[k]);
   const shown = canEdit ? values : course.commission;
-  const perSale = shown.sales + (TL_PAID ? shown.tl : 0) + shown.sm;
+  // Only the rates sent for this viewer: a salesperson's own, a team leader's own and their team's (2026-10-23).
+  const fields = FIELDS.filter((f) => f.key in course.commission);
+  const perSale = (shown.sales ?? 0) + (TL_PAID ? (shown.tl ?? 0) : 0) + (shown.sm ?? 0);
+  const perSaleLabel = !("sm" in course.commission) ? (TL_PAID && "tl" in course.commission ? "sales + TL per sale" : "you earn per sale") : "paid per sale";
   const inactive = course.status === "inactive";
 
   return (
@@ -162,12 +214,12 @@ function PlanRow({ course, canEdit, index }: {
           <p className={cn("text-sm font-semibold tabular-nums", perSale && !invalid ? "text-primary" : "text-muted-foreground")}>
             {perSale && !invalid ? aed(perSale) : "—"}
           </p>
-          <p className="text-[10px] text-muted-foreground">paid per sale</p>
+          <p className="text-[10px] text-muted-foreground">{perSaleLabel}</p>
         </div>
       </div>
 
-      <div className={cn("mt-2.5 grid grid-cols-2 gap-2", TL_PAID ? "sm:grid-cols-4" : "sm:grid-cols-3")}>
-        {FIELDS.map((f) => (
+      <div className={cn("mt-2.5 grid grid-cols-2 gap-2", fields.length >= 4 ? "sm:grid-cols-4" : fields.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+        {fields.map((f) => (
           <label key={f.key} className="block space-y-1">
             <span className="text-[11px] text-muted-foreground">{f.label}</span>
             {canEdit ? (
@@ -182,7 +234,7 @@ function PlanRow({ course, canEdit, index }: {
               />
             ) : (
               <p className="text-sm tabular-nums text-foreground">
-                {course.commission[f.key] ? f.money(course.commission[f.key]) : <span className="text-muted-foreground/60">—</span>}
+                {course.commission[f.key] ? f.money(course.commission[f.key]!) : <span className="text-muted-foreground/60">—</span>}
               </p>
             )}
           </label>

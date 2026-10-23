@@ -17,7 +17,8 @@ import { EveryonePayTable } from "@/components/pay/EveryonePayTable";
 
 /**
  * My Pay: a month's salary and commission on the salary slabs (the user,
- * 2026-10-05). Everyone sees their own month; a Super Admin also everyone's.
+ * 2026-10-05). Everyone sees their own month; a Super Admin and the Sales
+ * Manager also everyone's; a team leader their team's (2026-10-23).
  * The slabs themselves are set on Commission → Plan.
  */
 export default function MyPayPage() {
@@ -67,12 +68,12 @@ export default function MyPayPage() {
         <>
           {data.me ? (
             <>
-              <PayMonthCard row={data.me} slab={data.slabs[data.me.role]} month={data.month} payoutsKnown={!!data.payoutsKnown} />
+              <PayMonthCard row={data.me} slab={data.slabs[data.me.role] ?? []} month={data.month} payoutsKnown={!!data.payoutsKnown} />
               <section className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Your slab · {ROLE_LABEL[data.me.role]}
                 </p>
-                <SlabTable rows={data.slabs[data.me.role]} levelIndex={data.me.level.index} nextIndex={data.me.next?.index} />
+                <SlabTable rows={data.slabs[data.me.role] ?? []} levelIndex={data.me.level.index} nextIndex={data.me.next?.index} />
               </section>
             </>
           ) : !data.people ? (
@@ -99,7 +100,7 @@ export default function MyPayPage() {
           {data.people && data.totals && (
             <section className="space-y-2">
               <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                <Users className="h-3.5 w-3.5" /> Everyone · {monthLabel(data.month)}
+                <Users className="h-3.5 w-3.5" /> {data.view === "team" ? "Your team" : "Everyone"} · {monthLabel(data.month)}
               </p>
               {data.people.length ? (
                 <EveryonePayTable people={data.people} totals={data.totals} payoutsKnown={!!data.payoutsKnown} />

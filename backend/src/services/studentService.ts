@@ -1175,7 +1175,7 @@ export class StudentService {
     const { fetchEnrolmentStatuses } = await import("./financeClient.js");
     const { orgOfHandover } = await import("./financeOrgs.js");
     const { stepsOf } = await import("./enrolmentSteps.js");
-    const { isSuperAdmin, loadConfig } = await import("./commissionService.js");
+    const { isSuperAdmin, commissionScope, canSeeLine } = await import("./commissionService.js");
 
     if (!Types.ObjectId.isValid(id)) throw createError("Enrolment not found", 404);
     const student = await Student.findById(id)
@@ -1196,8 +1196,9 @@ export class StudentService {
     // Asked of the organization of the academy it was closed for.
     const [st] = await fetchEnrolmentStatuses([id], orgOfHandover(h, student.academy));
     const sale = await CommissionSale.findOne({ student: student._id }).lean();
-    const config = sale ? await loadConfig() : null;
-    const everything = isSuperAdmin(viewer.role as never) || (config?.salesManager ? String(config.salesManager) === viewer.userId : false);
+    // Whose lines this viewer sees, as on the Commission page (2026-10-23): everyone's for a Super Admin or the Sales
+    // Manager; a team leader their team's but the SM's; anyone else their own.
+    const scope = sale ? await commissionScope({ userId: viewer.userId, role: viewer.role as never }) : null;
     const suggestedEmail = await this.suggestedEmailFor(h, student);
 
     return {
@@ -1220,7 +1221,7 @@ export class StudentService {
             month: sale.month,
             countedAt: sale.countedAt ?? null,
             lines: (sale.lines ?? [])
-              .filter((l) => everything || String(l.user) === viewer.userId)
+              .filter((l) => !!scope && canSeeLine(scope, viewer.userId, l, closer))
               .map((l) => ({ role: l.role, userName: l.userName, amount: l.amount, note: l.note ?? "" })),
           }
         : null,

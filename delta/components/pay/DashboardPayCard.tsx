@@ -19,7 +19,7 @@ export function DashboardPayCard() {
   if (isLoading) return <Skeleton className="h-52 rounded-xl" />;
   if (isError || !data) return null;
   if (data.me) {
-    return <PayMonthCard compact row={data.me} slab={data.slabs[data.me.role]} month={data.month} payoutsKnown={!!data.payoutsKnown} />;
+    return <PayMonthCard compact row={data.me} slab={data.slabs[data.me.role] ?? []} month={data.month} payoutsKnown={!!data.payoutsKnown} />;
   }
   if (!data.totals || !data.people?.length) return null;
 

@@ -106,6 +106,53 @@ export async function loadConfig(): Promise<CommissionConfig> {
   };
 }
 
+/**
+ * What a viewer may see of commission (the user, 2026-10-23: "only his own; the team leader his and his team members';
+ * the sales manager everyone" — as the Sales CRM has it since 2026-10-15): Super Admins and the Sales Manager see
+ * everything; a team leader sees their own active teams; everyone else only themselves.
+ */
+export interface CommissionScope {
+  all: boolean;
+  /** Active teams the viewer leads (empty when `all`). */
+  ledTeamIds: string[];
+  /** Members and leaders of those teams, the viewer included. */
+  teamPeople: Set<string>;
+}
+
+export async function commissionScope(viewer: { userId: string; role?: IRole }): Promise<CommissionScope> {
+  const me = viewer.userId;
+  const s = await CommissionSettings.findOne({ key: "default" }).select("salesManager").lean();
+  if (isSuperAdmin(viewer.role) || idOf(s?.salesManager) === me) return { all: true, ledTeamIds: [], teamPeople: new Set() };
+  const led = Types.ObjectId.isValid(me)
+    ? await Team.find({ leaders: new Types.ObjectId(me), status: { $ne: "inactive" } }).select("_id members leaders").lean()
+    : [];
+  const teamPeople = new Set<string>([me]);
+  for (const t of led) for (const u of [...(t.members ?? []), ...(t.leaders ?? [])]) teamPeople.add(idOf(u));
+  return { all: false, ledTeamIds: led.map((t) => String(t._id)), teamPeople };
+}
+
+/** May the viewer see this commission line (an SM line only when `all`)? */
+export function canSeeLine(scope: CommissionScope, viewerId: string, line: { user?: unknown; role?: string }, saleCloser = ""): boolean {
+  if (scope.all) return true;
+  if (idOf(line.user) === viewerId) return true;
+  if (!scope.ledTeamIds.length || line.role === "sm") return false;
+  return scope.teamPeople.has(idOf(line.user)) || (!!saleCloser && scope.teamPeople.has(saleCloser));
+}
+
+/** The rates a viewer may see: a team leader no SM rate, everyone else only the sales rate. */
+export function planFor(plan: Plan, scope: CommissionScope): Partial<Plan> {
+  if (scope.all) return plan;
+  if (scope.ledTeamIds.length) return { sales: plan.sales, tl: plan.tl, creditUsd: plan.creditUsd };
+  return { sales: plan.sales, creditUsd: plan.creditUsd };
+}
+
+/** The salary slabs a viewer may see, by the same rule. */
+export function slabsForScope<T extends Record<string, unknown>>(slabs: T, scope: CommissionScope): Partial<T> {
+  if (scope.all) return slabs;
+  const keep = scope.ledTeamIds.length ? ["sales", "tl"] : ["sales"];
+  return Object.fromEntries(Object.entries(slabs).filter(([k]) => keep.includes(k))) as Partial<T>;
+}
+
 /** Names looked up once per pass, not once per line. */
 class Names {
   private cache = new Map<string, string>();
@@ -525,13 +572,19 @@ export class CommissionService {
     const canEdit = false;
     const seesHeld = isSuperAdmin(viewer.role);
     const month = uaeMonthOf(new Date());
+    const scope = await commissionScope(viewer);
     const [courses, settings, teams, slabs] = await Promise.all([
       Course.find({}).select("name amount status commission").sort({ status: 1, name: 1 }).lean(),
       CommissionSettings.findOne({ key: "default" })
         .populate("salesManager", "name email")
         .populate("excludedUsers", "name email")
         .lean(),
-      Team.find({ status: "active" }).select("name leaders").populate("leaders", "name").sort({ name: 1 }).lean(),
+      Team.find({ status: "active", ...(scope.all ? {} : { _id: { $in: scope.ledTeamIds.map((id) => new Types.ObjectId(id)) } }) })
+        .select("name leaders members")
+        .populate("leaders", "name")
+        .populate("members", "name")
+        .sort({ name: 1 })
+        .lean(),
       slabsFor(month),
     ]);
 
@@ -551,32 +604,37 @@ export class CommissionService {
         ])
       : [[], []];
 
+    // "all": the whole plan; "team": a team leader's teams, no SM; "own": the sales rate and slab only (2026-10-23).
+    const view: "all" | "team" | "own" = scope.all ? "all" : scope.ledTeamIds.length ? "team" : "own";
+    const named = (u: unknown) => ({ _id: idOf(u), name: (u as { name?: string }).name ?? "" });
     return {
       canEdit,
       seesHeld,
+      view,
       tlRule: TL_RULE,
       courses: courses.map((c) => ({
         _id: String(c._id),
         name: c.name,
         amount: c.amount,
         status: c.status,
-        commission: planOf(c),
+        commission: planFor(planOf(c), scope),
       })),
-      salesManager: person(settings?.salesManager),
-      excludedUsers: ((settings?.excludedUsers ?? []) as unknown[]).map(person).filter(Boolean),
-      teams: teams.map((t) => {
-        const leaders = ((t.leaders ?? []) as unknown[]).map((l) => ({ _id: idOf(l), name: (l as { name?: string }).name ?? "" }));
+      salesManager: scope.all ? person(settings?.salesManager) : null,
+      excludedUsers: scope.all ? ((settings?.excludedUsers ?? []) as unknown[]).map(person).filter(Boolean) : [],
+      teams: view === "own" ? [] : teams.map((t) => {
+        const leaders = ((t.leaders ?? []) as unknown[]).map(named);
         return {
           _id: String(t._id),
           name: t.name,
           leaders,
+          ...(view === "team" ? { members: ((t.members ?? []) as unknown[]).map(named) } : {}),
           problem: leaders.length === 1 ? null : leaders.length ? `${leaders.length} leaders` : "No leader",
         };
       }),
       waiting,
       users: users.map((u) => ({ _id: String(u._id), name: u.name, email: u.email, status: u.status })),
       // The salary slabs in force this month, and the month they were set in (null: the sheet's).
-      slabs: slabs.slabs,
+      slabs: slabsForScope(slabs.slabs as unknown as Record<string, unknown>, scope),
       slabsFrom: slabs.from,
       slabsMonth: month,
     };
@@ -624,11 +682,11 @@ export class CommissionService {
   async getEarnings(viewer: Viewer, month: string) {
     const me = viewer.userId;
     const meId = new Types.ObjectId(me);
-    const config = await loadConfig();
-    const everything = isSuperAdmin(viewer.role) || idOf(config.salesManager) === me;
-    const ledTeams = everything ? [] : await Team.find({ leaders: meId }).select("_id").lean();
-    const myTeams = new Set(ledTeams.map((t) => String(t._id)));
-    const scope: "all" | "team" | "own" = everything ? "all" : myTeams.size ? "team" : "own";
+    // Own, a team leader's active teams, or everything (commissionScope).
+    const who = await commissionScope(viewer);
+    const ledTeams = who.ledTeamIds.map((id) => ({ _id: new Types.ObjectId(id) }));
+    const myTeams = new Set(who.ledTeamIds);
+    const scope: "all" | "team" | "own" = who.all ? "all" : myTeams.size ? "team" : "own";
 
     const filter: Record<string, unknown> = { month };
     if (scope === "team") {
@@ -705,7 +763,7 @@ export class CommissionService {
    * What a sale would earn if it were approved now — for the closing dialog,
    * before anything is saved. The same rules as a real sale, written nowhere.
    */
-  async preview(input: { course: string; team?: string; closer?: string }) {
+  async preview(input: { course: string; team?: string; closer?: string }, viewer: Viewer) {
     const course = await Course.findById(input.course).select("name commission").lean();
     if (!course) throw Object.assign(new Error("Course not found"), { statusCode: 404 });
     const plan = planOf(course);
@@ -723,15 +781,19 @@ export class CommissionService {
           ? [{ role: "sales" as const, user: new Types.ObjectId(closer), userName: await names.of(closer), amount: plan.sales }]
           : [];
 
+    // Only what the viewer may see (2026-10-23): their own line(s), a team leader's team's lines but the SM's — it used
+    // to answer anyone signed in with every line of any closer's sale, names and amounts.
+    const scope = await commissionScope(viewer);
+    const visible = (l: { user?: unknown; role?: string }) => canSeeLine(scope, viewer.userId, l, closer);
     return {
       courseName: course.name,
-      plan,
+      plan: planFor(plan, scope),
       state: resolved.state,
       reason: resolved.reason,
       teamName: resolved.teamName,
       closerName: closer ? await names.of(closer) : "",
-      closerTotal: closerLines.reduce((s, l) => s + l.amount, 0),
-      lines: (resolved.state === "counted" ? resolved.lines : closerLines).map((l) => ({
+      closerTotal: closerLines.filter(visible).reduce((s, l) => s + l.amount, 0),
+      lines: (resolved.state === "counted" ? resolved.lines : closerLines).filter(visible).map((l) => ({
         role: l.role,
         user: String(l.user),
         userName: l.userName,

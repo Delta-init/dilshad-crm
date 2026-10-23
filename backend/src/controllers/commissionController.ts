@@ -185,7 +185,7 @@ export const getPreview = async (req: AuthenticatedRequest, res: Response, next:
       sendError(res, "Validation failed", 400, parsed.error.flatten().fieldErrors);
       return;
     }
-    const preview = await commissionService.preview(parsed.data);
+    const preview = await commissionService.preview(parsed.data, viewerOf(req));
     sendSuccess(res, "Commission preview", preview);
   } catch (err) {
     next(err);

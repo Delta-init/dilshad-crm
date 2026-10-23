@@ -337,7 +337,9 @@ check("the Sales Manager sees everyone's too, his own month with it; no month me
   && (body.people?.length ?? 0) === 8 && body.totals !== null && (h.body.data as { month?: string }).month === MONTH, `${body.people?.length}`);
 h = await call("GET", "/commission/pay", "Ria");
 body = h.body.data as unknown as PayBody;
-check("a team leader sees her own only", h.status === 200 && body.me?.name === "Ria" && body.people === null && body.totals === null);
+// Since 2026-10-23 a team leader sees her team's people too — not everyone's.
+check("a team leader sees her own and her team's, not everyone's", h.status === 200 && body.me?.name === "Ria" && (h.body.data as { view?: string }).view === "team"
+  && (body.people ?? []).some((r) => r.name === "Ria") && (body.people?.length ?? 0) < 8 && body.totals !== null, JSON.stringify((body.people ?? []).map((r) => r.name)));
 h = await call("GET", "/commission/pay", "Owner");
 body = h.body.data as unknown as PayBody;
 check("a Super Admin sees everyone — and has no row of their own", h.status === 200 && body.me === null && (body.people?.length ?? 0) === 8, `${body.people?.length}`);
@@ -363,7 +365,11 @@ body = h.body.data as unknown as PayBody;
 check("Theertha's month follows it: D now pays 60% — 21,000 → 2,500 + 138", body.me?.percent === 60 && body.me.commission.payable === 138 && body.me.total === 2_638, JSON.stringify(body.me));
 h = await call("GET", "/commission/plan", "Theertha");
 const plan = h.body.data as { slabs?: { sales: unknown[]; sm: unknown[]; tl?: unknown[] }; slabsFrom?: string; slabsMonth?: string };
-check("the plan carries this month's slabs, and when they were set", h.status === 200 && plan.slabs?.sales.length === 3 && plan.slabs.sm.length === 3 && !plan.slabs.tl && plan.slabsFrom === MONTH && plan.slabsMonth === MONTH);
+// A salesperson's plan carries only their own slab since 2026-10-23; a Super Admin's every one.
+check("the plan carries this month's slabs, and when they were set — a salesperson only the sales one", h.status === 200 && plan.slabs?.sales.length === 3 && !plan.slabs.sm && !plan.slabs.tl && plan.slabsFrom === MONTH && plan.slabsMonth === MONTH, JSON.stringify(Object.keys(plan.slabs ?? {})));
+h = await call("GET", "/commission/plan", "Owner");
+const ownerPlan = h.body.data as { slabs?: { sales: unknown[]; sm: unknown[]; tl?: unknown[] } };
+check("…a Super Admin's the Sales Manager's too", h.status === 200 && ownerPlan.slabs?.sales.length === 3 && ownerPlan.slabs.sm.length === 3);
 
 
 server.close();

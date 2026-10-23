@@ -19,6 +19,11 @@ export interface CommissionPerson {
 }
 
 export interface CommissionPlanView {
+  /**
+   * What the viewer may see (2026-10-23): "all" the whole plan; "team" a team
+   * leader's own teams, no SM rate; "own" only the Sales Staff rate and slab.
+   */
+  view?: "all" | "team" | "own";
   /** A Super Admin: may change amounts, the Sales Manager and excluded logins. */
   canEdit: boolean;
   /** A Super Admin sees the sales on hold; nobody edits the plan (2026-10-09). */
@@ -30,13 +35,16 @@ export interface CommissionPlanView {
     name: string;
     amount: number;
     status: "active" | "inactive";
-    commission: CoursePlan;
+    /** Only the rates the viewer may see are sent. */
+    commission: Partial<CoursePlan>;
   }[];
   salesManager: CommissionPerson | null;
   excludedUsers: CommissionPerson[];
   teams: {
     _id: string;
     name: string;
+    /** A team leader's own team: who is in it. */
+    members?: { _id: string; name: string }[];
     leaders: { _id: string; name: string }[];
     /** Why the team holds its sales: "No leader", "2 leaders"; null when it has one. */
     problem: string | null;
@@ -55,8 +63,8 @@ export interface CommissionPlanView {
   }[];
   /** Everyone, for the pickers — Super Admins only. */
   users: (CommissionPerson & { status: "active" | "inactive" })[];
-  /** The salary slabs in force this month; absent from a server before them. */
-  slabs?: Slabs;
+  /** The salary slabs in force this month, for the roles the viewer may see; absent from a server before them. */
+  slabs?: Partial<Slabs>;
   /** The month they were set in — null while they're the owner's sheet. */
   slabsFrom?: string | null;
   /** This month (UAE): a change saved now is in force from it. */
@@ -120,13 +128,16 @@ export interface CommissionPayout {
 
 export interface PayView {
   month: string;
-  slabs: Slabs;
+  /** "team": a team leader seeing their own teams' people (2026-10-23). */
+  view?: "all" | "team" | "own";
+  /** The roles the viewer may see. */
+  slabs: Partial<Slabs>;
   slabsFrom: string | null;
   /** False when finance couldn't be asked — the payouts are unknown, not "none". */
   payoutsKnown?: boolean;
   /** The viewer's own month; null when they aren't on a slab. */
   me: PayRow | null;
-  /** Everyone — Super Admins only. */
+  /** Everyone — a Super Admin and the Sales Manager; a team leader their team's people. */
   people: PayRow[] | null;
   totals: { people: number; salary: number; payable: number; total: number } | null;
 }
