@@ -306,3 +306,41 @@ export async function giveRepeatLead(viewer: Viewer, leadId: string, toUserId: s
   if (toUserId !== viewer.userId && toUserId !== ownerNow) void announceAssignment(toUserId, String(lead._id), lead.name);
   return { id: String(lead._id), givenTo: { id: toUserId, name: to.name } };
 }
+
+// ─── Finding the lead a number belongs to (2026-10-23, with the uploads and adding by hand) ────────────────────────────
+/*
+ * A number matches on its last 9 digits, as the 3CX lookup and Root's router match it — "+971 50 123 4567",
+ * "0501234567" and "971501234567" are one person (the sheet used to compare the text exactly, so a number typed another
+ * way came in as a second lead). A number shorter than that matches only itself. Email isn't used: families share one.
+ */
+export const PHONE_TAIL = 9;
+const digitsOf = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+/** The last 9 digits of a number, or "" when it has fewer. */
+export const phoneTail = (v: unknown) => { const d = digitsOf(v); return d.length >= PHONE_TAIL ? d.slice(-PHONE_TAIL) : ""; };
+/** Every number in a lead's phone field (it can hold several: "050… / 055…"), as last-9 tails. */
+const tailsOf = (field: unknown) => new Set(String(field ?? "").split(/[/,;|\n]+/).map(phoneTail).filter(Boolean));
+const SEP = "[\\s\\-.()]*";
+
+type FoundLead = { _id: Types.ObjectId; name?: string; phone?: string; status?: string; updatedAt?: Date };
+
+/** The lead already holding this number, or null — a copy marked "repeated" last, else the one worked on latest. */
+export async function findLeadByPhone(raw: unknown): Promise<FoundLead | null> {
+  const phone = String(raw ?? "").trim();
+  const tail = phoneTail(phone);
+  if (!tail) return phone ? Lead.findOne({ phone }).select("name phone status updatedAt").lean<FoundLead>() : null;
+  const found = await Lead.find({ phone: { $regex: `${tail.split("").join(SEP)}(?!${SEP}\\d)` } })
+    .select("name phone status updatedAt").limit(50).lean<FoundLead[]>();
+  const same = found.filter((l) => tailsOf(l.phone).has(tail));
+  same.sort((a, b) => Number(a.status === "repeated") - Number(b.status === "repeated")
+    || new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime());
+  return same[0] ?? null;
+}
+
+/** A sentence for whoever brought a known number in by hand or in an upload. */
+export function repeatMessage(outcome: RepeatOutcome): string {
+  if (outcome.kind === "split") return "Already in the CRM with nobody on it — split again as a new lead";
+  const was = outcome.previousOwnerName ? ` (with ${outcome.previousOwnerName})` : "";
+  return outcome.alreadyClient
+    ? `Already a client${was} — their team leader is asked to verify it`
+    : `Already in the CRM${was} — sent to the team leader to verify, not added twice`;
+}

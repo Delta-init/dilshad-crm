@@ -58,6 +58,9 @@ function ResultSummary({ result }: { result: UploadLeadsResult }) {
           { label: "Leads Created",   value: result.created,  color: "bg-green-500/10 border-green-500/20 text-green-400" },
           { label: "Invalid Rows",    value: result.invalid,  color: result.invalid > 0 ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-muted/30 border-border text-muted-foreground" },
           { label: "Auto Assigned",   value: result.assigned, color: "bg-purple-500/10 border-purple-500/20 text-purple-400" },
+          ...((result.cameAgain ?? 0) > 0
+            ? [{ label: "Came in again", value: result.cameAgain ?? 0, color: "bg-orange-500/10 border-orange-500/20 text-orange-500" }]
+            : []),
         ].map((stat, i) => (
           <motion.div
             key={stat.label}
@@ -82,6 +85,19 @@ function ResultSummary({ result }: { result: UploadLeadsResult }) {
         >
           {result.assigned} leads auto-assigned across selected teams
         </motion.p>
+      )}
+
+      {(result.repeatDetails?.length ?? 0) > 0 && (
+        <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-3 space-y-1">
+          <p className="text-sm font-medium text-orange-500">
+            {result.repeatDetails!.length} number{result.repeatDetails!.length !== 1 ? "s were" : " was"} already in the CRM — not added twice; see Repeat leads
+          </p>
+          <ul className="space-y-0.5 text-xs text-muted-foreground">
+            {result.repeatDetails!.map((r) => (
+              <li key={`${r.row}-${r.leadId}`}>Row {r.row} · {r.phone} — {r.message}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {result.invalid > 0 && result.invalidDetails.length > 0 && (

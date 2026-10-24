@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import type { ParsedLead, ExcelParseResult } from "../types/index.js";
-import { LeadService } from "./leadService.js";
+import { findLeadByPhone } from "./repeatLeadService.js";
 
 // Normalize header names to a canonical key
 function normalizeHeader(header: string): string {
@@ -46,7 +46,6 @@ function normalizeReferralType(raw?: string): "employee" | "external" | "student
   return "external";
 }
 
-const leadService = new LeadService();
 
 export class ExcelService {
   async parseFile(buffer: Buffer, mimetype: string): Promise<ExcelParseResult> {
@@ -96,6 +95,7 @@ export class ExcelService {
 
     const valid: ParsedLead[] = [];
     const invalid: ExcelParseResult["invalid"] = [];
+    const repeats: NonNullable<ExcelParseResult["repeats"]> = [];
 
     // Process data rows (starting from index 1)
     for (let i = 1; i < rows.length; i++) {
@@ -153,13 +153,9 @@ export class ExcelService {
         errors.push("Referred By is mandatory for referral leads");
       }
 
-      const existingLead = await leadService.getLeadsByPhoneNumber(
-        phone.replace("+", ""),
-      );
-
-      if (existingLead) {
-        errors.push("Lead already exists");
-      }
+      // A number already in the CRM (its last 9 digits) is that lead coming in again: held for its team leader by the
+      // upload, not refused (2026-10-23) — unless the row is wrong in some other way.
+      const existingLead = phone ? await findLeadByPhone(phone) : null;
 
       // Skip completely empty rows
       const allEmpty = rawHeaders.every(
@@ -169,6 +165,8 @@ export class ExcelService {
 
       if (errors.length > 0) {
         invalid.push({ row: rowNumber, data: rawData, errors });
+      } else if (existingLead) {
+        repeats.push({ row: rowNumber, leadId: String(existingLead._id), phone, name, ...(source ? { source } : {}) });
       } else {
         const parsedLead: ParsedLead = {
           name,
@@ -187,6 +185,6 @@ export class ExcelService {
       }
     }
 
-    return { valid, invalid };
+    return { valid, invalid, repeats };
   }
 }

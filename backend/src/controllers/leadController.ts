@@ -14,6 +14,7 @@ import { Team } from "../models/Team.js";
 import mongoose from "mongoose";
 import { notifyLeadAssignment } from "../services/pushService.js";
 import { announceNewLeads, collectAssignments } from "../services/leadAlertService.js";
+import { holdRepeatLead, announceRepeats, findLeadByPhone, repeatMessage, type RepeatOutcome } from "../services/repeatLeadService.js";
 import { changeFollowUpDate, syncFollowUpDateWithReminder } from "../services/followUpDateService.js";
 import { closeIsInFinance, leadFinanceLink, sendLeadPayment } from "../services/leadFinancePaymentService.js";
 
@@ -174,7 +175,8 @@ export const uploadLeads = async (
       file.mimetype,
     );
 
-    if (parseResult.valid.length === 0 && parseResult.invalid.length > 0) {
+    const repeatsFound = parseResult.repeats ?? [];
+    if (parseResult.valid.length === 0 && repeatsFound.length === 0 && parseResult.invalid.length > 0) {
       sendError(res, "No valid leads found in the file", 400, {
         invalid: parseResult.invalid,
       });
@@ -182,6 +184,23 @@ export const uploadLeads = async (
     }
 
     const reporterId = req.user!.userId;
+
+    // Numbers already in the CRM: those leads came in again — held for their team leaders to verify, as from the sheet,
+    // never created twice (2026-10-23).
+    const repeatDetails: { row: number; phone: string; leadId: string; outcome: string; message: string }[] = [];
+    const heldInUpload: Array<Extract<RepeatOutcome, { kind: "held" }>> = [];
+    const repeatsToSplit: string[] = [];
+    for (const r of repeatsFound) {
+      try {
+        const out = await holdRepeatLead(r.leadId, { name: r.name, source: r.source ?? null, note: `In an upload (row ${r.row})` }, reporterId);
+        if (out.kind === "held") heldInUpload.push(out); else repeatsToSplit.push(out.leadId);
+        repeatDetails.push({ row: r.row, phone: r.phone, leadId: r.leadId, outcome: out.kind, message: repeatMessage(out) });
+      } catch (err) {
+        console.error("[upload] repeat not held:", err instanceof Error ? err.message : err);
+      }
+    }
+    if (heldInUpload.length) void announceRepeats(heldInUpload);
+    if (repeatsToSplit.length) await leadService.autoAssignLeads(repeatsToSplit).catch(() => null);
     let createdLeads: unknown[] = [];
 
     if (parseResult.valid.length > 0) {
@@ -240,11 +259,13 @@ export const uploadLeads = async (
       res,
       "Leads uploaded successfully",
       {
-        total: parseResult.valid.length + parseResult.invalid.length,
+        total: parseResult.valid.length + parseResult.invalid.length + repeatsFound.length,
         created: createdLeads.length,
         assigned: assignmentResult.assigned,
         invalid: parseResult.invalid.length,
         invalidDetails: parseResult.invalid,
+        cameAgain: repeatDetails.length,
+        repeatDetails,
       },
       201,
     );
@@ -721,6 +742,17 @@ export const createLead = async (
     }
     if (!data.assignedTo && !teamAutoAssign) {
       data.assignedTo = req.user!.userId;
+    }
+
+    // A number already in the CRM is that lead coming in again, never a second copy (2026-10-23): held for its team
+    // leader to verify, as from the sheet; whoever typed it is told.
+    const existing = await findLeadByPhone(data.phone);
+    if (existing) {
+      const out = await holdRepeatLead(String(existing._id), { name: data.name, source: data.source ?? null, note: "Added again by hand" }, req.user!.userId);
+      if (out.kind === "held") void announceRepeats([out]);
+      else await leadService.autoAssignLeads([out.leadId]).catch(() => null);
+      sendError(res, repeatMessage(out), 409, { leadId: [out.leadId], outcome: [out.kind] });
+      return;
     }
 
     const lead = await leadService.createLead(data, req.user!.userId);

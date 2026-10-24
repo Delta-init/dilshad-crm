@@ -8,7 +8,7 @@ import { emitToUser } from "../socket.js";
 import { sendWelcomeToLead } from "../services/whatsappCloudService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import { announceNewLeads } from "../services/leadAlertService.js";
-import { holdRepeatLead, announceRepeats, type RepeatOutcome } from "../services/repeatLeadService.js";
+import { holdRepeatLead, announceRepeats, findLeadByPhone, type RepeatOutcome } from "../services/repeatLeadService.js";
 
 const leadService = new LeadService();
 
@@ -207,7 +207,7 @@ export const syncSheetLead = async (
     const reporterId = row?.reporter ? row.reporter : superAdmin._id.toString();
 
     // ── A phone we already have: a repeat, for its team leader to verify ──
-    const existing = await Lead.findOne({ phone });
+    const existing = await findLeadByPhone(phone);
     if (existing) {
       const outcome = await holdRepeatLead(existing._id.toString(), repeatRowOf(row), superAdmin._id.toString());
       if (outcome.kind === "split") await leadService.autoAssignLeads([outcome.leadId]).catch(() => null);
@@ -379,7 +379,7 @@ export const syncSheetLeadsBatch = async (
       const email = sanitizeEmail(row.email);
 
       // A phone we already have: a repeat, for its team leader to verify
-      const exists = await Lead.findOne({ phone });
+      const exists = await findLeadByPhone(phone);
       if (exists) {
         try {
           const outcome = await holdRepeatLead(exists._id.toString(), repeatRowOf(row), reporterId);

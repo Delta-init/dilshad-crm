@@ -753,6 +753,8 @@ export interface ParsedLead {
 export interface ExcelParseResult {
   valid: ParsedLead[];
   invalid: { row: number; data: Record<string, unknown>; errors: string[] }[];
+  /** Rows whose number is already a lead: that lead came in again (2026-10-23) — held for its team leader, not created. */
+  repeats?: { row: number; leadId: string; phone: string; name?: string; source?: string }[];
 }
 
 export interface AutoAssignResult {
