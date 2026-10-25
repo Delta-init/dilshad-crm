@@ -17,6 +17,7 @@ import api from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/lib/store/authStore";
 import { ClassInfo } from "@/components/mentors/ClassInfo";
+import { WhoIsFree } from "@/components/mentors/WhoIsFree";
 
 /** Ported alongside this page rather than shared: the rest of this codebase
     keeps this same small helper private to whichever file needs it (see
@@ -219,6 +220,8 @@ export default function MentorsPage() {
    * whichever they happen to know.
    */
   const [query, setQuery] = useState("");
+  /* The Who's free popup (2026-10-25). */
+  const [freeOpen, setFreeOpen] = useState(false);
 
   /*
    * Search the sessions — a class by its title, course or module, a booked
@@ -251,6 +254,14 @@ export default function MentorsPage() {
   const classShown = (c: MentorClass) =>
     (!course || c.courseId === course) && (!mod || c.moduleId === mod) && (!needle || (c.mine && has(c.title, c.course, c.module)));
   const meetingShown = (v: MentorMeeting) => !needle || has(v.title, ...(v.attendeeNames ?? []));
+
+  /* Who's free looks at the people on the page (academy and name), whatever sessions are being searched. */
+  const freeCandidates = useMemo(() => {
+    const all = schedule.data?.mentors ?? [];
+    const q = query.trim().toLowerCase();
+    const inAcademy = academy ? all.filter((m) => m.academy?.id === academy) : all;
+    return q ? inAcademy.filter((m) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)) : inAcademy;
+  }, [schedule.data, query, academy]);
 
   const shown = useMemo(() => {
     const all = schedule.data?.mentors ?? [];
@@ -334,10 +345,11 @@ export default function MentorsPage() {
     onError: (e) => toast.error(apiErrorMessage(e, "Could not cancel that")),
   });
 
-  const openBooking = (mentor: Mentor, day: Date) => {
+  /* From a cell: ten o'clock, half an hour. From Who's free (2026-10-25): the time and length picked there. */
+  const openBooking = (mentor: Mentor, day: Date, time = "10:00", durationMins = 30) => {
     setBooking({ mentor, day });
     setForm({
-      title: "", kind: "staff", time: "10:00", durationMins: "30",
+      title: "", kind: "staff", time, durationMins: String(durationMins),
       meetingUrl: "", notes: "",
     });
     setGuests([{ name: "", email: "" }]);
@@ -637,6 +649,9 @@ export default function MentorsPage() {
           />
         </div>
         <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" className="mr-1 gap-1.5" disabled={!schedule.data} onClick={() => setFreeOpen(true)}>
+            <Users2 className="h-3.5 w-3.5" /> Who&apos;s free?
+          </Button>
           <Button variant="outline" size="icon" onClick={() => setOffset((o) => o - 1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -868,6 +883,18 @@ export default function MentorsPage() {
           <Loader2 className="h-3 w-3 animate-spin" /> Refreshing…
         </p>
       )}
+
+      <WhoIsFree
+        open={freeOpen}
+        onOpenChange={setFreeOpen}
+        mentors={freeCandidates}
+        days={days}
+        tz={tz}
+        sameDay={sameDay}
+        offOnDay={offOnDay}
+        canBook={canBook}
+        onBook={openBooking}
+      />
 
       <Dialog open={Boolean(booking)} onOpenChange={(o) => !o && setBooking(null)}>
         <DialogContent className="sm:max-w-lg">
