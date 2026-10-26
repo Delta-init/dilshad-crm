@@ -115,8 +115,8 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
           {row.commission.notCountedYet > 0 && (
             <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
               <Hourglass className="mt-0.5 h-3 w-3 shrink-0" />
-              {row.commission.notCountedYet} {plural(row.commission.notCountedYet, "sale is", "sales are")} still finishing the steps after the
-              close — the commission is added once {plural(row.commission.notCountedYet, "it's", "they're")} done.
+              {row.commission.notCountedYet} {plural(row.commission.notCountedYet, "sale is", "sales are")} waiting for finance&apos;s
+              approval — the commission is added once {plural(row.commission.notCountedYet, "it's", "they're")} approved.
             </p>
           )}
         </div>

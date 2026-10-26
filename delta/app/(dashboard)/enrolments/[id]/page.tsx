@@ -21,7 +21,7 @@ import type { Course } from "@/types/course";
 /**
  * One enrolment: the five steps after the close — finance approved, LMS
  * account, CS assigned, onboarded, MT5 bonus — with who did each and when, and
- * what it earns in commission (counted once every step is done). Opened from a
+ * what it earns in commission (counted once finance approves it — 2026-10-26). Opened from a
  * My Enrolments card. The closer sees their own; anyone who may view students,
  * any.
  */

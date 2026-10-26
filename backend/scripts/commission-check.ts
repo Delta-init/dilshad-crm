@@ -3,10 +3,10 @@
  * stand-in for finance that answers the enrolment status call — with the LMS
  * and Tetra Commission's side, as finance passes them on.
  *
- *   - a sale is counted once its five steps are done (finance approved, LMS
- *     account, CS, onboarded, MT5 bonus — none promised counts as approved),
- *     once, with the plan of that day; until then it is in progress, saying
- *     which step it waits on; sales closed before 1 October never count;
+ *   - a sale is counted once finance approves it (since 2026-10-26 — the LMS
+ *     account, CS, onboarding and MT5 bonus are shown, never waited on), once,
+ *     with the plan of that day; until then it is in progress, waiting for
+ *     finance; sales closed before 1 October never count;
  *   - Sales Staff to the closer, TL to the leader of the sale's team (or the
  *     closer's one team), SM to the Sales Manager; a TL or SM who closes earns
  *     the Sales Staff amount too; the Sales Manager's own team pays no TL;
@@ -293,42 +293,33 @@ s = await saleOf(staff);
 check("an invoice voided in finance reverses its sale", reversed === 1 && s?.state === "reversed" && /voided/.test(s.reason), `${reversed} ${s?.reason}`);
 check("a reversed sale is not reversed twice", (await reverseVoidedSales()) === 0);
 
-section("The five steps: counted only when every one is done");
+section("Counted at finance's approval — the steps after it are shown, never waited on (2026-10-26)");
 const journey = await sale("Neethu", c1._id, "TEAM MAVERICK");
 finance.set(journey, { approval: "pending", status: "sent", invoiceNumber: "INV-J", lms: null, commission: null });
 await sweep();
 let j = await saleOf(journey);
 check("closed, not approved yet: in progress, waiting for finance", j?.state === "progress" && /^Next step: Finance approved/.test(j.reason) && j.lines.length === 0, j?.reason);
 approve(journey); await sweep(); j = await saleOf(journey);
-check("approved: waiting for the LMS account", j?.state === "progress" && /^Next step: LMS account/.test(j.reason), j?.reason);
-at(journey, { lms: DONE_LMS, commission: tc({ cs: "", onboarded: { done: false }, bonus: { state: "not_requested", amount: 500, currency: "USD" } }) });
+check("approved — no LMS account, no CS, no bonus yet: counted at once, the plan of that day, when", j?.state === "counted" && who(j, "sales") === "Neethu:230" && !!j.stepsDoneAt && !!j.countedAt, JSON.stringify(j));
+at(journey, { lms: DONE_LMS, commission: tc({ bonus: { state: "rejected", amount: 500, currency: "USD", reason: "Wrong MT5", by: "Bea Broker" } }) });
 await sweep(); j = await saleOf(journey);
-check("in the LMS, waiting in Delta Open Students: waiting for a CS", /^Next step: CS assigned/.test(j?.reason ?? ""), j?.reason);
-at(journey, { commission: tc({ onboarded: { done: false }, bonus: { state: "not_requested", amount: 500, currency: "USD" } }) });
-await sweep(); j = await saleOf(journey);
-check("given a CS: waiting for the welcome", /^Next step: Onboarded/.test(j?.reason ?? ""), j?.reason);
-at(journey, { commission: tc({ bonus: { state: "pending", amount: 500, currency: "USD" } }) });
-await sweep(); j = await saleOf(journey);
-check("welcomed, the bonus pending: waiting for a broker admin", /^Next step: MT5 bonus — \$500 — onboarding verification pending/.test(j?.reason ?? ""), j?.reason);
-at(journey, { commission: tc({ bonus: { state: "rejected", amount: 500, currency: "USD", reason: "Wrong MT5", by: "Bea Broker" } }) });
-await sweep(); j = await saleOf(journey);
-check("the bonus rejected: stopped there, nothing paid", j?.state === "progress" && /^Stopped at: MT5 bonus — Rejected: Wrong MT5/.test(j.reason) && j.lines.length === 0, j?.reason);
+check("a later step going wrong (the MT5 bonus rejected) changes nothing", j?.state === "counted" && who(j, "sales") === "Neethu:230", j?.reason);
 at(journey, { commission: tc({ bonus: { state: "approved", amount: 500, currency: "USD", by: "Bea Broker" } }) });
 await sweep(); j = await saleOf(journey);
-check("approved by the broker admin: counted, the plan of that day, when", j?.state === "counted" && who(j, "sales") === "Neethu:230" && !!j.stepsDoneAt && !!j.countedAt, JSON.stringify(j));
-const plain = await sale("Neethu", c1._id, "TEAM MAVERICK");
-complete(plain);
+check("…nor its approval afterwards — counted once, as it was", j?.state === "counted" && who(j, "sales") === "Neethu:230", j?.reason);
+const bonusWaiting = await sale("Neethu", c1._id, "TEAM MAVERICK");
+finance.set(bonusWaiting, { approval: "approved", status: "sent", invoiceNumber: "INV-BW", lms: DONE_LMS, commission: tc({ bonus: { state: "not_requested", amount: 500, currency: "USD" } }) });
 await sweep();
-check("no bonus promised: counted once welcomed", (await saleOf(plain))?.state === "counted");
-const notForex = await sale("Neethu", c1._id, "TEAM MAVERICK");
-finance.set(notForex, { approval: "approved", status: "sent", invoiceNumber: "INV-DM", lms: DONE_LMS, commission: { state: "skipped", detail: "Not a Forex course" } });
+check("approved, its MT5 bonus not raised yet: counted", (await saleOf(bonusWaiting))?.state === "counted");
+const returned = await sale("Neethu", c1._id, "TEAM MAVERICK");
+finance.set(returned, { approval: "returned", status: "sent", invoiceNumber: "INV-R", lms: null, commission: null });
 await sweep();
-check("a course Tetra Commission doesn't take: its steps aren't needed, counted after the LMS", (await saleOf(notForex))?.state === "counted");
+j = await saleOf(returned);
+check("sent back by finance: not counted, stopped at finance", j?.state === "progress" && /^Stopped at: Finance approved/.test(j.reason) && j.lines.length === 0, j?.reason);
 const silent = await sale("Neethu", c1._id, "TEAM MAVERICK");
 finance.set(silent, { approval: "approved", status: "sent", invoiceNumber: "INV-S", lms: DONE_LMS, commission: { state: "sent", code: "STU-9", cs: "Asha CS", team: "T", live: false } });
 await sweep();
-j = await saleOf(silent);
-check("Tetra Commission not answering: not counted on a guess", j?.state === "progress" && /^Next step: Onboarded — Tetra Commission didn't say/.test(j.reason), j?.reason);
+check("Tetra Commission not answering: counted all the same — finance approved it", (await saleOf(silent))?.state === "counted");
 const early = await sale("Neethu", c1._id, "TEAM MAVERICK");
 approve(early);
 await CommissionSale.create({
@@ -338,17 +329,14 @@ await CommissionSale.create({
 });
 await sweep();
 j = await saleOf(early);
-check("counted by the rule before this one, its steps not done: back in progress, nothing paid", j?.state === "progress" && j.lines.length === 0 && /^Next step: LMS account/.test(j.reason), j?.reason);
-complete(early);
-await sweep();
-j = await saleOf(early);
-check("…counted again once they are", j?.state === "counted" && !!j.stepsDoneAt);
+check("counted before stepsDoneAt existed, finance approved: still counted, now with stepsDoneAt", j?.state === "counted" && who(j, "sales") === "Neethu:230" && !!j.stepsDoneAt, JSON.stringify(j));
 const voided = await sale("Neethu", c1._id, "TEAM MAVERICK");
 approve(voided);
 await sweep();
+check("…approved: counted", (await saleOf(voided))?.state === "counted");
 at(voided, { status: "void" });
-await sweep();
-check("voided while in progress: reversed", (await saleOf(voided))?.state === "reversed");
+await reverseVoidedSales();
+check("voided after it was counted: reversed", (await saleOf(voided))?.state === "reversed");
 const quiet = await sale("Neethu", c1._id, "TEAM MAVERICK");
 complete(quiet);
 financeDown = true;
@@ -474,7 +462,7 @@ complete(blrSale);
 statusCalls.length = 0;
 await sweep();
 s = await saleOf(blrSale);
-check("counted once its steps are done, with the plan's amounts as any other sale",
+check("counted at finance's approval, with the plan's amounts as any other sale",
   s?.state === "counted" && who(s, "sales") === "Theertha:230" && who(s, "sm") === "Abrar:85", `${s?.state} ${JSON.stringify(s?.lines)}`);
 check("…its status asked of Bangalore's organization, and never of Dubai's",
   statusCalls.some((c) => c.org === BLR_ORG && c.ids.includes(blrSale)) && !statusCalls.some((c) => c.org === DUBAI_ORG && c.ids.includes(blrSale)),

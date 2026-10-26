@@ -42,7 +42,7 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
     month: { type: String, required: true },
     /** When finance approved it, where this CRM saw it happen. */
     approvedAt: { type: Date },
-    /** When its five steps were all done — and who earns what was decided. */
+    /** When it was counted at finance's approval (since 2026-10-26; before, when its five steps were done) — and who earns what was decided. */
     stepsDoneAt: { type: Date },
     /**
      * The course fee in AED: finance's invoice total, refreshed by the sweep

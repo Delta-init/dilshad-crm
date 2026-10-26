@@ -32,12 +32,14 @@ import type {
  *   - sales closed under a shared login (root user, superadmin, developer)
  *     earn nobody anything.
  *
- * Counted once the sale's five steps are all done (the user, 2026-10-04):
- * finance approved, LMS account, CS assigned, onboarded, and the MT5 bonus a
- * broker admin approved — approved by itself when none was promised. With the
- * amounts of that day, in the month the sale was made (UAE time), for sales
- * closed from 1 October 2026 on. Until then the sale is "progress", saying
- * which step it waits on. A sale whose invoice finance voids is reversed.
+ * Counted once finance approves the sale (the user, 2026-10-26: "they will get
+ * commission when they get approval from the finance — no need to wait for the
+ * MT5 bonus"). It used to wait for all five steps (2026-10-04) — LMS account,
+ * CS, onboarded and the MT5 bonus too; those are still shown on the enrolment,
+ * never waited on. With the amounts of that day, in the month the sale was made
+ * (UAE time), for sales closed from 1 October 2026 on. Until then the sale is
+ * "progress", saying it waits for finance (or was sent back). A sale whose
+ * invoice finance voids is reversed.
  */
 
 /**
@@ -308,13 +310,12 @@ type StudentLite = {
 };
 
 /**
- * Every sale closed since COUNT_FROM, followed until its five steps are done
- * (enrolmentSteps.ts): finance approved, LMS account, CS, onboarded, MT5 bonus.
- * Until then it is "progress", saying which step it waits on; once all are
- * done, who earns what is decided with the plan of that day — counted, held
- * (waiting) or excluded — and never redone by this. A sale counted by the rule
- * before this one (at finance's approval, with no `stepsDoneAt`) is followed
- * again until its steps are done too.
+ * Every sale closed since COUNT_FROM, followed until finance approves it (its
+ * first step, enrolmentSteps.ts — since 2026-10-26 the only one commission waits
+ * for). Until then it is "progress", saying it waits for finance; once approved,
+ * who earns what is decided with the plan of that day — counted, held (waiting)
+ * or excluded — and never redone by this (`stepsDoneAt`: when that was). A sale
+ * counted before `stepsDoneAt` existed is looked at once more and keeps counting.
  */
 export async function trackSales(config: CommissionConfig, names: Names): Promise<number> {
   const handed = await FinanceHandover.find({ status: "sent" }).select("studentId invoiceNumber approvedAt academy financeOrgId").lean();
@@ -387,7 +388,8 @@ export async function trackSales(config: CommissionConfig, names: Names): Promis
         continue;
       }
 
-      const steps = stepsOf(st, h ? { status: "sent", approvedAt: h.approvedAt as Date | undefined } : null);
+      // Only finance's approval is waited for (2026-10-26); LMS, CS, onboarding and the MT5 bonus are not.
+      const steps = stepsOf(st, h ? { status: "sent", approvedAt: h.approvedAt as Date | undefined } : null).filter((x) => x.key === "finance");
       if (!allDone(steps)) {
         const reason = waitingOn(steps);
         if (sale?.state === "progress" && sale.reason === reason && sale.fee === base.fee) continue;
@@ -400,7 +402,7 @@ export async function trackSales(config: CommissionConfig, names: Names): Promis
         continue;
       }
 
-      // Every step done: who earns what, at the plan of today.
+      // Finance approved: who earns what, at the plan of today.
       const plan = planOf(course);
       const resolved = await resolveSale({ closer: student.assignedTo, saleTeam: student.team, plan }, config, names);
       await CommissionSale.updateOne(

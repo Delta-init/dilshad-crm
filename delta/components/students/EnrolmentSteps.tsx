@@ -11,7 +11,8 @@ import type { EnrolmentStep } from "@/hooks/useEnrolments";
    An enrolment's five steps after the close (the user, 2026-10-04): finance
    approved → LMS account → CS assigned → onboarded → MT5 bonus approved. Green
    done, yellow waiting, red stopped; grey when not known yet, or not needed (a
-   course Tetra Commission doesn't take). Commission counts once all are done.
+   course Tetra Commission doesn't take). Commission counts once finance has
+   approved — the first step (2026-10-26); the others are shown, not waited on.
    The server works the steps out (backend/src/services/enrolmentSteps.ts);
    this only draws them — a strip on each My Enrolments card, and the full list
    on the enrolment's own page.
@@ -78,10 +79,13 @@ function StepsSummary({ steps }: { steps: EnrolmentStep[] }) {
   if (!open) {
     return <p className="mt-1.5 text-[11px] text-green-700 dark:text-green-400">Every step done — this sale counts for commission.</p>;
   }
+  // Commission counts at finance's approval (2026-10-26): once that step is done, say so beside what is still open.
+  const counts = steps.some((s) => s.key === "finance" && s.state === "done");
   const tone = open.state === "failed" ? "text-red-700 dark:text-red-400" : open.state === "waiting" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground";
   return (
     <p className={cn("mt-1.5 text-[11px]", tone)}>
       {open.state === "failed" ? "Stopped at" : "Next step"}: {open.label}{open.detail ? ` — ${open.detail}` : ""}
+      {counts && <span className="text-green-700 dark:text-green-400"> · counts for commission</span>}
     </p>
   );
 }
