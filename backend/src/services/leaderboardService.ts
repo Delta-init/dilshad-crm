@@ -5,6 +5,7 @@ import { Student } from "../models/Student.js";
 import { LeadCall } from "../models/LeadCall.js";
 import { dubaiDayStart, dubaiToday } from "../utils/dubaiDay.js";
 import { CommissionSettings } from "../models/CommissionSettings.js";
+import { COUNTED_PAYMENT } from "../utils/countedPayments.js";
 
 /*
  * The month's leaderboard (the owner, 2026-10-07): every active salesperson,
@@ -136,6 +137,7 @@ export class LeaderboardService {
       Lead.aggregate<Counted>([
         { $match: { "payments.paidAt": inMonth } },
         { $unwind: "$payments" },
+        { $match: COUNTED_PAYMENT },
         { $match: { "payments.paidAt": inMonth } },
         { $group: { _id: "$assignedTo", n: { $sum: "$payments.amount" } } },
       ]),

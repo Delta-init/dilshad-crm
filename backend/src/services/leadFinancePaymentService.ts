@@ -170,21 +170,27 @@ export async function sendLeadPayment(viewer: Viewer, leadId: string, body: Reco
   if (existing && minor(body.amount) !== minor(existing.amount)) throw fail(400, "Send the payment's own amount — change it on the lead first if it is wrong");
 
   const sent = await balance.record(viewer, String(student._id), body);
-  const externalId = sent?.externalId ?? `bp-${String(body.key ?? "")}`;
-  const method = String(body.method ?? "");
   // The finance write came first: a retry after a failure here finds the payment already with finance (same key)
   // and only records it on the lead.
-  const fresh = await Lead.findById(lead._id);
-  if (!fresh) throw fail(404, "Lead not found");
-  if (!fresh.payments.some((p) => p.finance?.externalId === externalId)) {
-    const finance = { externalId, method, sentAt: new Date() };
-    const target = paymentId ? fresh.payments.id(paymentId) : null;
-    if (target) target.finance = finance;
-    else {
-      const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, 500) : `Balance payment · ${PAYMENT_METHOD_LABELS[method as EnrolmentPaymentMethod] ?? method}`;
-      fresh.payments.push({ amount: Number(body.amount), note, paidAt: new Date(String(body.paidOn)), addedBy: new Types.ObjectId(viewer.userId), finance } as never);
-    }
-    await fresh.save();
-  }
+  await keepOnLead(lead._id, viewer, body, sent?.externalId ?? `bp-${String(body.key ?? "")}`, paymentId);
   return sent;
+}
+
+/**
+ * A balance payment sent to finance, kept on its lead as a request — pending, counted nowhere until finance approves it
+ * (2026-10-26: leadPaymentDecisions.ts keeps the decision). From the lead's Payments panel, or since 2026-10-26 the
+ * Balance payments page too, which used to leave the lead without it. Once only: the external id is finance's key.
+ */
+export async function keepOnLead(leadId: unknown, viewer: Viewer, body: Record<string, unknown>, externalId: string, paymentId?: string | null): Promise<void> {
+  const fresh = await Lead.findById(leadId);
+  if (!fresh || fresh.payments.some((p) => p.finance?.externalId === externalId)) return;
+  const method = String(body.method ?? "");
+  const finance = { externalId, method, sentAt: new Date(), state: "pending" as const };
+  const target = paymentId ? fresh.payments.id(paymentId) : null;
+  if (target) target.finance = finance;
+  else {
+    const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, 500) : `Balance payment · ${PAYMENT_METHOD_LABELS[method as EnrolmentPaymentMethod] ?? method}`;
+    fresh.payments.push({ amount: Number(body.amount), note, paidAt: new Date(String(body.paidOn)), addedBy: new Types.ObjectId(viewer.userId), finance } as never);
+  }
+  await fresh.save();
 }

@@ -398,8 +398,11 @@ export interface IPayment {
   /** How it was paid and its receipt (2026-10-23); absent on payments from before. */
   method?: EnrolmentPaymentMethod;
   receipt?: { name?: string; url: string; key: string; size?: number; mimeType?: string; uploadedAt?: Date };
-  /** Sent to finance as a balance payment (2026-10-23). */
-  finance?: { externalId: string; method: string; sentAt: Date };
+  /**
+   * Sent to finance as a balance payment (2026-10-23), and finance's decision on it (2026-10-26): it counts — revenue,
+   * leaderboard, reports — only once approved (utils/countedPayments.ts); `state` is kept by leadPaymentDecisions.ts.
+   */
+  finance?: { externalId: string; method: string; sentAt: Date; state?: "pending" | "approved" | "rejected"; decidedAt?: Date; reason?: string };
   createdAt?: Date;
   updatedAt?: Date;
 }

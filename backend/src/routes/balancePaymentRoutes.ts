@@ -3,6 +3,8 @@ import multer from "multer";
 import { authenticate } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/permissions.js";
 import { BalancePaymentService } from "../services/balancePaymentService.js";
+import { keepOnLead } from "../services/leadFinancePaymentService.js";
+import { Student } from "../models/Student.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 import { sendError, sendSuccess } from "../utils/response.js";
 
@@ -73,7 +75,15 @@ router.post(
 
 router.post("/:studentId", authenticate, checkPermission("balancePayments", "create"), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const sent = await svc.record(viewer(req), String(req.params.studentId), (req.body ?? {}) as Record<string, unknown>);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const sent = await svc.record(viewer(req), String(req.params.studentId), body);
+    // Kept on the lead too, as a request — counted once finance approves it (2026-10-26). The payment is with finance
+    // either way: a lead that can't be written is logged, not refused.
+    const student = await Student.findById(String(req.params.studentId)).select("leadId").lean<{ leadId?: unknown } | null>();
+    if (student?.leadId) {
+      await keepOnLead(student.leadId, viewer(req), body, sent?.externalId ?? `bp-${String(body.key ?? "")}`)
+        .catch((err) => console.error(`[balancePayments] could not keep ${sent?.externalId} on lead ${String(student.leadId)}`, err));
+    }
     sendSuccess(res, "Sent to finance for approval", sent, 201);
   } catch (err) { next(err); }
 });

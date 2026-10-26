@@ -8,6 +8,7 @@ import type { TeamFilters, ITeam, IUser } from "../types/index.js";
 import { emitToUser } from "../socket.js";
 import { notifyLeadAssignment, notifyBulkLeadAssignment } from "./pushService.js";
 import { announceNewLeads } from "./leadAlertService.js";
+import { COUNTED_TOTAL } from "../utils/countedPayments.js";
 
 // ─── Populated query helper ───────────────────────────────────────────────────
 
@@ -295,7 +296,7 @@ export class TeamService {
         $group: {
           _id:     "$assignedTo",
           total:   { $sum: 1 },
-          revenue: { $sum: { $sum: "$payments.amount" } },
+          revenue: { $sum: COUNTED_TOTAL },
           ...statusSumFields,
         },
       },
@@ -843,7 +844,7 @@ export class TeamService {
               whatsapp:       { $sum: { $cond: [{ $eq: ["$status", "whatsapp"] },       1, 0] } },
               student:        { $sum: { $cond: [{ $eq: ["$status", "student"] },        1, 0] } },
               // Sum all payments collected across all leads assigned to this member
-              totalPayments:  { $sum: { $sum: "$payments.amount" } },
+              totalPayments:  { $sum: COUNTED_TOTAL },
             },
           },
         ]);
@@ -1253,7 +1254,7 @@ export class TeamService {
           callback:       { $sum: { $cond: [{ $eq: ["$status", "callback"] },       1, 0] } },
           whatsapp:       { $sum: { $cond: [{ $eq: ["$status", "whatsapp"] },       1, 0] } },
           student:        { $sum: { $cond: [{ $eq: ["$status", "student"] },        1, 0] } },
-          totalPayments:  { $sum: { $sum: "$payments.amount" } },
+          totalPayments:  { $sum: COUNTED_TOTAL },
         },
       },
     ]);

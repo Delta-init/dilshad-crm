@@ -43,7 +43,8 @@ export interface Payment {
   method?: string;
   receipt?: { name?: string; url: string; key: string; size?: number; mimeType?: string };
   /** Sent to finance as a balance payment (2026-10-23). */
-  finance?: { externalId: string; method: string; sentAt: string };
+  /** Sent to finance as a balance payment, and finance's decision on it (2026-10-26) — it counts only once approved. */
+  finance?: { externalId: string; method: string; sentAt: string; state?: "pending" | "approved" | "rejected"; reason?: string };
 }
 
 export interface Reminder {

@@ -171,8 +171,8 @@ function FinanceTag({ state }: { state?: LeadFinanceLink["payments"][number] }) 
     : state.financeStatus === "approved"
       ? { text: `Approved by finance${state.receiptNumber ? ` · ${state.receiptNumber}` : ""}`, cls: "border-green-500/40 bg-green-500/10 text-green-500" }
       : state.financeStatus === "rejected"
-        ? { text: `Rejected by finance${state.reason ? `: ${state.reason}` : ""}`, cls: "border-red-500/40 bg-red-500/10 text-red-400" }
-        : { text: "With finance — waiting for approval", cls: "border-blue-500/40 bg-blue-500/10 text-blue-400" };
+        ? { text: `Rejected by finance${state.reason ? `: ${state.reason}` : ""} — not counted`, cls: "border-red-500/40 bg-red-500/10 text-red-400" }
+        : { text: "Request — waiting for finance, not counted yet", cls: "border-blue-500/40 bg-blue-500/10 text-blue-400" };
   return <span className={cn("mt-1 inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium", tag.cls)}><Landmark className="h-3 w-3" />{tag.text}</span>;
 }
 
@@ -219,7 +219,11 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
     (a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime(),
   );
 
-  const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+  // A balance payment sent to finance counts once finance approves it (2026-10-26) — until then it is a request,
+  // shown with its tag and kept out of the total; a rejected one never counts.
+  const counts = (p: (typeof payments)[number]) => !p.finance?.externalId || p.finance.state === "approved";
+  const totalPaid = payments.filter(counts).reduce((s, p) => s + p.amount, 0);
+  const waitingTotal = payments.filter((p) => p.finance?.externalId && p.finance.state !== "approved" && p.finance.state !== "rejected").reduce((s, p) => s + p.amount, 0);
 
   // sellingAmount takes priority over courseAmount for progress tracking
   const targetAmount = sellingAmount ?? courseAmount;
@@ -289,6 +293,9 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
                 <p className={cn("text-base font-bold", isOverpaid ? "text-red-400" : "text-green-400")}>
                   {fmt(totalPaid)}
                 </p>
+                {waitingTotal > 0 && (
+                  <p className="text-[10px] text-blue-400">+ {fmt(waitingTotal)} waiting for finance — not counted yet</p>
+                )}
               </div>
               {hasTotal && (
                 <>

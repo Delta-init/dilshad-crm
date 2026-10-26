@@ -162,6 +162,10 @@ const paymentSchema = new Schema<IPayment>(
         externalId: { type: String, required: true },
         method: { type: String, required: true },
         sentAt: { type: Date, required: true },
+        /** Finance's decision (2026-10-26): only an approved one counts. Absent on ones sent before — read as pending. */
+        state: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+        decidedAt: { type: Date },
+        reason: { type: String },
       }, { _id: false }),
       default: undefined,
     },

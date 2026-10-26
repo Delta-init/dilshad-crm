@@ -11,6 +11,9 @@
  *     on the lead; sent once; then finance's say (pending) on it; its amount and date locked, and no deleting it.
  *   - Case 4: a new payment on a closed lead — sent and kept on the lead; saved twice is one; refused by finance, kept
  *     nowhere; out of scope; not in finance yet.
+ *   - Case 6 (2026-10-26): a balance payment counts only once finance approves it — pending or rejected it is shown,
+ *     never counted; one sent before has its decision filled in; a decision is final.
+ *   - Case 7 (2026-10-26): the Balance payments page keeps the payment on the lead too, as a request.
  *
  * Run by lead-payments-finance-check.sh. Scratch database only.
  */
@@ -273,6 +276,54 @@ try {
   check("…not to another lead's receipt", r.status === 400, `${r.status} ${r.body.message}`);
   r = await call("PUT", `/leads/${jasheer.leadId}/payments/${jasheer.pays[1]}`, "Sally", { method: "cash" });
   check("a payment sent to finance keeps its method", r.status === 409, `${r.status} ${r.body.message}`);
+
+  section("Case 6 — a balance payment counts only once finance approves it (2026-10-26)");
+  const { LeaderboardService } = await import("../src/services/leaderboardService.js");
+  const { syncLeadPaymentDecisions } = await import("../src/services/leadPaymentDecisions.js");
+  const month = today.slice(0, 7);
+  const sallyRevenue = async () => (await new LeaderboardService().getLeaderboard(month)).rows.find((x: any) => x.name === "Sally")?.revenue ?? 0;
+  const bpOn = async (l: { leadId: string }, ext: string) => ((await leadDoc(l)).payments as any[]).find((x) => x.finance?.externalId === ext);
+  const decide = (studentId: string, ext: string, status: string, reason?: string) => {
+    const f = finance.get(`org-dubai:${studentId}`)!;
+    const b = f.balancePayments.find((x) => x.externalId === ext);
+    Object.assign(b, { status, decidedAt: new Date().toISOString(), ...(reason ? { reason } : {}) });
+  };
+  check("sent, finance not decided: a request — pending on the lead", (await bpOn(fresh, "bp-knew12345678"))?.finance?.state === "pending", JSON.stringify(await bpOn(fresh, "bp-knew12345678")));
+  const revBefore = await sallyRevenue();
+  await syncLeadPaymentDecisions();
+  check("…still pending at finance: not counted on the leaderboard", (await sallyRevenue()) === revBefore, `${revBefore} → ${await sallyRevenue()}`);
+  decide(fresh.studentId, "bp-knew12345678", "approved");
+  check("finance approves it: kept on the lead", (await syncLeadPaymentDecisions()) >= 1 && (await bpOn(fresh, "bp-knew12345678"))?.finance?.state === "approved" && !!(await bpOn(fresh, "bp-knew12345678"))?.finance?.decidedAt);
+  check("…and it counts: the leaderboard up by its 500", (await sallyRevenue()) === revBefore + 500, `${revBefore} → ${await sallyRevenue()}`);
+  // One sent before this (no state kept): read as pending until finance's answer is kept.
+  await db.collection("leads").updateOne({ _id: new Types.ObjectId(fresh.leadId) }, { $unset: { "payments.$[p].finance.state": "" } }, { arrayFilters: [{ "p.finance.externalId": "bp-kroot1234567" }] });
+  check("a payment sent before this, no decision kept: not counted", (await sallyRevenue()) === revBefore + 500);
+  await syncLeadPaymentDecisions();
+  check("…its decision filled in from finance (pending)", (await bpOn(fresh, "bp-kroot1234567"))?.finance?.state === "pending", JSON.stringify(await bpOn(fresh, "bp-kroot1234567")));
+  decide(fresh.studentId, "bp-kroot1234567", "rejected", "Wrong amount");
+  await syncLeadPaymentDecisions();
+  const rejected = await bpOn(fresh, "bp-kroot1234567");
+  check("finance rejects it: rejected on the lead, with finance's reason — still shown, never counted",
+    rejected?.finance?.state === "rejected" && rejected.finance.reason === "Wrong amount" && rejected.amount === 100 && (await sallyRevenue()) === revBefore + 500, JSON.stringify(rejected));
+  decide(fresh.studentId, "bp-kroot1234567", "approved");
+  await syncLeadPaymentDecisions();
+  check("a decision is final: not asked about again", (await bpOn(fresh, "bp-kroot1234567"))?.finance?.state === "rejected");
+  const { isCountedPayment } = await import("../src/utils/countedPayments.js");
+  check("the rule in code: the close's own counts, a pending or rejected balance payment doesn't, an approved one does",
+    isCountedPayment({}) && !isCountedPayment({ finance: { externalId: "x", state: "pending" } }) && !isCountedPayment({ finance: { externalId: "x" } })
+    && !isCountedPayment({ finance: { externalId: "x", state: "rejected" } }) && isCountedPayment({ finance: { externalId: "x", state: "approved" } }));
+
+  section("Case 7 — the Balance payments page keeps the payment on the lead too, as a request (2026-10-26)");
+  const page = await lead({ payments: [{ amount: 1125, note: CLOSE, day: plus(today, -6) }] });
+  r = await call("POST", `/balance-payments/${page.studentId}`, "Root", { key: "kpage1234567", amount: 600, method: "cash", paidOn: today, receipt });
+  const onLead = await bpOn(page, "bp-kpage1234567");
+  check("sent to finance, and on the lead: pending, its amount, method and date", r.status === 201 && onLead?.amount === 600 && onLead.finance?.state === "pending" && onLead.finance.method === "cash" && onLead.note === "Balance payment · Cash", `${r.status} ${r.body.message} ${JSON.stringify(onLead)}`);
+  r = await call("POST", `/balance-payments/${page.studentId}`, "Root", { key: "kpage1234567", amount: 600, method: "cash", paidOn: today, receipt });
+  check("sent twice: one payment on the lead", ((await leadDoc(page)).payments as any[]).filter((x) => x.finance?.externalId === "bp-kpage1234567").length === 1);
+  const pageBefore = await sallyRevenue();
+  decide(page.studentId, "bp-kpage1234567", "approved");
+  await syncLeadPaymentDecisions();
+  check("…approved: counts", (await sallyRevenue()) === pageBefore + 600, `${pageBefore} → ${await sallyRevenue()}`);
 } finally {
   server.close();
   fin.stop(true);

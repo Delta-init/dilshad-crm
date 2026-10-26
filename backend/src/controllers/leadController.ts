@@ -17,6 +17,7 @@ import { announceNewLeads, collectAssignments } from "../services/leadAlertServi
 import { holdRepeatLead, announceRepeats, findLeadByPhone, repeatMessage, type RepeatOutcome } from "../services/repeatLeadService.js";
 import { changeFollowUpDate, syncFollowUpDateWithReminder } from "../services/followUpDateService.js";
 import { closeIsInFinance, leadFinanceLink, sendLeadPayment } from "../services/leadFinancePaymentService.js";
+import { COUNTED_PAYMENT } from "../utils/countedPayments.js";
 
 const leadService = new LeadService();
 const excelService = new ExcelService();
@@ -1033,6 +1034,7 @@ export const getUserRevenue = async (
         },
       },
       { $unwind: "$payments" },
+      { $match: COUNTED_PAYMENT },
       { $match: { "payments.paidAt": { $gte: dateFrom, $lte: dateTo } } },
       {
         $group: {

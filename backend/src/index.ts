@@ -16,6 +16,7 @@ import { startFollowupWarningScheduler } from "./services/followupWarningSchedul
 import { startBackupScheduler } from "./services/backupService.js";
 import { startInactiveLeadScheduler } from "./services/inactiveLeadScheduler.js";
 import { startIdleAlertScheduler } from "./services/idleAlertScheduler.js";
+import { startLeadPaymentDecisionScheduler } from "./services/leadPaymentDecisions.js";
 import { startMeetingReminderScheduler } from "./services/meetingReminderScheduler.js";
 import { startCallSyncWorker } from "./services/callSyncService.js";
 
@@ -63,6 +64,8 @@ const start = async () => {
       startBackupScheduler();
       startInactiveLeadScheduler();
       startIdleAlertScheduler();
+      // Finance's decision on each balance payment sent from a lead — only an approved one counts (2026-10-26).
+      startLeadPaymentDecisionScheduler();
       startMeetingReminderScheduler();
     } else {
       console.log("⏸️  RUN_SCHEDULERS=false — the timed jobs are not running in this process");
