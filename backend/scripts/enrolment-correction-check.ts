@@ -538,8 +538,9 @@ const pageB = await call("GET", `/students/enrolments/${blr.id}`, "Abrar");
 check("…its own page too", pageB.status === 200 && (pageB.body.data as any)?.academy === "bangalore" && (pageB.body.data as any)?.invoice?.approval === "returned", `${pageB.status}`);
 
 form = await call("GET", `/students/${blr.id}/correction`, "Theertha");
-check("the correction starts from: Bangalore, sent back, the lead's own AED 200",
-  form.status === 200 && form.body.data?.academy === "bangalore" && form.body.data?.sentBack === true && form.body.data?.ownOnLead === 200,
+check("the correction starts from: Bangalore, sent back, the lead's own AED 200, both academies offered",
+  form.status === 200 && form.body.data?.academy === "bangalore" && form.body.data?.sentBack === true && form.body.data?.ownOnLead === 200
+    && (form.body.data as any)?.academies?.join(",") === "dubai,bangalore",
   JSON.stringify({ ...form.body.data, student: undefined }));
 const blrCorrection = (over: Record<string, unknown> = {}) => correction({
   course: String(courseBlr._id), totalFee: 45000, paidAmount: 45000, hasBonus: false, bonusAmount: 0,
@@ -558,7 +559,7 @@ const refusedB = async (label: string, body: Record<string, unknown>, status: nu
   const same = (await snapshot(blr.id)) === before && sendsFor(blr.id).length === sendsB;
   check(label, x.status === status && pattern.test(x.body.message ?? "") && same, `${x.status} ${x.body.message}${same ? "" : " — something changed"}`);
 };
-await refusedB("moving it to Dubai in a correction: 422, the academy is fixed", blrCorrection({ academy: "dubai" }), 422, /academy is fixed at the close/);
+await refusedB("an academy that isn't one: 422", blrCorrection({ academy: "mumbai" }), 422, /isn't an academy/);
 await refusedB("a course with no Bangalore price: 422", blrCorrection({ course: String(course500._id) }), 422, /COURSE 500 has no Bangalore price/);
 await refusedB("an AED figure the rate doesn't make: 422", blrCorrection({ paidAmount: 46000, payments: [pay("cash", 4500, "own", { collectedBefore: true, currency: "AED", amountInCurrency: 200, exchangeRate: 22.5 }), pay("cash", 41500, "aed", { currency: "AED", amountInCurrency: 500, exchangeRate: 22.5 })] }), 422, /comes to 11,250 INR/);
 await refusedB("the lead's own money at another AED figure: 409", blrCorrection({ paidAmount: 42250, payments: [pay("cash", 2250, "own", { collectedBefore: true, currency: "AED", amountInCurrency: 100, exchangeRate: 22.5 }), pay("bank_transfer", 40000, "upi")] }), 409, /come to 200 AED now, not 100 AED/);
@@ -597,6 +598,49 @@ const k10 = sendsFor(blr.id).length;
 r = await call("PUT", `/students/${blr.id}/correction`, "Theertha", blrCorrection());
 await waitFor(() => sendsFor(blr.id).length === k10 + 1);
 check("a correction after the setting changed still goes to the organization it was billed in", r.status === 200 && sendsFor(blr.id).at(-1)?._org === BLR_ORG, `${r.status} ${sendsFor(blr.id).at(-1)?._org}`);
+env.FINANCE_ORG_ID_BANGALORE = BLR_ORG;
+
+section("Case 9b — moved to the other academy in a correction (2026-10-26)");
+// Sent back again; corrected for Dubai: the course's Dubai price, in AED — the lead's own 200 needs no rate now.
+await settled(blr.id);
+await sendBack(blr.id);
+const toDubai = blrCorrection({
+  academy: "dubai", totalFee: 2250, paidAmount: 2250,
+  payments: [pay("cash", 200, "own-dxb", { collectedBefore: true }), pay("card", 2050, "card-dxb")],
+});
+const k11 = sendsFor(blr.id).length;
+r = await call("PUT", `/students/${blr.id}/correction`, "Theertha", toDubai);
+s = await Student.findById(blr.id).lean();
+let hMove = await FinanceHandover.findOne({ studentId: blr.id }).lean();
+check("corrected for Dubai: 200, the enrolment now Dubai's, at the Dubai fee", r.status === 200 && s?.academy === "dubai" && s?.totalFee === 2250 && /moves to the Dubai academy's books/.test(r.body.message ?? ""), `${r.status} ${r.body.message} ${s?.academy}`);
+check("…the outbox row moved to Dubai's organization", hMove?.academy === "dubai" && hMove?.financeOrgId === DUBAI_ORG, `${hMove?.academy} ${hMove?.financeOrgId}`);
+await waitFor(() => sendsFor(blr.id).length === k11 + 1);
+const moved = sendsFor(blr.id).at(-1);
+check("…sent to Dubai's organization, same id, saying academy dubai, in fils", moved?._org === DUBAI_ORG && moved?.externalId === blr.id && moved?.academy === "dubai"
+  && moved?.payments?.map((p: any) => p.amountMinor).join(",") === "20000,205000", JSON.stringify({ org: moved?._org, academy: moved?.academy, payments: moved?.payments?.map((p: any) => p.amountMinor) }));
+// And back to Bangalore: sent back by Dubai's finance this time.
+await settled(blr.id);
+await sendBack(blr.id);
+const k12 = sendsFor(blr.id).length;
+r = await call("PUT", `/students/${blr.id}/correction`, "Theertha", blrCorrection({ academy: "bangalore" }));
+hMove = await FinanceHandover.findOne({ studentId: blr.id }).lean();
+await waitFor(() => sendsFor(blr.id).length === k12 + 1);
+check("and back to Bangalore: Bangalore's organization again, the row and the enrolment with it",
+  r.status === 200 && (await Student.findById(blr.id).lean())?.academy === "bangalore" && hMove?.financeOrgId === BLR_ORG && sendsFor(blr.id).at(-1)?._org === BLR_ORG && sendsFor(blr.id).at(-1)?.academy === "bangalore",
+  `${r.status} ${r.body.message} ${hMove?.financeOrgId} ${sendsFor(blr.id).at(-1)?._org}`);
+// Bangalore not offered on this server: moving there is refused, nothing changes.
+await settled(blr.id);
+await sendBack(blr.id);
+await call("PUT", `/students/${blr.id}/correction`, "Theertha", toDubai);
+await settled(blr.id);
+await sendBack(blr.id);
+env.FINANCE_ORG_ID_BANGALORE = "";
+const before9b = await snapshot(blr.id);
+r = await call("PUT", `/students/${blr.id}/correction`, "Theertha", blrCorrection({ academy: "bangalore" }));
+check("without Bangalore set up, moving there is refused: 422, nothing changed", r.status === 422 && /Bangalore finance organization/.test(r.body.message ?? "") && (await snapshot(blr.id)) === before9b, `${r.status} ${r.body.message}`);
+form = await call("GET", `/students/${blr.id}/correction`, "Theertha");
+check("…and the form offers only Dubai", form.status === 200 && (form.body.data as any)?.academies?.join(",") === "dubai", JSON.stringify((form.body.data as any)?.academies));
+env.FINANCE_ORG_ID_BANGALORE = BLR_ORG;
 
 // No Bangalore organization set: a Bangalore close is refused, Dubai's still go.
 env.FINANCE_ORG_ID_BANGALORE = "";

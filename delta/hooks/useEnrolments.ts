@@ -198,8 +198,10 @@ export interface EnrolmentCorrectionStart {
   /** …starting from this email, the enrolment's or else the lead's, when finance would take it; "" when none. */
   suggestedEmail?: string;
   mayMove: boolean;
-  /** The academy it was closed for — fixed; the form's money is in its currency. */
+  /** The academy it is for — the form's money is in its currency; changeable while sent back (2026-10-26). */
   academy?: Academy;
+  /** The academies this server offers — the academy can change only when there is more than one. */
+  academies?: Academy[];
   /** What the lead holds of its own, in AED (its currency) — on a Bangalore correction, given with its rate to INR. */
   ownOnLead: number;
   counsellors?: { _id: string; name: string }[];
@@ -213,6 +215,8 @@ export interface EnrolmentCorrectionInput {
   phone: string;
   email: string;
   course: string;
+  /** The academy, changed or not (2026-10-26). */
+  academy?: Academy;
   team?: string | null;
   assignedTo?: string | null;
   enrollmentDate: string;

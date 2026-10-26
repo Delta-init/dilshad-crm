@@ -274,7 +274,7 @@ export interface EnrolmentCorrection {
   payments?: unknown;
   hasBonus?: boolean;
   bonusAmount?: number | string;
-  /** Fixed at the close: only accepted when it is the academy the enrolment already has. */
+  /** The academy: kept unless changed (2026-10-26) — a change moves it to that academy's finance books. */
   academy?: string;
 }
 
@@ -1432,8 +1432,9 @@ export class StudentService {
       needsClientEmail: refusedForEmail(h),
       suggestedEmail: await this.suggestedEmailFor(h, student),
       mayMove,
-      // Fixed at the close, shown read only: the form's money is in its currency.
+      // The academy it is for — changeable while sent back (2026-10-26), to those this server offers.
       academy: academyOf(student),
+      academies: (await import("./financeClient.js")).academiesOffered(),
       // In AED, the lead's own currency — on a Bangalore correction, given with its rate to INR.
       ownOnLead: (await this.ownOnLead(student.leadId)) / 100,
       ...options,
@@ -1506,13 +1507,17 @@ export class StudentService {
     const holder = await findEmailHolder(email, { name, phone, studentId: student._id, leadId: student.leadId });
     if (holder) throw emailTaken(holder, name);
 
-    // The academy is the close's, and stays (the user, 2026-10-10): the money
-    // below is in its currency, and finance is asked in its organization.
-    const academy = academyOf(student);
+    /*
+     * The academy (the user, 2026-10-26: "when it is sent back we can change the location when correcting it"):
+     * kept unless changed. Changed, the money below is in the new academy's currency and the correction goes to
+     * that academy's finance organization — finance makes it there and voids the one it sent back here.
+     */
+    const was = academyOf(student);
+    const academy = data.academy === undefined || data.academy === null || data.academy === "" ? was : data.academy;
+    if (!isAcademy(academy)) throw createError(`"${String(data.academy)}" isn't an academy — choose Dubai or Bangalore.`, 422);
+    const moving = academy !== was;
+    if (moving && academy === "bangalore") await this.assertBangaloreClose(data.course);
     const base = ACADEMY_CURRENCY[academy];
-    if (data.academy !== undefined && data.academy !== null && data.academy !== "" && data.academy !== academy) {
-      throw createError(`The academy is fixed at the close — this enrolment is for ${ACADEMY_LABELS[academy]}, and a correction can't move it.`, 422);
-    }
 
     const course = await Course.findById(data.course).select("name bangalore").lean();
     if (!course) throw createError("That course no longer exists — choose another.", 422);
@@ -1587,8 +1592,16 @@ export class StudentService {
       payments,
       hasBonus: data.hasBonus,
       bonusAmount: data.hasBonus ? Number(data.bonusAmount) : 0,
+      ...(moving ? { academy } : {}),
     });
     await student.save();
+
+    // Moved academy: the row is sent to that academy's finance organization from now on.
+    if (moving) {
+      const { financeOrgOf } = await import("./financeClient.js");
+      const financeOrgId = financeOrgOf(academy);
+      await FinanceHandover.updateOne({ studentId: student._id }, { $set: { academy, ...(financeOrgId ? { financeOrgId } : {}) } });
+    }
 
     /*
      * The lead's payment list follows: what the close recorded there is
@@ -1615,7 +1628,8 @@ export class StudentService {
     }
 
     await this.resendCorrected(id);
-    return { student: await this.populateStudent(id), message: `Corrected and sent to finance.${leadNote}` };
+    const movedNote = moving ? ` It moves to the ${ACADEMY_LABELS[academy]} academy's books.` : "";
+    return { student: await this.populateStudent(id), message: `Corrected and sent to finance.${movedNote}${leadNote}` };
   }
 
   // ── A close that went without the client's email ─────────────────────────────

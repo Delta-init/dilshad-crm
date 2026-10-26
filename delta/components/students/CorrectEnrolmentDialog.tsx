@@ -20,7 +20,7 @@ import {
   PaymentRowsEditor, missingInRows, newPaymentRow, rowAmount, rowForeignFields, type PaymentBase, type PaymentRow, rateInputFor } from "@/components/students/PaymentRowsEditor";
 import { AcademyBadge } from "@/components/students/AcademyBadge";
 import { bangalorePriceOf, feeFor, type Course } from "@/types/course";
-import type { FeeStatus, Student } from "@/types/student";
+import type { Academy, FeeStatus, Student } from "@/types/student";
 import { ACADEMY_CURRENCY, ACADEMY_LABELS, BASE_CURRENCY, ENROLMENT_LANGUAGES, academyOf, isFinanceEmail } from "@/types/student";
 
 /*
@@ -87,6 +87,14 @@ function startingRows(s: Student, ownOnLead: number, base: PaymentBase = BASE_CU
   return rows.length ? rows : [newPaymentRow({ currency: base })];
 }
 
+/**
+ * The payments as handed over, expressed for another academy (2026-10-26): each keeps what was handed over — its
+ * currency, amount and receipt — and one in a currency that isn't the new academy's asks for its rate again.
+ */
+function rowsForAcademy(rows: PaymentRow[]): PaymentRow[] {
+  return rows.map((r) => ({ ...r, rateInput: "", convertedInput: "" }));
+}
+
 interface Props {
   studentId: string;
   open: boolean;
@@ -132,8 +140,12 @@ function CorrectionForm({ studentId, start, onClose }: { studentId: string; star
   const { data: courses = [], isLoading: coursesLoading } = useAllCourses();
   const correct = useCorrectEnrolment();
 
-  // The academy it was closed for — fixed: the money below is in its currency.
-  const academy = start.academy ?? academyOf(s);
+  // The academy — changeable while sent back (2026-10-26), when this server offers more than one: the money below is in
+  // its currency, and a change moves the enrolment to that academy's finance books.
+  const closedFor = start.academy ?? academyOf(s);
+  const [academy, setAcademy] = useState<Academy>(closedFor);
+  const mayChangeAcademy = (start.academies ?? []).length > 1;
+  const moving = academy !== closedFor;
   const base = ACADEMY_CURRENCY[academy];
   const fmt = (n: number) => fmtAcademy(n, academy);
   const priceOf = (c: Course | null | undefined) => feeFor(c, academy);
@@ -225,6 +237,7 @@ function CorrectionForm({ studentId, start, onClose }: { studentId: string; star
           phone: phone.trim(),
           email: email.trim(),
           course: courseId,
+          academy,
           ...(start.mayMove ? { assignedTo: closerId || null, team: teamId || null } : {}),
           enrollmentDate: on,
           feeStatus: effectiveFeeStatus,
@@ -287,7 +300,9 @@ function CorrectionForm({ studentId, start, onClose }: { studentId: string; star
           <div className="min-w-0">
             <p className="text-xs text-red-300">Sent back{start.returnedReason ? `: ${start.returnedReason}` : " — no reason was given"}</p>
             <p className="mt-0.5 text-[10px] text-red-300/70">
-              Change anything below. Saving sends it to finance again{start.invoiceNumber ? ` as ${start.invoiceNumber}` : ""} — the same invoice, the same number.
+              {moving
+                ? `Change anything below. Saving moves it to the ${ACADEMY_LABELS[academy]} academy's finance books as a new invoice there${start.invoiceNumber ? `; ${start.invoiceNumber} is voided` : ""}.`
+                : `Change anything below. Saving sends it to finance again${start.invoiceNumber ? ` as ${start.invoiceNumber}` : ""} — the same invoice, the same number.`}
             </p>
           </div>
         </div>
@@ -319,11 +334,45 @@ function CorrectionForm({ studentId, start, onClose }: { studentId: string; star
           {takenBy && <p className="text-[10px] text-red-600 dark:text-red-400">{takenBy.message}</p>}
         </section>
 
-        {/* The academy: shown, not changed — a correction keeps the close's. */}
-        <section className="flex items-center gap-2 text-xs text-muted-foreground">
-          <MapPin className="h-3 w-3" /> Academy <AcademyBadge academy={academy} />
-          <span className="text-[10px]">Fixed at the close{academy === "bangalore" ? " — in ₹ INR, billed in Bangalore's finance" : ""}.</span>
-        </section>
+        {/* The academy: changeable while sent back (2026-10-26) when this server offers both. */}
+        {mayChangeAcademy ? (
+          <section className="space-y-1.5">
+            <p className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> Academy</p>
+            <div className="inline-flex rounded-lg border border-border p-0.5" role="radiogroup" aria-label="Academy">
+              {(start.academies ?? []).map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  role="radio"
+                  aria-checked={academy === a}
+                  onClick={() => {
+                    if (a === academy) return;
+                    setAcademy(a);
+                    // The fee follows the course's price for that academy; the payments ask for their rates again.
+                    const price = feeFor(pickedCourse, a);
+                    if (price) setFeeInput(String(price));
+                    setPaymentRows(rowsForAcademy);
+                  }}
+                  className={cn("rounded-md px-3 py-1 text-xs font-medium", academy === a ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+                >
+                  {ACADEMY_LABELS[a]}
+                </button>
+              ))}
+            </div>
+            {moving ? (
+              <p className="text-[10px] text-amber-400">
+                Moves to the {ACADEMY_LABELS[academy]} academy&apos;s books when sent — billed in {ACADEMY_CURRENCY[academy]}. Check the fee and give each payment&apos;s rate where it was paid in another currency.
+              </p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">Closed for {ACADEMY_LABELS[closedFor]}{closedFor === "bangalore" ? " — in ₹ INR, billed in Bangalore's finance" : ""}.</p>
+            )}
+          </section>
+        ) : (
+          <section className="flex items-center gap-2 text-xs text-muted-foreground">
+            <MapPin className="h-3 w-3" /> Academy <AcademyBadge academy={academy} />
+            <span className="text-[10px]">Closed for {ACADEMY_LABELS[academy]}{academy === "bangalore" ? " — in ₹ INR, billed in Bangalore's finance" : ""}.</span>
+          </section>
+        )}
 
         {/* The course and the money */}
         <section className="space-y-2">
