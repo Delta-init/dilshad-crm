@@ -19,6 +19,7 @@ import { startIdleAlertScheduler } from "./services/idleAlertScheduler.js";
 import { startLeadPaymentDecisionScheduler } from "./services/leadPaymentDecisions.js";
 import { startMeetingReminderScheduler } from "./services/meetingReminderScheduler.js";
 import { startCallSyncWorker } from "./services/callSyncService.js";
+import { startWhatsApp } from "./services/whatsapp/service.js";
 
 const app = express();
 
@@ -58,6 +59,8 @@ const start = async () => {
     // Off in a second process against the same database: these assign leads and
     // notify people on a timer, and two of them do it twice.
     if (env.RUN_SCHEDULERS) {
+      // Each person's linked WhatsApp, back after a restart (WHATSAPP=off keeps a server out of it). One process only.
+      startWhatsApp();
       startReminderScheduler();
       startSplitScheduler();
       startFollowupWarningScheduler();

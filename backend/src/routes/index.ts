@@ -27,6 +27,7 @@ import meetingRoomRoutes from "./meetingRoomRoutes.js";
 import commissionRoutes from "./commissionRoutes.js";
 import leaderboardRoutes from "./leaderboardRoutes.js";
 import publicRoutes from "./publicRoutes.js";
+import whatsappRoutes from "./whatsappRoutes.js";
 
 const router = Router();
 
@@ -68,6 +69,8 @@ router.use("/break", breakRoutes);
 router.use("/meetings", meetingRoutes);
 // The office's meeting rooms, booked through the HRMS — see meetingRoomRoutes.
 router.use("/meeting-rooms", meetingRoomRoutes);
+// WhatsApp (2026-10-27): each person's own linked WhatsApp, its chats and the lead page's card. Its media links are signed, not authenticated.
+router.use("/whatsapp", whatsappRoutes);
 
 // Health check
 router.get("/health", (_req, res) => {

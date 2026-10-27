@@ -64,6 +64,12 @@ export const CRM_MODULES = [
    * team's or everyone's (leadCallService).
    */
   "calls",
+  /*
+   * WhatsApp (2026-10-27, as in the Sales CRM): each person links their own WhatsApp and chats with their leads. View
+   * reads the chats (their own; a team leader their team's; everyone's for those above), create links a WhatsApp,
+   * sends, links a chat to a lead or makes a lead of it. Open to every role by default.
+   */
+  "whatsapp",
 ] as const;
 
 export type CrmModule = (typeof CRM_MODULES)[number];
@@ -83,6 +89,7 @@ export const OPEN_BY_DEFAULT: Partial<Record<CrmModule, Partial<ModulePermission
   balancePayments: { view: true, create: true },
   // The Calls page: 3CX calls with leads, each person scoped to their own, their team's or everyone's (2026-10-14).
   calls: { view: true, export: true },
+  whatsapp: { view: true, create: true },
 };
 
 export type PermissionsMap = {

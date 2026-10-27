@@ -44,6 +44,8 @@ export const CRM_MODULES = [
   "balancePayments",
   // The 3CX calls with leads (2026-10-14): view the Calls page, export its CSV.
   "calls",
+  /* WhatsApp (2026-10-27): each person links their own WhatsApp and chats with their leads. Open by default. */
+  "whatsapp",
 ] as const;
 
 export type CrmModule = (typeof CRM_MODULES)[number];
@@ -69,6 +71,7 @@ export const MODULE_LABELS: Record<CrmModule, string> = {
   calendar: "Calendar",
   activity: "Activity",
   "inactive-leads": "Inactive Leads",
+  whatsapp: "WhatsApp",
   balancePayments: "Balance payments",
   calls: "Calls (3CX)",
 };
@@ -94,6 +97,7 @@ export const OPEN_BY_DEFAULT: Partial<Record<CrmModule, Partial<ModulePermission
   balancePayments: { view: true, create: true },
   // Open to everyone; the server shows each person their own calls, their team's, or everyone's.
   calls: { view: true, export: true },
+  whatsapp: { view: true, create: true },
 };
 
 /** A role's permissions on one module — what it was given, or the module's default. */
