@@ -12,6 +12,8 @@
  *   - Case 7: the lead page's card — the lead's chats you may read, and its numbers.
  *   - Case 8: photos and files, voice notes — kept on disk, on short-lived signed links.
  *   - Case 9: no WhatsApp access — refused.
+ *   - Case 10: past chats handed over at linking — kept as read, nobody told, text and voice notes only, never a
+ *     follow-up.
  *
  * Run by whatsapp-check.sh. Scratch database only.
  */
@@ -249,6 +251,31 @@ try {
   check("Nora's role has no WhatsApp: the page is refused", (await call("GET", "/whatsapp/status", "Nora")).status === 403);
   check("…and sending", (await call("POST", "/whatsapp/send", "Nora", { chat: "971501234567", text: "x" })).status === 403);
   check("no token: refused", (await fetch(`http://127.0.0.1:${port}/api/v1/whatsapp/status`)).status === 401);
+
+  section("Case 10 — past chats handed over at linking");
+  const unreadBefore = (await call("GET", "/whatsapp/unread", "Sam")).body.data?.unread;
+  const past = (id: string, message: Record<string, unknown>, opts: { fromMe?: boolean; daysAgo?: number } = {}) =>
+    wa.receive({ id: String(P("Sam")), name: "Sam" }, fakeSock([]), {
+      key: { remoteJid: "971501234567@s.whatsapp.net", fromMe: !!opts.fromMe, id },
+      message, messageTimestamp: Math.floor(Date.now() / 1000) - (opts.daysAgo ?? 30) * 86400, pushName: "Asha",
+    } as never, { history: true });
+  await past("PAST-1", { conversation: "Hi, I saw your ad last month" });
+  await past("PAST-2", { conversation: "Sure — here are the details" }, { fromMe: true, daysAgo: 29 });
+  await past("PAST-3", { imageMessage: { mimetype: "image/jpeg", caption: "Fee structure" } }, { daysAgo: 28 });
+  await past("PAST-4", { documentMessage: { mimetype: "application/pdf", fileName: "brochure.pdf" } }, { daysAgo: 28 });
+  await past("PAST-5", { audioMessage: { mimetype: "audio/ogg; codecs=opus", ptt: true } }, { daysAgo: 27 });
+  await past("PAST-1", { conversation: "Hi, I saw your ad last month" });   // handed over twice
+  const kept = await WhatsAppMessage.find({ owner: P("Sam"), messageId: /^PAST-/ }).sort({ at: 1 }).lean();
+  check("kept once each, under the lead, marked as past", kept.length === 5 && kept.every((m) => m.history === true && String(m.lead) === asha), j(kept.map((m) => [m.messageId, m.history, String(m.lead)])));
+  check("…as read: the unread count doesn't move", (await call("GET", "/whatsapp/unread", "Sam")).body.data?.unread === unreadBefore && kept.every((m) => m.read === true));
+  check("…their old date kept, and who wrote", kept[0]!.direction === "in" && kept[1]!.direction === "out" && kept[0]!.at.getTime() < Date.now() - 29 * 86400_000);
+  check("an old photo: a line saying so, with its caption — no file", kept[2]!.body === "📷 Photo (older — not kept): Fee structure" && kept[2]!.media === null, j(kept[2]));
+  check("an old document: the same", kept[3]!.body === "📄 brochure.pdf (older — not kept)" && kept[3]!.media === null, j(kept[3]));
+  check("an old voice note: kept as one, to play", kept[4]!.media?.type === "audio" && kept[4]!.body === "🎤 Voice note", j(kept[4]));
+  const { chainOf } = await import("../src/services/whatsapp/followups.js");
+  const chain = chainOf([{ _id: new Types.ObjectId(), direction: "out", at: new Date(), chat: "x", history: true }] as never,
+    { enabled: true, startedAt: new Date(Date.now() - 365 * 86400_000), teams: [], dailyLimit: 60, steps: [{ waitMinutes: 60, text: "x", file: null }], updatedByName: "", updatedAt: null }, { at: null, byName: "" });
+  check("a past chat never starts an automatic follow-up", chain?.state === "before", j(chain));
 } finally {
   server.close();
   await mongoose.disconnect();

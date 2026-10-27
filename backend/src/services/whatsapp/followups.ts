@@ -109,7 +109,7 @@ export async function saveFollowupSettings(input: Record<string, unknown>, byNam
 
 /* ── One chat's chain, read from its messages ───────────────────────────── */
 
-type Msg = { _id: Types.ObjectId; direction: "in" | "out"; at: Date; chat: string; auto?: { step: number } | null };
+type Msg = { _id: Types.ObjectId; direction: "in" | "out"; at: Date; chat: string; auto?: { step: number } | null; history?: boolean };
 
 export type ChainState =
   | { state: "replied" }                        // their message is the last: nothing to follow up
@@ -132,14 +132,15 @@ export function chainOf(newestFirst: Msg[], settings: FollowupSettings, stopped:
     break;
   }
   if (!anchor) return null;   // only automatic messages kept (an older chat cut off): leave it be
-  if (!settings.startedAt || anchor.at < settings.startedAt) return { state: "before" };
+  // A past chat brought in at linking never starts one.
+  if (!settings.startedAt || anchor.at < settings.startedAt || anchor.history) return { state: "before" };
   if (stopped.at && stopped.at >= anchor.at) return { state: "stopped", byName: stopped.byName };
   if (sent >= settings.steps.length) return { state: "done", sent };
   return { state: "waiting", step: sent + 1, of: settings.steps.length, dueAt: new Date(last.at.getTime() + settings.steps[sent]!.waitMinutes * MIN), chat: last.chat };
 }
 
 const recent = (owner: Types.ObjectId | string, key: string) =>
-  WhatsAppMessage.find({ owner: new Types.ObjectId(String(owner)), key }).sort({ at: -1, _id: -1 }).limit(40).select("direction at chat auto").lean<Msg[]>();
+  WhatsAppMessage.find({ owner: new Types.ObjectId(String(owner)), key }).sort({ at: -1, _id: -1 }).limit(40).select("direction at chat auto history").lean<Msg[]>();
 
 /** The first working moment at or after `at` (in 15-minute steps, a week and a day at most). */
 async function nextWorkingMoment(at: Date): Promise<Date> {

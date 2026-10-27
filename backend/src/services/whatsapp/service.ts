@@ -33,6 +33,14 @@ import { asVoiceNote, VOICE_MIME } from "./voice.js";
    WhatsApp knows by a private id (@lid) are traced back to their number. A
    number no lead has is never made one by itself — someone links it to a lead,
    or makes a lead of it.
+
+   Past chats (the user, 2026-10-27: "get all old chats of Shan's number"):
+   when a phone is linked, WhatsApp hands the new device a copy of its chats —
+   asked for in full (which WhatsApp gives only to a desktop app, so the CRM
+   links as one: "Mac OS" on the phone's Linked devices). They are kept as
+   read, tell nobody, and never start an automatic follow-up (`history`).
+   Their text is kept, and voice notes; older photos, videos and documents
+   only as a line saying so — not downloaded.
 ──────────────────────────────────────────────────────────────────────────── */
 
 export type WAStatus = "disconnected" | "connecting" | "qr_ready" | "connected";
@@ -160,15 +168,28 @@ async function store(doc: NewMessage): Promise<Saved | null> {
 
 type Owner = { id: string; name: string };
 
-/** A message on someone's WhatsApp — kept, matched to its lead, and the owner told when it is new and not theirs. */
-export async function receive(owner: Owner, sock: WASocket, msg: WAMessage): Promise<void> {
+const captionOf = (m: proto.IMessage) => String(m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption || "").trim();
+
+/**
+ * A message on someone's WhatsApp — kept, matched to its lead, and the owner told when it is new and not theirs.
+ * `history`: one from WhatsApp's copy of past chats — kept as read, nobody told, only a voice note's file downloaded.
+ */
+export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts: { history?: boolean } = {}): Promise<void> {
   const jid = msg.key.remoteJid ?? "";
   if (!jid || jid.endsWith("@g.us") || jid.endsWith("@broadcast") || jid.endsWith("@newsletter")) return;
   const content = normalizeMessageContent(msg.message);
   if (!content || content.protocolMessage) return;
-  const body = bodyOf(content).trim();
-  const media = mediaOf(content);
+  let body = bodyOf(content).trim();
+  let media = mediaOf(content);
   if (!body && !media) return;
+  const history = opts.history === true;
+  // An old photo, video, document or sticker: a line saying so, not the file. A voice note is kept to play.
+  if (history && media && !(media.type === "audio" && content.audioMessage?.ptt)) {
+    const what = media.type === "document" ? `📄 ${media.fileName || "Document"}` : (LABEL[media.type] ?? "File");
+    const caption = captionOf(content);
+    body = `${what} (older — not kept)${caption ? `: ${caption}` : ""}`;
+    media = null;
+  }
 
   const phone = await phoneOf(sock, msg.key as proto.IMessageKey & { remoteJidAlt?: string });
   const key = phone ? phoneKey(phone) : "";
@@ -193,12 +214,13 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage): Pro
     senderName: fromMe ? "From their phone" : msg.pushName || phone || "",
     sentBy: null, sentByName: fromMe ? "From their phone" : "",
     lead,
-    read: fromMe,
+    read: fromMe || history,
     media: media ? { type: media.type, mime: media.mime, fileName: media.fileName, file: saved?.file ?? "", size: saved?.size ?? 0 } : null,
+    ...(history ? { history: true } : {}),
     at: new Date(ts > 0 ? ts * 1000 : Date.now()),
   });
   // A new message to them: a push to their phone and computer, and the open CRM refreshes its chats and count.
-  if (kept && !fromMe) {
+  if (kept && !fromMe && !history) {
     const { Lead } = await import("../../models/Lead.js");
     const leadDoc = lead ? await Lead.findById(lead).select("name").lean<{ name?: string } | null>() : null;
     const who = String(leadDoc?.name ?? "").trim() || msg.pushName || (phone ? `+${phone}` : "WhatsApp");
@@ -242,9 +264,11 @@ export async function connect(userId: string): Promise<void> {
     ...(version ? { version } : {}),
     auth: state,
     logger,
-    browser: ["Delta Remote CRM", "Chrome", "1.0.0"],
+    // A desktop app: the only kind WhatsApp hands its full past chats to (Baileys asks for them with syncFullHistory).
+    browser: ["Mac OS", "Desktop", "14.4.1"],
     markOnlineOnConnect: false,   // the phone keeps its notifications
-    syncFullHistory: false,
+    syncFullHistory: true,
+    shouldSyncHistoryMessage: () => true,
     generateHighQualityLinkPreview: false,
   });
   s.sock = sock;
@@ -278,8 +302,17 @@ export async function connect(userId: string): Promise<void> {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (s.sock !== sock || type !== "notify") return;
-    for (const msg of messages) await receive(owner, sock, msg).catch((err) => console.error(`[whatsapp] message not kept (${owner.name})`, err));
+    if (s.sock !== sock) return;
+    // "append": older ones WhatsApp catches up on — kept quietly, as past chats.
+    const history = type !== "notify";
+    for (const msg of messages) await receive(owner, sock, msg, { history }).catch((err) => console.error(`[whatsapp] message not kept (${owner.name})`, err));
+  });
+
+  // WhatsApp's copy of past chats, in parts, when the phone is linked.
+  sock.ev.on("messaging-history.set", async ({ messages, progress }) => {
+    if (s.sock !== sock) return;
+    for (const msg of messages) await receive(owner, sock, msg, { history: true }).catch((err) => console.error(`[whatsapp] past message not kept (${owner.name})`, err));
+    console.log(`[whatsapp] past chats — ${owner.name}: ${messages.length} messages${progress != null ? ` (${progress}%)` : ""}`);
   });
 }
 
