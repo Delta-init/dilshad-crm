@@ -11,7 +11,11 @@ import api from "@/lib/axios";
 export type WAStatus = "disconnected" | "connecting" | "qr_ready" | "connected";
 
 export interface WAMedia { type: string; mime: string; fileName: string; size: number; url: string }
-export interface WAMessage { id: string; direction: "in" | "out"; body: string; at: string; senderName: string; sentByName: string; media: WAMedia | null }
+export interface WAMessage {
+  id: string; direction: "in" | "out"; body: string; at: string; senderName: string; sentByName: string; media: WAMedia | null;
+  /** Sent by the CRM on its own — an automatic follow-up, its step. */
+  auto?: { step: number; of: number } | null;
+}
 export interface WALead { id: string; name: string; status: string; owner: string }
 export interface WAChat {
   chat: string; phone: string; name: string; whatsappName: string; lead: WALead | null;
@@ -19,7 +23,22 @@ export interface WAChat {
 }
 export interface WAOwner { id: string; name: string; team: string; status: WAStatus; phone: string; messages: number }
 export interface WAStatusAnswer { enabled: boolean; canLink: boolean; me: { id: string; name: string; status: WAStatus; phone: string; qr: string }; owners: WAOwner[] }
+/** Where a lead's automatic follow-ups stand (api services/whatsapp/followups.ts). */
+export interface WAFollowup {
+  on: boolean;
+  state: "off" | "ended" | "no_chat" | "replied" | "before" | "stopped" | "done" | "waiting";
+  step?: number; of?: number; nextAt?: string; sent?: number; byName?: string; ownerName?: string; linked?: boolean;
+}
+export interface WAFollowupStep { waitMinutes: number; text: string; file: { file: string; name: string; mime: string; size: number } | null }
+export interface WAFollowupSettings {
+  enabled: boolean; startedAt: string | null; teams: string[]; dailyLimit: number; steps: WAFollowupStep[];
+  updatedByName: string; updatedAt: string | null; allTeams: { id: string; name: string }[];
+}
+export interface WARecentFollowup {
+  id: string; at: string; body: string; step: number; of: number; ownerId: string; ownerName: string; chat: string; phone: string; lead: WALead | null;
+}
 export interface WALeadCard {
+  followup?: WAFollowup;
   numbers: string[]; canSend: boolean; canLink: boolean; linked: boolean; me: string;
   threads: { ownerId: string; ownerName: string; chat: string; phone: string; messages: WAMessage[] }[];
 }
@@ -119,6 +138,54 @@ export function useWhatsAppSend() {
       onSuccess: refresh,
     }),
   };
+}
+
+/* ── Automatic follow-ups ── */
+
+/** The Super Admin's settings — only asked for when `enabled` (anyone else is refused). */
+export function useWhatsAppFollowupSettings(enabled: boolean) {
+  return useQuery({
+    queryKey: ["whatsapp", "followup-settings"],
+    queryFn: async () => data<WAFollowupSettings>(await api.get("/whatsapp/followups/settings")),
+    enabled,
+    retry: false,
+  });
+}
+
+export function useSaveWhatsAppFollowupSettings() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (v: Pick<WAFollowupSettings, "enabled" | "teams" | "dailyLimit" | "steps">) => data<WAFollowupSettings>(await api.put("/whatsapp/followups/settings", v)),
+    onSuccess: refresh,
+  });
+}
+
+export function useUploadFollowupFile() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return data<NonNullable<WAFollowupStep["file"]>>(await api.post("/whatsapp/followups/file", form, { headers: { "Content-Type": "multipart/form-data" } }));
+    },
+  });
+}
+
+export function useRecentFollowups(enabled = true) {
+  return useQuery({
+    queryKey: ["whatsapp", "followups-recent"],
+    queryFn: async () => data<WARecentFollowup[]>(await api.get("/whatsapp/followups/recent")),
+    enabled,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+}
+
+export function useLeadFollowupStop() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (v: { leadId: string; stop: boolean }) => data(await api.post(`/whatsapp/followups/lead/${v.leadId}/${v.stop ? "stop" : "resume"}`)),
+    onSuccess: refresh,
+  });
 }
 
 export function useWhatsAppChatActions() {

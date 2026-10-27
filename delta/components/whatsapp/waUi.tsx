@@ -82,7 +82,7 @@ export function MessageBubble({ m }: { m: WAMessage }) {
         <Media media={m.media} />
         {!label && m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
         <p className="mt-0.5 text-right text-[10px] opacity-60">
-          {out && m.sentByName ? `${m.sentByName} · ` : ""}{time(m.at)}
+          {m.auto ? `Auto follow-up · step ${m.auto.step} of ${m.auto.of} · ` : out && m.sentByName ? `${m.sentByName} · ` : ""}{time(m.at)}
         </p>
       </div>
     </div>

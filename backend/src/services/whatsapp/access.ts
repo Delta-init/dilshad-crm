@@ -16,7 +16,7 @@ const idOf = (v: unknown): string => {
   if (typeof v === "object" && "_id" in (v as Record<string, unknown>)) return String((v as { _id: unknown })._id);
   return String(v);
 };
-const isSuperAdmin = (role?: IRole | null) => Boolean(role?.isSystemRole && role.roleName === "Super Admin");
+export const isSuperAdmin = (role?: IRole | null) => Boolean(role?.isSystemRole && role.roleName === "Super Admin");
 
 async function ledTeams(userId: string) {
   return Team.find({ status: "active", leaders: new Types.ObjectId(userId) }).select("_id members leaders").lean();

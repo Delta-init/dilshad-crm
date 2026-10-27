@@ -333,26 +333,32 @@ function connected(userId: string): WASocket {
   return s.sock;
 }
 
+/** How a send was made: by a person (the default), or by the CRM on its own — an automatic follow-up. */
+export type SendOpts = { auto?: { kind: "followup"; step: number; of: number } };
+
 async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: string, sentId: string, body: string,
-  media: { type: string; mime: string; fileName: string; file: string; size: number } | null) {
+  media: { type: string; mime: string; fileName: string; file: string; size: number } | null, opts: SendOpts = {}) {
   const phone = to.phone;
   const key = phone ? phoneKey(phone) : "";
   return store({
     owner: new Types.ObjectId(owner.id), ownerName: owner.name,
     chat: phone || chat, phone, key, jid: to.jid,
     direction: "out", body, messageId: sentId,
-    senderName: owner.name, sentBy: new Types.ObjectId(owner.id), sentByName: owner.name,
+    senderName: owner.name, sentBy: new Types.ObjectId(owner.id), sentByName: opts.auto ? "Auto follow-up" : owner.name,
     lead: (await leadsByKey()).get(key || chat) ?? null,
-    read: true, media, at: new Date(),
+    read: true, media, at: new Date(), auto: opts.auto ?? null,
   });
 }
 
-export async function sendText(userId: string, chat: string, text: string) {
+/** Whether this person's WhatsApp is linked and up, here — the automatic follow-ups send only then. */
+export const isConnected = (userId: string) => { const s = session(userId); return !!s.sock && s.status === "connected"; };
+
+export async function sendText(userId: string, chat: string, text: string, opts: SendOpts = {}) {
   const sock = connected(userId);
   const owner = await ownerOf(userId);
   const to = await target(sock, chat);
   const sent = await sock.sendMessage(to.jid, { text });
-  return keepSent(owner, to, chat, sent?.key?.id ?? "", text, null);
+  return keepSent(owner, to, chat, sent?.key?.id ?? "", text, null, opts);
 }
 
 /**
@@ -360,7 +366,8 @@ export async function sendText(userId: string, chat: string, text: string) {
  * voice note (the blue microphone on the phone): Opus in Ogg, re-wrapped from the browser's WebM when it has to be
  * (voice.ts). A recording that can't be one (an older Safari's MP4) goes as plain audio.
  */
-export async function sendFile(userId: string, chat: string, buffer: Buffer, mime: string, fileName: string, caption: string, voice = false) {
+export async function sendFile(userId: string, chat: string, buffer: Buffer, mime: string, fileName: string, caption: string, voice = false,
+  opts: SendOpts & { storedFile?: string } = {}) {
   if (buffer.length > MAX_MEDIA_BYTES) throw new WhatsAppError("Files up to 25 MB");
   const sock = connected(userId);
   const owner = await ownerOf(userId);
@@ -377,7 +384,8 @@ export async function sendFile(userId: string, chat: string, buffer: Buffer, mim
   const content = type === "image" ? { image: buffer, caption } : type === "video" ? { video: buffer, caption }
     : type === "audio" ? { audio: buffer, mimetype: mime, ptt: false } : { document: buffer, mimetype: mime, fileName, caption };
   const sent = await sock.sendMessage(to.jid, content);
-  const saved = await saveMedia(owner.id, buffer, mime, fileName);
+  // A file kept once already (a follow-up's video, sent to many) is pointed at, not copied again for each.
+  const saved = opts.storedFile ? { file: opts.storedFile, size: buffer.length } : await saveMedia(owner.id, buffer, mime, fileName);
   return keepSent(owner, to, chat, sent?.key?.id ?? "", caption || (type === "document" ? `📄 ${fileName || "Document"}` : LABEL[type]!),
-    { type, mime, fileName, file: saved.file, size: saved.size });
+    { type, mime, fileName, file: saved.file, size: saved.size }, opts);
 }

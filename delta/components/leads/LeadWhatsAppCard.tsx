@@ -2,12 +2,41 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, Repeat } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/lib/toast";
 import { Composer, Thread, WA_GREEN } from "@/components/whatsapp/waUi";
-import { errMsg, useLeadWhatsApp, useWhatsAppSend } from "@/hooks/useWhatsApp";
+import { errMsg, useLeadFollowupStop, useLeadWhatsApp, useWhatsAppSend, type WAFollowup } from "@/hooks/useWhatsApp";
+
+const when = (iso?: string) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Dubai", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
+
+/** One line: where the automatic follow-ups stand for this lead, with Stop / Resume. Nothing when they are off for the team. */
+function FollowupLine({ leadId, f }: { leadId: string; f?: WAFollowup }) {
+  const stop = useLeadFollowupStop();
+  if (!f?.on) return null;
+  const text: Record<WAFollowup["state"], string> = {
+    off: "", ended: "Off — the lead is closed, lost or repeated",
+    no_chat: "Starts once their salesperson messages them on WhatsApp",
+    replied: "They answered — none due",
+    before: "None for this chat (it went quiet before follow-ups were switched on)",
+    stopped: `Stopped${f.byName ? ` by ${f.byName}` : ""} — writing to them starts them again`,
+    done: `All ${f.sent ?? ""} sent — no answer`,
+    waiting: `Step ${f.step} of ${f.of} next, ${when(f.nextAt)}${f.ownerName ? ` from ${f.ownerName}'s WhatsApp` : ""}${f.linked === false ? " (not linked — won't go until it is)" : ""}`,
+  };
+  const act = async (s: boolean) => {
+    try { await stop.mutateAsync({ leadId, stop: s }); toast.success(s ? "Follow-ups stopped" : "Follow-ups resumed"); }
+    catch (e) { toast.error(errMsg(e, "Not changed")); }
+  };
+  return (
+    <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2 text-xs">
+      <span className="flex items-center gap-1.5 text-muted-foreground"><Repeat className="h-3.5 w-3.5" />Auto follow-up: {text[f.state]}</span>
+      {f.state === "waiting" && <Button size="sm" variant="outline" className="h-7 text-xs" disabled={stop.isPending} onClick={() => act(true)}>Stop</Button>}
+      {f.state === "stopped" && <Button size="sm" variant="outline" className="h-7 text-xs" disabled={stop.isPending} onClick={() => act(false)}>Resume</Button>}
+    </div>
+  );
+}
 
 /**
  * The lead page's WhatsApp (2026-10-27, as Tetra Commission's student card): their chats you may read — yours, and for
@@ -42,6 +71,7 @@ export function LeadWhatsAppCard({ leadId }: { leadId: string }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
+        <FollowupLine leadId={leadId} f={data.followup} />
         {data.canLink && (
           <>
             <Thread messages={myMessages} className="max-h-96 min-h-32" empty={data.linked ? "No messages with them yet" : "Your WhatsApp is not linked"} />

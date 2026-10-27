@@ -1,5 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { extname } from "node:path";
 import { Router, type NextFunction, type Response } from "express";
 import multer from "multer";
 import { Types } from "mongoose";
@@ -12,7 +15,10 @@ import { User } from "../models/User.js";
 import { WhatsAppLink, WhatsAppMessage } from "../models/WhatsAppMessage.js";
 import { LeadService } from "../services/leadService.js";
 import { phoneKey, phoneKeys } from "../services/whatsapp/leads.js";
-import { canWhatsApp, leadScope, readableOwners, type Viewer } from "../services/whatsapp/access.js";
+import { canWhatsApp, isSuperAdmin, leadScope, readableOwners, type Viewer } from "../services/whatsapp/access.js";
+import {
+  followupSettings, FollowupError, leadFollowup, saveFollowupSettings, setLeadFollowupStopped,
+} from "../services/whatsapp/followups.js";
 import {
   connect, disconnect, forgetLeads, intlNumbers, leadsByKey, mediaPath, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
 } from "../services/whatsapp/service.js";
@@ -71,7 +77,7 @@ router.get("/media", async (req, res, next) => {
 });
 
 type MessageDoc = { _id: Types.ObjectId; direction: string; body?: string; at: Date; senderName?: string; sentByName?: string;
-  media?: { type: string; mime: string; fileName: string; size: number; file: string } | null };
+  media?: { type: string; mime: string; fileName: string; size: number; file: string } | null; auto?: { step: number; of: number } | null };
 const shape = (m: MessageDoc, viewerId: string) => ({
   id: String(m._id),
   direction: m.direction,
@@ -80,6 +86,8 @@ const shape = (m: MessageDoc, viewerId: string) => ({
   senderName: m.senderName ?? "",
   sentByName: m.sentByName ?? "",
   media: m.media ? { type: m.media.type, mime: m.media.mime, fileName: m.media.fileName, size: m.media.size, url: m.media.file ? mediaUrl(String(m._id), viewerId) : "" } : null,
+  // Sent by the CRM on its own: an automatic follow-up, its step.
+  auto: m.auto ? { step: m.auto.step, of: m.auto.of } : null,
 });
 
 async function leadsBrief(ids: unknown[]) {
@@ -366,6 +374,8 @@ router.get("/lead/:leadId", checkPermission("whatsapp", "view"), checkPermission
     const mine = status(v.userId);
     const canLink = canWhatsApp(v, "create");
     sendSuccess(res, "WhatsApp", {
+      // Where the automatic follow-ups stand for this lead (services/whatsapp/followups.ts).
+      followup: await leadFollowup(leadId),
       numbers: intlNumbers(lead.phone),
       canSend: canLink && mine.status === "connected",
       canLink,
@@ -375,5 +385,83 @@ router.get("/lead/:leadId", checkPermission("whatsapp", "view"), checkPermission
     });
   } catch (err) { next(err); }
 });
+
+/* ── Automatic follow-ups (services/whatsapp/followups.ts) ──────────────── */
+
+const superAdminOnly = (req: AuthenticatedRequest, res: Response): boolean => {
+  if (isSuperAdmin(req.user!.role ?? null)) return true;
+  sendError(res, "Only a Super Admin sets up the automatic follow-ups", 403);
+  return false;
+};
+const myName = async (req: AuthenticatedRequest) => String((await User.findById(req.user!.userId).select("name").lean<{ name?: string } | null>())?.name ?? "");
+
+/** GET /whatsapp/followups/settings — the steps, the teams switched on, the daily limit; and every team to pick from. Super Admin. */
+router.get("/followups/settings", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!superAdminOnly(req, res)) return;
+    const teams = await Team.find({ status: "active" }).select("name").sort({ name: 1 }).lean<{ _id: Types.ObjectId; name?: string }[]>();
+    sendSuccess(res, "Follow-ups", { ...(await followupSettings(true)), allTeams: teams.map((t) => ({ id: String(t._id), name: t.name ?? "" })) });
+  } catch (err) { next(err); }
+});
+
+/** PUT /whatsapp/followups/settings { enabled, teams, dailyLimit, steps: [{ waitMinutes, text, file? }] } — Super Admin. */
+router.put("/followups/settings", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!superAdminOnly(req, res)) return;
+    sendSuccess(res, "Saved", await saveFollowupSettings((req.body ?? {}) as Record<string, unknown>, await myName(req)));
+  } catch (err) {
+    if (err instanceof FollowupError) { sendError(res, err.message, err.statusCode); return; }
+    next(err);
+  }
+});
+
+const FOLLOWUP_FILE_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/mp4|audio\/(mpeg|ogg|mp4)|application\/pdf)$/;
+/** POST /whatsapp/followups/file (form: file) — a photo, video, audio or PDF for a step, up to 25 MB; kept once, sent to each. Super Admin. */
+router.post("/followups/file", upload.single("file"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!superAdminOnly(req, res)) return;
+    const file = (req as AuthenticatedRequest & { file?: Express.Multer.File }).file;
+    if (!file) { sendError(res, "file is required", 400); return; }
+    const mime = (file.mimetype || "").split(";")[0]!.trim();
+    if (!FOLLOWUP_FILE_TYPES.test(mime)) { sendError(res, "A photo (JPG, PNG, WebP, GIF), an MP4 video, audio or a PDF", 400); return; }
+    const ext = (extname(file.originalname || "").toLowerCase().match(/^\.\w{1,10}$/)?.[0]) || `.${mime.split("/")[1]}`;
+    const stored = `followups/${randomUUID()}${ext}`;
+    await mkdir(mediaPath("followups"), { recursive: true });
+    await writeFile(mediaPath(stored), file.buffer);
+    sendSuccess(res, "Uploaded", { file: stored, name: file.originalname || `file${ext}`, mime, size: file.size }, 201);
+  } catch (err) { next(err); }
+});
+
+/** GET /whatsapp/followups/recent — the latest 50 automatic follow-ups from the WhatsApps you may read. */
+router.get("/followups/recent", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const owners = await readableOwners(viewer(req));
+    const filter: Record<string, unknown> = { "auto.kind": "followup" };
+    if (owners) filter.owner = { $in: [...owners].map((i) => new Types.ObjectId(i)) };
+    const docs = await WhatsAppMessage.find(filter).sort({ at: -1 }).limit(50)
+      .lean<(MessageDoc & { owner: Types.ObjectId; ownerName?: string; chat: string; phone?: string; key?: string; lead?: Types.ObjectId | null })[]>();
+    const byKey = await leadsByKey();
+    const leads = await leadsBrief(docs.map((m) => byKey.get(m.key || m.chat) ?? m.lead));
+    sendSuccess(res, "Recent follow-ups", docs.map((m) => ({
+      id: String(m._id), at: m.at, body: m.body ?? "", step: m.auto?.step ?? 0, of: m.auto?.of ?? 0,
+      ownerId: String(m.owner), ownerName: m.ownerName ?? "", chat: m.chat, phone: m.phone ?? "",
+      lead: leads.get(String(byKey.get(m.key || m.chat) ?? m.lead ?? "")) ?? null,
+    })));
+  } catch (err) { next(err); }
+});
+
+/** POST /whatsapp/followups/lead/:leadId/stop | /resume — for whoever may see the lead. Stopped until someone writes to them again. */
+for (const action of ["stop", "resume"] as const) {
+  router.post(`/followups/lead/:leadId/${action}`, checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const leadId = str(req.params.leadId, 40);
+      if (!isId(leadId)) { sendError(res, "Lead not found", 404); return; }
+      const lead = await Lead.findOne({ _id: new Types.ObjectId(leadId), ...(await leadScope(viewer(req))) }).select("_id").lean();
+      if (!lead) { sendError(res, "You can stop follow-ups only on leads you can see", 403); return; }
+      await setLeadFollowupStopped(leadId, action === "stop", await myName(req));
+      sendSuccess(res, action === "stop" ? "Follow-ups stopped" : "Follow-ups resumed", { followup: await leadFollowup(leadId) });
+    } catch (err) { next(err); }
+  });
+}
 
 export default router;

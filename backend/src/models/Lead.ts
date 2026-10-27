@@ -44,6 +44,7 @@ const activityLogSchema = new Schema<IActivityLog>(
         "inactive_reassigned",
         "repeat_enquiry",
         "repeat_verified",
+        "whatsapp_followup",
       ],
     },
     description: {
@@ -403,6 +404,10 @@ const leadSchema = new Schema<ILead>(
       type: Date,
       default: null,
     },
+    // Automatic WhatsApp follow-ups stopped on this lead (services/whatsapp/followups.ts): until someone writes to them
+    // on WhatsApp again, which starts a new chain.
+    waFollowupStoppedAt: { type: Date, default: null },
+    waFollowupStoppedByName: { type: String, default: "" },
     referralType: {
       type: String,
       enum: ["employee", "external", "student", null],

@@ -20,6 +20,7 @@ import { startLeadPaymentDecisionScheduler } from "./services/leadPaymentDecisio
 import { startMeetingReminderScheduler } from "./services/meetingReminderScheduler.js";
 import { startCallSyncWorker } from "./services/callSyncService.js";
 import { startWhatsApp } from "./services/whatsapp/service.js";
+import { startWhatsAppFollowups } from "./services/whatsapp/followups.js";
 
 const app = express();
 
@@ -61,6 +62,8 @@ const start = async () => {
     if (env.RUN_SCHEDULERS) {
       // Each person's linked WhatsApp, back after a restart (WHATSAPP=off keeps a server out of it). One process only.
       startWhatsApp();
+      // Automatic WhatsApp follow-ups to leads who went quiet, every minute — nothing until a Super Admin switches them on.
+      startWhatsAppFollowups();
       startReminderScheduler();
       startSplitScheduler();
       startFollowupWarningScheduler();

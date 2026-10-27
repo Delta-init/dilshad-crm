@@ -15,6 +15,7 @@ import { chooseCurrency } from "@/hooks/useSyncedCurrency";
 import { fmtCompact, fmtFull } from "@/lib/currency";
 import { toast } from "@/lib/toast";
 import { AutomationSettingsCard } from "@/components/settings/AutomationSettingsCard";
+import { WhatsAppFollowupsCard } from "@/components/settings/WhatsAppFollowupsCard";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -289,6 +290,11 @@ export default function SettingsPage() {
       {/* Automation & alerts — inactive leads, idle alerts, working hours, email */}
       <motion.div variants={itemVariants}>
         <AutomationSettingsCard />
+      </motion.div>
+
+      {/* Automatic WhatsApp follow-ups — Super Admin only (shows nothing to anyone else) */}
+      <motion.div variants={itemVariants}>
+        <WhatsAppFollowupsCard />
       </motion.div>
     </motion.div>
   );

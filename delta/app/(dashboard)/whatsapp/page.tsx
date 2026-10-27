@@ -17,6 +17,7 @@ import {
   errMsg, useWhatsAppChatActions, useWhatsAppChats, useWhatsAppLeadOptions, useWhatsAppLink, useWhatsAppMessages, useWhatsAppSend,
   useWhatsAppStatus, type WAChat, type WALeadOption, type WAStatusAnswer,
 } from "@/hooks/useWhatsApp";
+import { RecentFollowups } from "@/components/whatsapp/RecentFollowups";
 
 /* ────────────────────────────────────────────────────────────────────────────
    WhatsApp (2026-10-27, as in Tetra Commission): each person links their own
@@ -366,6 +367,9 @@ function WhatsAppPage() {
       {owners.length === 0 && !st.canLink && (
         <div className="rounded-xl border border-border/50 bg-card p-6 text-center text-sm text-muted-foreground">Nobody you look after has linked WhatsApp yet.</div>
       )}
+
+      {/* The follow-ups the CRM sent on its own (Settings → WhatsApp follow-ups) */}
+      {!full && <RecentFollowups />}
 
       <LinkLeadDialog open={linking} onOpenChange={setLinking} ownerId={viewing} chat={chat} />
     </div>

@@ -27,6 +27,8 @@ export interface IWhatsAppMessage {
   lead: Types.ObjectId | null;
   read: boolean;
   media: { type: string; mime: string; fileName: string; file: string; size: number } | null;
+  /** Sent by the CRM on its own — an automatic follow-up, which step (services/whatsapp/followups.ts). Null: by a person. */
+  auto?: { kind: "followup"; step: number; of: number } | null;
   at: Date;
   createdAt: Date;
 }
@@ -57,6 +59,14 @@ const whatsAppMessageSchema = new Schema<IWhatsAppMessage>(
       }, { _id: false }),
       default: null,
     },
+    auto: {
+      type: new Schema({
+        kind: { type: String, enum: ["followup"], required: true },
+        step: { type: Number, required: true },
+        of: { type: Number, required: true },
+      }, { _id: false }),
+      default: null,
+    },
     at: { type: Date, required: true },
   },
   { timestamps: { createdAt: true, updatedAt: false }, versionKey: false, collection: "whatsapp_messages" },
@@ -68,6 +78,8 @@ whatsAppMessageSchema.index({ owner: 1, chat: 1, at: -1 });
 whatsAppMessageSchema.index({ owner: 1, direction: 1, read: 1 });
 whatsAppMessageSchema.index({ key: 1 });
 whatsAppMessageSchema.index({ lead: 1, at: -1 });
+// Each person's automatic follow-ups by time — the daily limit and the recent list.
+whatsAppMessageSchema.index({ owner: 1, "auto.kind": 1, at: -1 }, { partialFilterExpression: { "auto.kind": "followup" } });
 
 export const WhatsAppMessage = mongoose.model<IWhatsAppMessage>("WhatsAppMessage", whatsAppMessageSchema);
 

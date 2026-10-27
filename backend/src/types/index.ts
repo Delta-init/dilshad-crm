@@ -386,7 +386,8 @@ export type ActivityAction =
   | "followup_missed"
   | "inactive_reassigned"
   | "repeat_enquiry"
-  | "repeat_verified";
+  | "repeat_verified"
+  | "whatsapp_followup";
 
 export interface ILeadNote {
   _id: Types.ObjectId;
@@ -490,6 +491,8 @@ export interface ILead extends Document {
   lastFollowupDate?: Date | null;
   lastContactedAt?: Date | null;
   missedFollowUpWarnedAt?: Date | null;
+  waFollowupStoppedAt?: Date | null;
+  waFollowupStoppedByName?: string;
   referralType?: "employee" | "external" | "student" | null;
   referredBy?: string | null;
   whatsappWelcome?: {
