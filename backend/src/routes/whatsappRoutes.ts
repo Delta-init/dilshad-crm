@@ -20,7 +20,7 @@ import {
   followupSettings, FollowupError, leadFollowup, saveFollowupSettings, setLeadFollowupStopped,
 } from "../services/whatsapp/followups.js";
 import {
-  connect, disconnect, forgetLeads, intlNumbers, leadsByKey, mediaPath, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
+  connect, contactNames, disconnect, fetchOlder, forgetLeads, intlNumbers, leadsByKey, mediaPath, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
 } from "../services/whatsapp/service.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 import { sendError, sendSuccess } from "../utils/response.js";
@@ -176,6 +176,8 @@ router.get("/chats", checkPermission("whatsapp", "view"), async (req: Authentica
     const byKey = await leadsByKey();
     const leadOf = (r: (typeof rows)[number]) => byKey.get(r.last.key || r._id) ?? r.last.lead ?? null;
     const leads = await leadsBrief(rows.map(leadOf));
+    // Their name as saved in the owner's phone, else their own on WhatsApp (whatsapp_contacts).
+    const names = await contactNames(owner, rows.map((r) => r.last.key ?? ""));
     sendSuccess(res, "Chats", {
       ownerId: owner,
       canSend: owner === req.user!.userId && canWhatsApp(viewer(req), "create") && status(owner).status === "connected",
@@ -183,8 +185,8 @@ router.get("/chats", checkPermission("whatsapp", "view"), async (req: Authentica
         const lead = leads.get(String(leadOf(r) ?? "")) ?? null;
         return {
           chat: r._id, phone: r.last.phone ?? "",
-          name: lead?.name || r.name || (r.last.phone ? `+${r.last.phone}` : "Unknown"),
-          whatsappName: r.name || "",
+          name: lead?.name || names.get(r.last.key ?? "") || r.name || (r.last.phone ? `+${r.last.phone}` : "Unknown"),
+          whatsappName: names.get(r.last.key ?? "") || r.name || "",
           lead,
           last: { body: r.last.body ?? "", at: r.last.at, direction: r.last.direction, media: r.last.media?.type ?? null },
           unread: r.unread, count: r.count,
@@ -243,6 +245,19 @@ router.post("/read", checkPermission("whatsapp", "view"), async (req: Authentica
     const r = await WhatsAppMessage.updateMany({ owner: new Types.ObjectId(req.user!.userId), chat, direction: "in", read: false }, { $set: { read: true } });
     sendSuccess(res, "Read", { marked: r.modifiedCount });
   } catch (err) { next(err); }
+});
+
+/**
+ * POST /whatsapp/history { chat } — "Load older messages": asks your phone for the 50 messages before the oldest kept in
+ * this chat of yours. They come a few seconds later (the open chat shows them as they land).
+ */
+router.post("/history", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const chat = str(req.body?.chat, 120);
+    if (!chat) { sendError(res, "chat is required", 400); return; }
+    const r = await fetchOlder(req.user!.userId, chat);
+    sendSuccess(res, "Asked your phone for older messages", { before: r.before });
+  } catch (err) { fail(res, next, err); }
 });
 
 /** POST /whatsapp/send { chat, text } — from your own WhatsApp; chat is the number (or a chat's address). */
@@ -340,7 +355,10 @@ router.post("/create-lead", checkPermission("whatsapp", "create"), checkPermissi
       return;
     }
     const inName = await WhatsAppMessage.findOne({ owner: new Types.ObjectId(owner), chat, direction: "in", senderName: { $gt: "" } }).sort({ at: -1 }).select("senderName").lean<{ senderName?: string } | null>();
-    const name = str(req.body?.name, 100) || (inName?.senderName && !/^\d+$/.test(inName.senderName) ? inName.senderName : "") || `WhatsApp +${last.phone}`;
+    // The name given, else theirs as saved in the owner's phone or their own on WhatsApp, else the one a message carried.
+    const saved = (await contactNames(owner, [last.key ?? ""])).get(last.key ?? "") ?? "";
+    const name = str(req.body?.name, 100) || (saved && !/^\+?\d+$/.test(saved) ? saved : "")
+      || (inName?.senderName && !/^\d+$/.test(inName.senderName) ? inName.senderName : "") || `WhatsApp +${last.phone}`;
     const lead = await leadService.createLead({ name, phone: `+${last.phone}`, source: "WhatsApp", assignedTo: owner }, req.user!.userId) as unknown as { _id: Types.ObjectId };
     await linkKey(last.key || chat, lead._id, req);
     sendSuccess(res, "Lead created", { lead: { id: String(lead._id), name }, existed: false }, 201);
@@ -429,6 +447,25 @@ router.post("/followups/file", upload.single("file"), async (req: AuthenticatedR
     await mkdir(mediaPath("followups"), { recursive: true });
     await writeFile(mediaPath(stored), file.buffer);
     sendSuccess(res, "Uploaded", { file: stored, name: file.originalname || `file${ext}`, mime, size: file.size }, 201);
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /whatsapp/followups/summary — for anyone with WhatsApp: whether automatic follow-ups are on, for your team(s), and
+ * the steps (how long after, what they say, the file's name). Read only; a Super Admin also gets canEdit.
+ */
+router.get("/followups/summary", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const st = await followupSettings();
+    const me = new Types.ObjectId(req.user!.userId);
+    const mine = await Team.find({ status: "active", $or: [{ members: me }, { leaders: me }] }).select("name").lean<{ _id: Types.ObjectId; name?: string }[]>();
+    sendSuccess(res, "Follow-ups", {
+      enabled: st.enabled,
+      canEdit: isSuperAdmin(req.user!.role ?? null),
+      myTeams: mine.map((t) => ({ name: t.name ?? "", on: st.teams.includes(String(t._id)) })),
+      dailyLimit: st.dailyLimit,
+      steps: st.steps.map((x) => ({ waitMinutes: x.waitMinutes, text: x.text, fileName: x.file?.name ?? "" })),
+    });
   } catch (err) { next(err); }
 });
 

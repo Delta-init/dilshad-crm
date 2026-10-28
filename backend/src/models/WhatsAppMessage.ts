@@ -112,3 +112,36 @@ const whatsAppLinkSchema = new Schema<IWhatsAppLink>(
 );
 
 export const WhatsAppLink = mongoose.model<IWhatsAppLink>("WhatsAppLink", whatsAppLinkSchema);
+
+/*
+ * A contact's names on someone's WhatsApp (2026-10-28): `name` as they saved it in their phone, `notify` the name the
+ * person set on WhatsApp themselves, `verifiedName` a business's. Keyed by the number's last 9 digits, per owner — a
+ * chat, and a lead made of it, are called by these rather than "WhatsApp +…".
+ */
+export interface IWhatsAppContact {
+  _id: Types.ObjectId;
+  owner: Types.ObjectId;
+  key: string;
+  phone: string;
+  name: string;
+  notify: string;
+  verifiedName: string;
+  updatedAt: Date;
+}
+
+const whatsAppContactSchema = new Schema<IWhatsAppContact>(
+  {
+    owner: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    key: { type: String, required: true },
+    phone: { type: String, default: "" },
+    name: { type: String, default: "" },
+    notify: { type: String, default: "" },
+    verifiedName: { type: String, default: "" },
+  },
+  { timestamps: { createdAt: false, updatedAt: true }, versionKey: false, collection: "whatsapp_contacts" },
+);
+whatsAppContactSchema.index({ owner: 1, key: 1 }, { unique: true });
+
+export const WhatsAppContact = mongoose.model<IWhatsAppContact>("WhatsAppContact", whatsAppContactSchema);
+/** The best name a contact has: as saved in the phone, else their own WhatsApp name, else a business's. */
+export const contactName = (c?: Pick<IWhatsAppContact, "name" | "notify" | "verifiedName"> | null) => String(c?.name || c?.notify || c?.verifiedName || "").trim();

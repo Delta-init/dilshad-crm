@@ -180,6 +180,25 @@ export function useRecentFollowups(enabled = true) {
   });
 }
 
+/** For anyone with WhatsApp: whether follow-ups are on (for their teams), the steps; a Super Admin may edit. */
+export interface WAFollowupSummary {
+  enabled: boolean; canEdit: boolean; myTeams: { name: string; on: boolean }[]; dailyLimit: number;
+  steps: { waitMinutes: number; text: string; fileName: string }[];
+}
+export function useWhatsAppFollowupSummary() {
+  return useQuery({
+    queryKey: ["whatsapp", "followup-summary"],
+    queryFn: async () => data<WAFollowupSummary>(await api.get("/whatsapp/followups/summary")),
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** "Load older messages": asks your phone for the 50 before the oldest kept in this chat; they land a few seconds later. */
+export function useFetchOlderMessages() {
+  return useMutation({ mutationFn: async (chat: string) => data<{ before: string }>(await api.post("/whatsapp/history", { chat })) });
+}
+
 export function useLeadFollowupStop() {
   const refresh = useRefresh();
   return useMutation({

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, Link2, Loader2, Maximize2, MessageCircle, Minimize2, Plus, Search, Smartphone, Unlink, UserPlus } from "lucide-react";
+import { ArrowLeft, History, Link2, Loader2, Maximize2, MessageCircle, Minimize2, Plus, Search, Smartphone, Unlink, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -14,10 +14,11 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { Composer, shortTime, Thread, WA_GREEN } from "@/components/whatsapp/waUi";
 import {
-  errMsg, useWhatsAppChatActions, useWhatsAppChats, useWhatsAppLeadOptions, useWhatsAppLink, useWhatsAppMessages, useWhatsAppSend,
+  errMsg, useFetchOlderMessages, useWhatsAppChatActions, useWhatsAppChats, useWhatsAppLeadOptions, useWhatsAppLink, useWhatsAppMessages, useWhatsAppSend,
   useWhatsAppStatus, type WAChat, type WALeadOption, type WAStatusAnswer,
 } from "@/hooks/useWhatsApp";
 import { RecentFollowups } from "@/components/whatsapp/RecentFollowups";
+import { FollowupsPanel } from "@/components/whatsapp/FollowupsPanel";
 
 /* ────────────────────────────────────────────────────────────────────────────
    WhatsApp (2026-10-27, as in Tetra Commission): each person links their own
@@ -174,6 +175,7 @@ function WhatsAppPage() {
   const { data: thread } = useWhatsAppMessages(viewing, chatId);
   const { read, createLead } = useWhatsAppChatActions();
   const send = useWhatsAppSend();
+  const older = useFetchOlderMessages();
 
   /** Their chat if there is one (with the lead, or on one of their numbers), else a new one on their number. */
   const openLead = (l: WALeadOption) => {
@@ -353,6 +355,18 @@ function WhatsAppPage() {
                       {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                     </Button>
                   </div>
+                  {/* Older messages of your own chat, from your phone (they land a few seconds later) */}
+                  {mine && canSend && (thread?.messages?.length ?? 0) > 0 && (
+                    <div className="flex justify-center border-b bg-muted/30 py-1.5">
+                      <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" disabled={older.isPending}
+                        onClick={async () => {
+                          try { await older.mutateAsync(chat.chat); toast.success("Asked your phone — older messages appear in a few seconds"); }
+                          catch (e) { toast.error(errMsg(e, "Couldn't ask your phone")); }
+                        }}>
+                        {older.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}Load older messages
+                      </Button>
+                    </div>
+                  )}
                   <Thread messages={thread?.messages ?? []} className="min-h-0 flex-1" empty={canSend ? "Write the first message" : "No messages yet"} />
                   {canSend
                     ? <Composer onSendText={sendText} onSendFile={sendFile} />
@@ -369,6 +383,7 @@ function WhatsAppPage() {
       )}
 
       {/* The follow-ups the CRM sent on its own (Settings → WhatsApp follow-ups) */}
+      {!full && <FollowupsPanel />}
       {!full && <RecentFollowups />}
 
       <LinkLeadDialog open={linking} onOpenChange={setLinking} ownerId={viewing} chat={chat} />

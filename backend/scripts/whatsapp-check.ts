@@ -12,8 +12,11 @@
  *   - Case 7: the lead page's card — the lead's chats you may read, and its numbers.
  *   - Case 8: photos and files, voice notes — kept on disk, on short-lived signed links.
  *   - Case 9: no WhatsApp access — refused.
- *   - Case 10: past chats handed over at linking — kept as read, nobody told, text and voice notes only, never a
- *     follow-up.
+ *   - Case 10: past chats handed over at linking — kept as read, nobody told, files fetched (one WhatsApp no longer
+ *     has: a line saying so), never a follow-up.
+ *   - Case 11: names, catch-up and older messages — contacts' names on chats and new leads (a "WhatsApp +…" lead
+ *     renamed); messages WhatsApp catches up on kept as they are; "Load older messages" asks the phone; the follow-ups
+ *     summary for everyone.
  *
  * Run by whatsapp-check.sh. Scratch database only.
  */
@@ -269,13 +272,60 @@ try {
   check("kept once each, under the lead, marked as past", kept.length === 5 && kept.every((m) => m.history === true && String(m.lead) === asha), j(kept.map((m) => [m.messageId, m.history, String(m.lead)])));
   check("…as read: the unread count doesn't move", (await call("GET", "/whatsapp/unread", "Sam")).body.data?.unread === unreadBefore && kept.every((m) => m.read === true));
   check("…their old date kept, and who wrote", kept[0]!.direction === "in" && kept[1]!.direction === "out" && kept[0]!.at.getTime() < Date.now() - 29 * 86400_000);
-  check("an old photo: a line saying so, with its caption — no file", kept[2]!.body === "📷 Photo (older — not kept): Fee structure" && kept[2]!.media === null, j(kept[2]));
-  check("an old document: the same", kept[3]!.body === "📄 brochure.pdf (older — not kept)" && kept[3]!.media === null, j(kept[3]));
-  check("an old voice note: kept as one, to play", kept[4]!.media?.type === "audio" && kept[4]!.body === "🎤 Voice note", j(kept[4]));
+  // The stand-in WhatsApp has no files to hand over: each is tried, and said so when it can't be fetched.
+  check("an old photo it couldn't fetch: a line saying so, with its caption", kept[2]!.body === "📷 Photo (older — couldn't be fetched): Fee structure" && kept[2]!.media === null, j(kept[2]));
+  check("an old document: the same, its name once", kept[3]!.body === "📄 brochure.pdf (older — couldn't be fetched)" && kept[3]!.media === null, j(kept[3]));
+  check("an old voice note: the same", kept[4]!.body === "🎤 Voice note (older — couldn't be fetched)" && kept[4]!.media === null, j(kept[4]));
   const { chainOf } = await import("../src/services/whatsapp/followups.js");
   const chain = chainOf([{ _id: new Types.ObjectId(), direction: "out", at: new Date(), chat: "x", history: true }] as never,
     { enabled: true, startedAt: new Date(Date.now() - 365 * 86400_000), teams: [], dailyLimit: 60, steps: [{ waitMinutes: 60, text: "x", file: null }], updatedByName: "", updatedAt: null }, { at: null, byName: "" });
   check("a past chat never starts an automatic follow-up", chain?.state === "before", j(chain));
+
+  section("Case 11 — names, catch-up and older messages");
+  const { WhatsAppContact } = await import("../src/models/WhatsAppMessage.js");
+  await incoming("Sam", "971544444444", "Hello?", { name: "" });
+  r = await call("POST", "/whatsapp/create-lead", "Sam", { chat: "971544444444" });
+  const nameless = r.body.data?.lead;
+  check("a lead made before any name was known: \"WhatsApp +…\"", r.status === 201 && nameless?.name === "WhatsApp +971544444444", j(r.body));
+  await wa.keepContacts({ id: String(P("Sam")), name: "Sam" }, [{ id: "971544444444@s.whatsapp.net", name: "Priya (Dubai Mall)", notify: "Priya" }, { id: "x@g.us", name: "A group" }]);
+  const pc = await WhatsAppContact.findOne({ owner: P("Sam"), key: "544444444" }).lean();
+  check("a contact's names kept by number (a group's ignored)", pc?.name === "Priya (Dubai Mall)" && pc?.notify === "Priya" && (await WhatsAppContact.countDocuments({})) >= 1, j(pc));
+  const renamed = await db.collection("leads").findOne({ _id: new Types.ObjectId(nameless?.id) });
+  check("…the \"WhatsApp +…\" lead takes the name saved in the phone", renamed?.name === "Priya (Dubai Mall)", j(renamed?.name));
+  await incoming("Sam", "971566666666", "Info please", { name: "" });
+  await wa.keepContacts({ id: String(P("Sam")), name: "Sam" }, [{ id: "971566666666@s.whatsapp.net", notify: "Karthik" }]);
+  let ch = (await chatsOf("Sam")).body.data?.chats?.find((c: any) => c.chat === "971566666666");
+  check("a chat that is no lead's: called by their WhatsApp name", ch?.name === "Karthik" && ch?.lead === null, j(ch));
+  r = await call("POST", "/whatsapp/create-lead", "Sam", { chat: "971566666666" });
+  check("…and a lead made of it takes that name", r.status === 201 && r.body.data?.lead?.name === "Karthik", j(r.body));
+  await incoming("Sam", "971577777777", "Hi there", { name: "Meera" });
+  ch = (await chatsOf("Sam")).body.data?.chats?.find((c: any) => c.chat === "971577777777");
+  check("a name a message carries is kept too", ch?.name === "Meera" && (await WhatsAppContact.findOne({ owner: P("Sam"), key: "577777777" }).lean())?.notify === "Meera", j(ch));
+  const unreadNow = (await call("GET", "/whatsapp/unread", "Sam")).body.data?.unread;
+  await wa.receive({ id: String(P("Sam")), name: "Sam" }, fakeSock([]), {
+    key: { remoteJid: "971577777777@s.whatsapp.net", fromMe: false, id: "CATCHUP-1" }, message: { conversation: "Sent while you were away" },
+    messageTimestamp: Math.floor(Date.now() / 1000), pushName: "Meera",
+  } as never, { quiet: true });
+  const cu = await WhatsAppMessage.findOne({ owner: P("Sam"), messageId: "CATCHUP-1" }).lean();
+  check("one WhatsApp catches up on: kept as it is — unread, not a past one", cu?.read === false && !cu?.history && (await call("GET", "/whatsapp/unread", "Sam")).body.data?.unread === unreadNow + 1, j(cu));
+  const asked: unknown[] = [];
+  const histSock = Object.assign(fakeSock(samSent) as object, { fetchMessageHistory: async (...a: unknown[]) => { asked.push(a); return "REQ-1"; } });
+  wa.attachSocketForCheck(String(P("Sam")), histSock as never, "971500000001");
+  r = await call("POST", "/whatsapp/history", "Sam", { chat: "971501234567" });
+  const first = await WhatsAppMessage.findOne({ owner: P("Sam"), chat: "971501234567", messageId: { $gt: "" } }).sort({ at: 1 }).lean();
+  const a0 = asked[0] as [number, { remoteJid: string; id: string; fromMe: boolean }, number] | undefined;
+  check("Load older messages: the phone is asked for 50 before the oldest kept", r.status === 200 && a0?.[0] === 50 && a0[1].id === first?.messageId && a0[1].remoteJid === first?.jid && a0[2] === Math.floor(first!.at.getTime() / 1000), j({ r: r.body, a0, first: first?.messageId }));
+  r = await call("POST", "/whatsapp/history", "Sam", { chat: "971599999999" });
+  check("…a chat with nothing in it: said so", r.status === 409, j(r.body));
+  wa.attachSocketForCheck(String(P("Sam")), null);
+  r = await call("POST", "/whatsapp/history", "Sam", { chat: "971501234567" });
+  check("…not linked: refused", r.status === 409 && /not linked/i.test(r.body.message ?? ""), j(r.body));
+  wa.attachSocketForCheck(String(P("Sam")), fakeSock(samSent), "971500000001");
+  r = await call("GET", "/whatsapp/followups/summary", "Sam");
+  check("follow-ups summary for a salesperson: off, his team, the steps, not his to edit", r.status === 200 && r.body.data?.enabled === false && r.body.data.canEdit === false
+    && r.body.data.myTeams?.[0]?.name === "Titans" && r.body.data.steps?.length === 5, j(r.body.data));
+  r = await call("GET", "/whatsapp/followups/summary", "Root");
+  check("…a Super Admin may edit", r.status === 200 && r.body.data?.canEdit === true);
 } finally {
   server.close();
   await mongoose.disconnect();

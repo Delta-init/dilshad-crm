@@ -12,7 +12,7 @@ import type { Boom } from "@hapi/boom";
 import { Types } from "mongoose";
 import { env } from "../../config/env.js";
 import { User } from "../../models/User.js";
-import { WhatsAppLink, WhatsAppMessage, type IWhatsAppMessage } from "../../models/WhatsAppMessage.js";
+import { contactName, WhatsAppContact, WhatsAppLink, WhatsAppMessage, type IWhatsAppMessage } from "../../models/WhatsAppMessage.js";
 import { leadsByPhone, phoneKey } from "./leads.js";
 import { sendPushToUser } from "../pushService.js";
 import { emitToUser } from "../../socket.js";
@@ -39,8 +39,13 @@ import { asVoiceNote, VOICE_MIME } from "./voice.js";
    chats (asked for in full; WhatsApp gives its whole history only to a desktop
    app, and linking as one gets no QR — 2026-10-28, refused with 428). They are
    kept as read, tell nobody, and never start an automatic follow-up (`history`).
-   Their text is kept, and voice notes; older photos, videos and documents
-   only as a line saying so — not downloaded.
+   Their files are downloaded like any other (2026-10-28: "audio and documents
+   and all"); one WhatsApp no longer has is a line saying so. Older messages of
+   a chat come on request too — "Load older messages" (fetchOlder).
+
+   Names (2026-10-28): each contact's name as saved in the phone, else their own
+   WhatsApp name, kept in whatsapp_contacts — a chat and a lead made of it are
+   called by it, and a lead still called "WhatsApp +…" takes it when it comes.
 ──────────────────────────────────────────────────────────────────────────── */
 
 export type WAStatus = "disconnected" | "connecting" | "qr_ready" | "connected";
@@ -161,9 +166,56 @@ async function store(doc: NewMessage): Promise<Saved | null> {
     const saved = await WhatsAppMessage.create(doc);
     return { id: String(saved._id), chat: saved.chat };
   } catch (err) {
-    if ((err as { code?: number }).code === 11000) return null;   // the same WhatsApp message again (a reconnect replays them)
+    if ((err as { code?: number }).code === 11000) {
+      // The same WhatsApp message again (a reconnect replays them). Kept before without its file, and it has one now
+      // (asked for again with "Load older messages"): the file goes on the one kept.
+      if (doc.media?.file && doc.messageId) {
+        await WhatsAppMessage.updateOne(
+          { owner: doc.owner, messageId: doc.messageId, $or: [{ media: null }, { "media.file": "" }] },
+          { $set: { media: doc.media, body: doc.body } },
+        );
+      }
+      return null;
+    }
     throw err;
   }
+}
+
+/* ── Contacts' names ────────────────────────────────────────────────────── */
+
+type ContactIn = { id?: string | null; phoneNumber?: string | null; name?: string | null; notify?: string | null; verifiedName?: string | null };
+const pnOf = (c: ContactIn) => {
+  for (const jid of [c.phoneNumber, c.id]) if (jid && (jid.endsWith("@s.whatsapp.net") || isPnUser(jid))) return digits(jid.split("@")[0]!.split(":")[0]);
+  return "";
+};
+
+/** Names WhatsApp gave for contacts — kept per owner by number; a lead still called "WhatsApp +<number>" takes the name. */
+export async function keepContacts(owner: Owner, contacts: ContactIn[]): Promise<number> {
+  let kept = 0;
+  for (const c of contacts) {
+    const phone = pnOf(c);
+    const key = phone ? phoneKey(phone) : "";
+    if (!key) continue;
+    const set: Record<string, string> = {};
+    for (const f of ["name", "notify", "verifiedName"] as const) { const v = String(c[f] ?? "").trim(); if (v) set[f] = v.slice(0, 120); }
+    if (!Object.keys(set).length) continue;
+    const doc = await WhatsAppContact.findOneAndUpdate({ owner: new Types.ObjectId(owner.id), key }, { $set: { ...set, phone } }, { upsert: true, new: true }).lean();
+    kept++;
+    const best = contactName(doc);
+    if (best && !/^\+?\d+$/.test(best)) {
+      const { Lead } = await import("../../models/Lead.js");
+      await Lead.updateMany({ name: `WhatsApp +${phone}` }, { $set: { name: best } });
+    }
+  }
+  return kept;
+}
+
+/** Names of these numbers (last 9 digits) on the owner's WhatsApp. */
+export async function contactNames(owner: string, keys: string[]): Promise<Map<string, string>> {
+  const list = [...new Set(keys.filter(Boolean))];
+  if (!list.length || !Types.ObjectId.isValid(owner)) return new Map();
+  const docs = await WhatsAppContact.find({ owner: new Types.ObjectId(owner), key: { $in: list } }).lean();
+  return new Map(docs.map((d) => [d.key, contactName(d)]).filter(([, n]) => !!n) as [string, string][]);
 }
 
 type Owner = { id: string; name: string };
@@ -172,9 +224,10 @@ const captionOf = (m: proto.IMessage) => String(m.imageMessage?.caption || m.vid
 
 /**
  * A message on someone's WhatsApp — kept, matched to its lead, and the owner told when it is new and not theirs.
- * `history`: one from WhatsApp's copy of past chats — kept as read, nobody told, only a voice note's file downloaded.
+ * `history`: one from WhatsApp's copy of past chats — kept as read, nobody told. `quiet`: one WhatsApp catches up on
+ * after linking or a reconnect — kept as it is (unread if it is theirs), with no push for each.
  */
-export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts: { history?: boolean } = {}): Promise<void> {
+export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts: { history?: boolean; quiet?: boolean } = {}): Promise<void> {
   const jid = msg.key.remoteJid ?? "";
   if (!jid || jid.endsWith("@g.us") || jid.endsWith("@broadcast") || jid.endsWith("@newsletter")) return;
   const content = normalizeMessageContent(msg.message);
@@ -183,13 +236,6 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
   let media = mediaOf(content);
   if (!body && !media) return;
   const history = opts.history === true;
-  // An old photo, video, document or sticker: a line saying so, not the file. A voice note is kept to play.
-  if (history && media && !(media.type === "audio" && content.audioMessage?.ptt)) {
-    const what = media.type === "document" ? `📄 ${media.fileName || "Document"}` : (LABEL[media.type] ?? "File");
-    const caption = captionOf(content);
-    body = `${what} (older — not kept)${caption ? `: ${caption}` : ""}`;
-    media = null;
-  }
 
   const phone = await phoneOf(sock, msg.key as proto.IMessageKey & { remoteJidAlt?: string });
   const key = phone ? phoneKey(phone) : "";
@@ -202,7 +248,17 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
     } catch (err) {
       console.warn("[whatsapp] could not download a file", err instanceof Error ? err.message : err);
     }
+    // An old one WhatsApp no longer has: a line saying so (its caption with it, unless it is just the file's name).
+    if (!saved && history) {
+      const what = media.type === "document" ? `📄 ${media.fileName || "Document"}`
+        : content.audioMessage?.ptt ? LABEL.ptt! : (LABEL[media.type] ?? "File");
+      const caption = captionOf(content);
+      body = `${what} (older — couldn't be fetched)${caption && caption !== media.fileName ? `: ${caption}` : ""}`;
+      media = null;
+    }
   }
+  // Their own name on WhatsApp, kept for the chat (and a lead made of it).
+  if (!msg.key.fromMe && msg.pushName && phone) await keepContacts(owner, [{ id: `${phone}@s.whatsapp.net`, notify: msg.pushName }]).catch(() => 0);
   const fromMe = !!msg.key.fromMe;
   const ts = Number(msg.messageTimestamp ?? 0);
   const kept = await store({
@@ -220,7 +276,7 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
     at: new Date(ts > 0 ? ts * 1000 : Date.now()),
   });
   // A new message to them: a push to their phone and computer, and the open CRM refreshes its chats and count.
-  if (kept && !fromMe && !history) {
+  if (kept && !fromMe && !history && !opts.quiet) {
     const { Lead } = await import("../../models/Lead.js");
     const leadDoc = lead ? await Lead.findById(lead).select("name").lean<{ name?: string } | null>() : null;
     const who = String(leadDoc?.name ?? "").trim() || msg.pushName || (phone ? `+${phone}` : "WhatsApp");
@@ -304,17 +360,22 @@ export async function connect(userId: string): Promise<void> {
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (s.sock !== sock) return;
-    // "append": older ones WhatsApp catches up on — kept quietly, as past chats.
-    const history = type !== "notify";
-    for (const msg of messages) await receive(owner, sock, msg, { history }).catch((err) => console.error(`[whatsapp] message not kept (${owner.name})`, err));
+    // "append": ones WhatsApp catches up on after linking or a reconnect — kept as they are, without a push for each.
+    const quiet = type !== "notify";
+    for (const msg of messages) await receive(owner, sock, msg, { quiet }).catch((err) => console.error(`[whatsapp] message not kept (${owner.name})`, err));
   });
 
-  // WhatsApp's copy of past chats, in parts, when the phone is linked.
-  sock.ev.on("messaging-history.set", async ({ messages, progress }) => {
+  // WhatsApp's copy of past chats, in parts, when the phone is linked — and older messages asked for (fetchOlder).
+  sock.ev.on("messaging-history.set", async ({ messages, contacts, progress }) => {
     if (s.sock !== sock) return;
+    if (contacts?.length) await keepContacts(owner, contacts).catch((err) => console.error(`[whatsapp] contacts not kept (${owner.name})`, err));
     for (const msg of messages) await receive(owner, sock, msg, { history: true }).catch((err) => console.error(`[whatsapp] past message not kept (${owner.name})`, err));
     console.log(`[whatsapp] past chats — ${owner.name}: ${messages.length} messages${progress != null ? ` (${progress}%)` : ""}`);
   });
+
+  // Contacts' names as WhatsApp tells them (saved in the phone, or their own).
+  sock.ev.on("contacts.upsert", (contacts) => { if (s.sock === sock) void keepContacts(owner, contacts).catch(() => 0); });
+  sock.ev.on("contacts.update", (contacts) => { if (s.sock === sock) void keepContacts(owner, contacts as ContactIn[]).catch(() => 0); });
 }
 
 export async function disconnect(userId: string): Promise<void> {
@@ -347,6 +408,21 @@ export function attachSocketForCheck(userId: string, sock: WASocket | null, phon
   s.sock = sock;
   s.status = sock ? "connected" : "disconnected";
   s.phone = sock ? phone : "";
+}
+
+/* ── Older messages, on request ─────────────────────────────────────────── */
+
+/**
+ * "Load older messages": asks the owner's phone for the `count` messages before the oldest kept in this chat. They
+ * come a few seconds later as past chats (messaging-history.set) — the chat shows them as they land.
+ */
+export async function fetchOlder(userId: string, chat: string, count = 50): Promise<{ before: Date }> {
+  const sock = connected(userId);
+  const oldest = await WhatsAppMessage.findOne({ owner: new Types.ObjectId(userId), chat, messageId: { $gt: "" }, jid: { $gt: "" } })
+    .sort({ at: 1, _id: 1 }).select("messageId jid direction at").lean<{ messageId: string; jid: string; direction: string; at: Date } | null>();
+  if (!oldest) throw new WhatsAppError("Nothing in this chat to start from — older messages come once there is one", 409);
+  await sock.fetchMessageHistory(count, { remoteJid: oldest.jid, fromMe: oldest.direction === "out", id: oldest.messageId }, Math.floor(oldest.at.getTime() / 1000));
+  return { before: oldest.at };
 }
 
 /* ── Sending ────────────────────────────────────────────────────────────── */
