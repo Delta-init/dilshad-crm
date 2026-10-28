@@ -4,6 +4,8 @@ import { authenticate } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/permissions.js";
 import { LeaderboardService, isLeaderboardMonth, isRankBy } from "../services/leaderboardService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
+import { hiddenFromViewer, withoutHidden } from "../services/leaderboardViewer.js";
+import type { AuthenticatedRequest } from "../types/index.js";
 
 const router = Router();
 const service = new LeaderboardService();
@@ -23,7 +25,11 @@ router.get("/", authenticate, checkPermission("leaderboard", "view"), async (req
       sendError(res, "rankBy must be revenue, calls or talk", 400);
       return;
     }
-    sendSuccess(res, "Leaderboard", await service.getLeaderboard(month as string | undefined, rankBy ?? "revenue"));
+    const board = await service.getLeaderboard(month as string | undefined, rankBy ?? "revenue");
+    // A salesperson's board leaves out the team leaders and the Sales Manager (2026-10-28).
+    const user = (req as AuthenticatedRequest).user;
+    const hidden = await hiddenFromViewer({ userId: user?.userId ?? "", role: user?.role });
+    sendSuccess(res, "Leaderboard", withoutHidden(board, hidden));
   } catch (error) {
     next(error);
   }
