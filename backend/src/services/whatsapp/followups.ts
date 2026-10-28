@@ -8,7 +8,7 @@ import { WhatsAppLink, WhatsAppMessage } from "../../models/WhatsAppMessage.js";
 import { WhatsAppFollowupSettings, type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
 import { phoneKeys } from "./leads.js";
-import { contactNames, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled, WhatsAppError } from "./service.js";
+import { connectedOwnerIds, contactNames, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled, WhatsAppError } from "./service.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Automatic WhatsApp follow-ups (the user, 2026-10-27: "this type of follow-up
@@ -331,9 +331,17 @@ const FIRST_REPLY_WAIT_LINK_MS = 30 * MIN;
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 let firstRunning = false;
 
+/** A first message noted more than this after it was sent is a catch-up, not someone writing in now. */
+const FIRST_REPLY_CATCH_UP_MS = 5 * MIN;
+
 /**
  * One look at the first messages noted: a minute on, the first reply goes — unless a person answered, it's off, the
  * owner isn't on a team switched on, or it came before the first reply was switched on. `gapMs`: between its parts.
+ *
+ * Quick (2026-10-28 — first replies were coming many minutes late): only messages of people whose WhatsApp is linked
+ * are taken, so ones waiting for someone to relink never fill the batch; each person's are sent alongside everyone
+ * else's rather than one after another; and anything that can no longer be a first reply in time is let go first —
+ * waited 30 minutes, or a catch-up from earlier that was queued as new.
  */
 export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Math.floor(Math.random() * 2000)): Promise<{ sent: number; skipped: number }> {
   if (firstRunning) return { sent: 0, skipped: 0 };
@@ -341,23 +349,36 @@ export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Mat
   const col = WhatsAppMessage.db.collection(FIRST);
   let sent = 0, skipped = 0;
   try {
+    const linked = connectedOwnerIds().map((id) => new Types.ObjectId(id));
+    const tooOld = new Date(now.getTime() - FIRST_REPLY_WAIT_LINK_MS);
+    // Let go first, so they never stand in front of a real one: too late now…
+    skipped += (await col.updateMany({ status: "waiting", at: { $lt: tooOld }, owner: { $nin: linked } }, { $set: { status: "not_linked", decidedAt: now } })).modifiedCount;
+    skipped += (await col.updateMany({ status: "waiting", at: { $lt: tooOld } }, { $set: { status: "too_late", decidedAt: now } })).modifiedCount;
+    // …and a catch-up from earlier, noted as new (before only fresh ones were noted).
+    skipped += (await col.updateMany(
+      { status: "waiting", $expr: { $gt: [{ $subtract: [{ $ifNull: ["$createdAt", "$at"] }, "$at"] }, FIRST_REPLY_CATCH_UP_MS] } },
+      { $set: { status: "catch_up", decidedAt: now } },
+    )).modifiedCount;
+    if (!linked.length) return { sent, skipped };
+
     const settings = await followupSettings(true);
     const fr = settings.firstReply;
-    const due = (await col.find({ status: "waiting", at: { $lte: new Date(now.getTime() - FIRST_REPLY_AFTER_MS) } }).sort({ at: 1 }).limit(50).toArray()) as unknown as
+    const due = (await col.find({ status: "waiting", owner: { $in: linked }, at: { $lte: new Date(now.getTime() - FIRST_REPLY_AFTER_MS) } }).sort({ at: 1 }).limit(200).toArray()) as unknown as
       { _id: string; owner: Types.ObjectId; key: string; chat: string; at: Date; createdAt?: Date }[];
-    for (const d of due) {
+
+    const one = async (d: (typeof due)[number]) => {
       const close = async (status: string) => { await col.updateOne({ _id: d._id as never }, { $set: { status, decidedAt: now } }); skipped++; };
       // Before it was switched on — by when it reached the CRM (WhatsApp's own times are whole seconds).
-      if (!fr.enabled || !fr.items.length || !fr.startedAt || (d.createdAt ?? d.at) < fr.startedAt) { await close("off"); continue; }
+      if (!fr.enabled || !fr.items.length || !fr.startedAt || (d.createdAt ?? d.at) < fr.startedAt) { await close("off"); return; }
       const onTeam = await Team.countDocuments({ _id: { $in: settings.teams.map((t) => new Types.ObjectId(t)) }, status: "active", $or: [{ members: d.owner }, { leaders: d.owner }] });
-      if (!onTeam) { await close("not_on_team"); continue; }
+      if (!onTeam) { await close("not_on_team"); return; }
       const answered = await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at } });
-      if (answered) { await close("answered"); continue; }
+      if (answered) { await close("answered"); return; }
       const owner = String(d.owner);
-      if (!isConnected(owner)) { if (now.getTime() - d.at.getTime() > FIRST_REPLY_WAIT_LINK_MS) await close("not_linked"); continue; }
+      if (!isConnected(owner)) return;   // unlinked a moment ago: looked at again next time
       // Taken first: another process (or run) doesn't send it twice.
       const claim = await col.updateOne({ _id: d._id as never, status: "waiting" }, { $set: { status: "sending", decidedAt: now } });
-      if (claim.modifiedCount !== 1) continue;
+      if (claim.modifiedCount !== 1) return;
       const lead = (await leadsByKey()).get(d.key) ?? null;
       const leadDoc = lead ? await Lead.findById(lead).select("name").lean<{ name?: string } | null>() : null;
       const ownerDoc = await User.findById(owner).select("name").lean<{ name?: string } | null>();
@@ -386,7 +407,14 @@ export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Mat
         await col.updateOne({ _id: d._id as never }, { $set: { status: "failed", parts, error: err instanceof Error ? err.message : String(err) } });
         console.warn(`[whatsapp first reply] to ${d.chat} stopped after ${parts} part(s)`, err instanceof Error ? err.message : err);
       }
-    }
+    };
+
+    // Each person's one after another (their WhatsApp sends one at a time); everyone's alongside each other.
+    const byOwner = new Map<string, typeof due>();
+    for (const d of due) byOwner.set(String(d.owner), [...(byOwner.get(String(d.owner)) ?? []), d]);
+    await Promise.all([...byOwner.values()].map(async (list) => {
+      for (const d of list) await one(d).catch((err) => console.error("[whatsapp first reply] not decided", err));
+    }));
     return { sent, skipped };
   } finally {
     firstRunning = false;

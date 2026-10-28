@@ -341,8 +341,11 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
     ...(history ? { history: true } : {}),
     at: new Date(ts > 0 ? ts * 1000 : Date.now()),
   });
-  // Their first message ever to this WhatsApp: noted for the automatic first reply (followups.ts runFirstReplies).
-  if (kept && !fromMe && !history && key) {
+  // Their first message ever to this WhatsApp: noted for the automatic first reply (followups.ts runFirstReplies) —
+  // only one sent just now. One WhatsApp catches up on (after linking or a reconnect) from earlier is not a new
+  // person writing in: a pile of those queued behind each other held real first replies up for many minutes.
+  const fresh = !ts || Date.now() - ts * 1000 < FIRST_CONTACT_FRESH_MS;
+  if (kept && !fromMe && !history && key && fresh) {
     const earlier = await WhatsAppMessage.countDocuments({ owner: new Types.ObjectId(owner.id), key, _id: { $ne: new Types.ObjectId(kept.id) } });
     if (!earlier) {
       await WhatsAppMessage.db.collection("whatsapp_first_contacts").insertOne({
@@ -585,6 +588,12 @@ async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: 
     ...(opts.saved ? { saved: opts.saved } : {}),
   });
 }
+
+/** How old a message may be and still count as someone writing in for the first time (2026-10-28). */
+export const FIRST_CONTACT_FRESH_MS = 5 * 60_000;
+
+/** Everyone whose WhatsApp is linked and up in this process. */
+export const connectedOwnerIds = () => [...sessions].filter(([, s]) => !!s.sock && s.status === "connected").map(([id]) => id);
 
 /** Whether this person's WhatsApp is linked and up, here — the automatic follow-ups send only then. */
 export const isConnected = (userId: string) => { const s = session(userId); return !!s.sock && s.status === "connected"; };

@@ -11,6 +11,9 @@
  *   - Case 5: gently — one per person a run, the daily limit, a number not on WhatsApp tried again only later.
  *   - Case 6: a step with a file — sent with it, the file kept once.
  *   - Case 7: what people see — the lead card, the chat marks, the recent list.
+ *   - Case 9: the first reply on time (2026-10-28: it came many minutes late) — a catch-up from earlier is not a first
+ *     message; a backlog of people not linked doesn't hold a linked person's up; two people's go alongside each
+ *     other; too late (30 min) or an old catch-up already queued is let go.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -385,6 +388,44 @@ try {
   const fu = await run(work(Date.now() + 5 * H));
   const after = (await db.collection("whatsapp_messages").find({ owner: P("Sally"), key: "551110001", "auto.kind": "followup" }).toArray()) as any[];
   check("she goes quiet after the first reply: follow-up step 1 counts from it", fu.sent >= 1 && after.length === 1 && after[0].auto.step === 1, j({ fu, after: after.map((m) => m.auto) }));
+
+  section("Case 9 — the first reply on time");
+  await wa.receive({ id: String(P("Sally")), name: "Sally" }, {} as never, {
+    key: { remoteJid: "971551119001@s.whatsapp.net", fromMe: false, id: "CATCH-1" }, message: { conversation: "sent twenty minutes ago" },
+    messageTimestamp: Math.floor(Date.now() / 1000) - 20 * 60, pushName: "Late",
+  } as never, { quiet: true });
+  check("a message WhatsApp catches up on from 20 min ago: not a first message (no first reply to it)", (await firsts().countDocuments({ key: "551119001" })) === 0);
+  await first("Sally", "971551119002", "FRESH-1", "Hi!", "Fresh");
+  check("…one sent just now still is", (await firsts().findOne({ key: "551119002" }))?.status === "waiting");
+  // A backlog: 80 first messages to someone whose WhatsApp isn't linked (Root), older than the linked one's.
+  const base = Date.now() - 2 * 60_000;
+  await firsts().insertMany(Array.from({ length: 80 }, (_, i) => ({
+    _id: `${P("Root")}|5599${String(i).padStart(5, "0")}`, owner: P("Root"), key: `5599${String(i).padStart(5, "0")}`, chat: `97155990${String(i).padStart(4, "0")}`,
+    at: new Date(base - i * 1000), status: "waiting", createdAt: new Date(base - i * 1000),
+  })) as never);
+  const sallyBefore = outbox.Sally!.length;
+  fr = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  check("80 waiting for someone not linked don't hold Sally's up: hers goes at once", fr.sent === 1 && (await firsts().findOne({ key: "551119002" }))?.status === "sent" && outbox.Sally!.length > sallyBefore, j(fr));
+  check("…theirs keep waiting (they may still link)", (await firsts().countDocuments({ owner: P("Root"), status: "waiting" })) === 80);
+  fr = await F.runFirstReplies(new Date(Date.now() + 31 * 60_000), () => 0);
+  check("half an hour on and still not linked: let go", (await firsts().countDocuments({ owner: P("Root"), status: "not_linked" })) === 80 && fr.skipped >= 80, j(fr));
+  // Two people at once: each first reply has 4 parts, 250 ms apart — alongside each other, not one after the other.
+  await lead("Sam's", "+971 55 111 9100", "Sam", titans);
+  await first("Sam", "971551119003", "PAR-1", "Hello", "Par One");
+  await first("Lina", "971551119004", "PAR-2", "Hello", "Par Two");
+  const t0 = Date.now();
+  fr = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 250);
+  const took = Date.now() - t0;
+  check("two people's first replies go alongside each other (4 parts each, ~0.75 s each, not ~1.5 s together)", fr.sent === 2 && took < 1300, j({ fr, took }));
+  // Already queued before this fix: a catch-up noted long after it was sent, and one that has waited too long while linked.
+  await firsts().insertMany([
+    { _id: `${P("Sally")}|551119005`, owner: P("Sally"), key: "551119005", chat: "971551119005", at: new Date(Date.now() - 20 * 60_000), createdAt: new Date(), status: "waiting" },
+    { _id: `${P("Sally")}|551119006`, owner: P("Sally"), key: "551119006", chat: "971551119006", at: new Date(Date.now() - 40 * 60_000), createdAt: new Date(Date.now() - 40 * 60_000), status: "waiting" },
+  ] as never);
+  const sallyNow = outbox.Sally!.length;
+  fr = await F.runFirstReplies(new Date(), () => 0);
+  check("an old catch-up already queued: let go, nothing sent", (await firsts().findOne({ key: "551119005" }))?.status === "catch_up" && outbox.Sally!.length === sallyNow, j(await firsts().findOne({ key: "551119005" })));
+  check("one waiting 40 min while linked: too late, nothing sent", (await firsts().findOne({ key: "551119006" }))?.status === "too_late");
 } finally {
   server.close();
   await mongoose.disconnect();
