@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, MessageCircle, Paperclip, Plus, Save, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Loader2, MessageCircle, Mic, Paperclip, Plus, Save, Trash2, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/lib/toast";
 import { useAuthStore } from "@/lib/store/authStore";
 import {
-  errMsg, useSaveWhatsAppFollowupSettings, useUploadFollowupFile, useWhatsAppFollowupSettings, type WAFollowupStep,
+  errMsg, useSaveWhatsAppFollowupSettings, useUploadFollowupFile, useWhatsAppFollowupSettings, type WAFirstReplyItem, type WAFollowupStep,
 } from "@/hooks/useWhatsApp";
 
 /*
@@ -21,6 +21,9 @@ import {
  * who doesn't answer is followed up from that person's own linked WhatsApp, step by step, each so long after the one
  * before, inside the working hours; it stops when they answer, are Closed / Lost / Repeated, or someone presses Stop on
  * the lead. Only the teams ticked here, and no more than the daily limit per person. (api services/whatsapp/followups.ts)
+ *
+ * The first reply (2026-10-28): to someone's first message ever, a minute on unless a person answered — the parts here
+ * in order (words, a link, a brochure, audio as voice notes), from the same teams' WhatsApps, at any hour.
  */
 
 type Unit = "hours" | "days";
@@ -28,7 +31,7 @@ const unitOf = (m: number): Unit => (m % 1440 === 0 ? "days" : "hours");
 const amountOf = (m: number) => (unitOf(m) === "days" ? m / 1440 : Math.round((m / 60) * 10) / 10);
 const minutesOf = (amount: number, unit: Unit) => Math.round(amount * (unit === "days" ? 1440 : 60));
 
-function StepFile({ step, onChange }: { step: WAFollowupStep; onChange: (f: WAFollowupStep["file"]) => void }) {
+function StepFile({ step, onChange, label = "Add a photo, video or PDF" }: { step: { file: WAFollowupStep["file"] }; onChange: (f: WAFollowupStep["file"]) => void; label?: string }) {
   const upload = useUploadFollowupFile();
   const input = useRef<HTMLInputElement>(null);
   if (step.file) {
@@ -41,7 +44,7 @@ function StepFile({ step, onChange }: { step: WAFollowupStep; onChange: (f: WAFo
   }
   return (
     <>
-      <input ref={input} type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/mpeg,audio/ogg,audio/mp4,application/pdf"
+      <input ref={input} type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/*,.opus,.ogg,.m4a,application/pdf"
         onChange={async (e) => {
           const f = e.target.files?.[0];
           e.target.value = "";
@@ -50,7 +53,7 @@ function StepFile({ step, onChange }: { step: WAFollowupStep; onChange: (f: WAFo
           try { onChange(await upload.mutateAsync(f)); } catch (err) { toast.error(errMsg(err, "Not uploaded")); }
         }} />
       <Button type="button" size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" disabled={upload.isPending} onClick={() => input.current?.click()}>
-        {upload.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}Add a photo, video or PDF
+        {upload.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}{label}
       </Button>
     </>
   );
@@ -69,18 +72,24 @@ export function WhatsAppFollowupsCard() {
   const [teams, setTeams] = useState<string[]>([]);
   const [limit, setLimit] = useState(60);
   const [steps, setSteps] = useState<WAFollowupStep[]>([]);
+  const [frOn, setFrOn] = useState(false);
+  const [frItems, setFrItems] = useState<WAFirstReplyItem[]>([]);
   useEffect(() => {
     if (!data) return;
     setEnabled(data.enabled); setTeams(data.teams); setLimit(data.dailyLimit); setSteps(data.steps);
+    setFrOn(data.firstReply?.enabled ?? false); setFrItems(data.firstReply?.items ?? []);
   }, [data]);
 
   if (!isSuperAdmin) return null;
   const setStep = (i: number, patch: Partial<WAFollowupStep>) => setSteps((s) => s.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+  const setItem = (i: number, patch: Partial<WAFirstReplyItem>) => setFrItems((s) => s.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+  const moveItem = (i: number, by: number) => setFrItems((s) => { const n = [...s]; const [x] = n.splice(i, 1); n.splice(i + by, 0, x!); return n; });
 
   const submit = async () => {
-    if (enabled && !teams.length) { toast.error("Tick at least one team, or switch it off"); return; }
+    if ((enabled || frOn) && !teams.length) { toast.error("Tick at least one team, or switch it off"); return; }
+    if (frOn && !frItems.length) { toast.error("Add what the first reply sends, or switch it off"); return; }
     try {
-      await save.mutateAsync({ enabled, teams, dailyLimit: limit, steps });
+      await save.mutateAsync({ enabled, teams, dailyLimit: limit, steps, firstReply: { enabled: frOn, items: frItems } });
       toast.success(enabled ? "Saved — follow-ups are on for the teams ticked" : "Saved — follow-ups are off");
     } catch (e) { toast.error(errMsg(e, "Not saved")); }
   };
@@ -158,6 +167,43 @@ export function WhatsAppFollowupsCard() {
                 <Button type="button" size="sm" variant="outline" className="gap-1.5"
                   onClick={() => setSteps((x) => [...x, { waitMinutes: 7 * 1440, text: "", file: null }])}>
                   <Plus className="h-3.5 w-3.5" />Add a step
+                </Button>
+              )}
+            </div>
+
+            <div className="space-y-3 rounded-lg border border-dashed p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label htmlFor="wa-fr-on" className="text-sm">First reply</Label>
+                  <p className="text-xs text-muted-foreground">
+                    When someone messages a WhatsApp of a team ticked above for the first time ever, these go out a minute later, in order — unless
+                    someone answered them first. Any hour. Audio goes as a voice note when it can (record it on WhatsApp: .opus / .ogg); an MP3 or M4A goes as audio.
+                  </p>
+                </div>
+                <Switch id="wa-fr-on" checked={frOn} onCheckedChange={setFrOn} />
+              </div>
+              {frItems.map((it, i) => (
+                <div key={i} className="space-y-2 rounded-lg border p-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium">Part {i + 1}</span>
+                    {it.file?.mime?.startsWith("audio/") && (
+                      <label className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Checkbox checked={it.voice} onCheckedChange={(c) => setItem(i, { voice: c === true })} /><Mic className="h-3.5 w-3.5" />as a voice note
+                      </label>
+                    )}
+                    <span className="ml-auto flex gap-1">
+                      <Button type="button" size="icon" variant="ghost" className="h-7 w-7" disabled={i === 0} aria-label="Move up" onClick={() => moveItem(i, -1)}><ArrowUp className="h-3.5 w-3.5" /></Button>
+                      <Button type="button" size="icon" variant="ghost" className="h-7 w-7" disabled={i === frItems.length - 1} aria-label="Move down" onClick={() => moveItem(i, 1)}><ArrowDown className="h-3.5 w-3.5" /></Button>
+                      <Button type="button" size="icon" variant="ghost" className="h-7 w-7" aria-label={`Remove part ${i + 1}`} onClick={() => setFrItems((x) => x.filter((_, k) => k !== i))}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </span>
+                  </div>
+                  <Textarea rows={2} maxLength={1000} value={it.text} placeholder={it.file ? "Words with it (optional)" : "Words — a link, a greeting…"} onChange={(e) => setItem(i, { text: e.target.value })} />
+                  <StepFile step={it} label="Add audio, a brochure, a photo or a video" onChange={(file) => setItem(i, { file, voice: !!file?.mime?.startsWith("audio/") })} />
+                </div>
+              ))}
+              {frItems.length < 6 && (
+                <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={() => setFrItems((x) => [...x, { text: "", file: null, voice: false }])}>
+                  <Plus className="h-3.5 w-3.5" />Add a part
                 </Button>
               )}
             </div>

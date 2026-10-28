@@ -48,6 +48,14 @@ export function FollowupsPanel() {
                   </li>
                 ))}
               </ol>
+              {data.firstReply && (
+                <div className="space-y-1 rounded-lg border border-dashed p-3">
+                  <p className="text-xs font-semibold text-muted-foreground">First reply — {data.firstReply.enabled ? "on" : "off"}: to someone&apos;s first message, a minute later unless you answered</p>
+                  {data.firstReply.items.map((x, i) => (
+                    <p key={i} className="text-sm">{i + 1}. {x.fileName ? `${x.voice ? "🎤 " : "📎 "}${x.fileName}${x.text ? ` — ${x.text}` : ""}` : x.text}</p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

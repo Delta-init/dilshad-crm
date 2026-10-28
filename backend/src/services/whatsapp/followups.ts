@@ -5,10 +5,10 @@ import { Lead } from "../../models/Lead.js";
 import { Team } from "../../models/Team.js";
 import { User } from "../../models/User.js";
 import { WhatsAppLink, WhatsAppMessage } from "../../models/WhatsAppMessage.js";
-import { WhatsAppFollowupSettings, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
+import { WhatsAppFollowupSettings, type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
 import { phoneKeys } from "./leads.js";
-import { isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled } from "./service.js";
+import { contactNames, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled } from "./service.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Automatic WhatsApp follow-ups (the user, 2026-10-27: "this type of follow-up
@@ -32,6 +32,14 @@ import { isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled
 
    The chain is never stored: it is read from the chat itself — the messages
    after the last one a person sent, each automatic one marked with its step.
+
+   The first reply (2026-10-28: "two audios, a link and the brochure as the first
+   message when a client messages first"): someone's first message ever to a
+   linked WhatsApp of a team switched on is noted (whatsapp_first_contacts); a
+   minute on, unless a person has answered, the Super Admin's items go out in
+   order a few seconds apart — words, files, audio as voice notes — at any hour.
+   They count as our message: if the client then goes quiet, the follow-ups
+   start from them.
 ──────────────────────────────────────────────────────────────────────────── */
 
 const MIN = 60_000;
@@ -50,7 +58,7 @@ const DEFAULT_DAILY_LIMIT = 60;
 
 /* ── Settings ───────────────────────────────────────────────────────────── */
 
-export type FollowupSettings = Pick<IWhatsAppFollowupSettings, "enabled" | "startedAt" | "dailyLimit" | "steps" | "updatedByName"> & { teams: string[]; updatedAt: Date | null };
+export type FollowupSettings = Pick<IWhatsAppFollowupSettings, "enabled" | "startedAt" | "dailyLimit" | "steps" | "updatedByName" | "firstReply"> & { teams: string[]; updatedAt: Date | null };
 
 let cache: { at: number; value: FollowupSettings } | null = null;
 export async function followupSettings(fresh = false): Promise<FollowupSettings> {
@@ -64,6 +72,11 @@ export async function followupSettings(fresh = false): Promise<FollowupSettings>
     steps: doc?.steps?.length ? doc.steps.map((s) => ({ waitMinutes: s.waitMinutes, text: s.text, file: s.file ?? null })) : DEFAULT_STEPS,
     updatedByName: doc?.updatedByName ?? "",
     updatedAt: doc?.updatedAt ?? null,
+    firstReply: {
+      enabled: doc?.firstReply?.enabled ?? false,
+      startedAt: doc?.firstReply?.startedAt ?? null,
+      items: (doc?.firstReply?.items ?? []).map((i) => ({ text: i.text ?? "", file: i.file ?? null, voice: i.voice === true })),
+    },
   };
   cache = { at: Date.now(), value };
   return value;
@@ -96,9 +109,29 @@ export async function saveFollowupSettings(input: Record<string, unknown>, byNam
   const known = await Team.countDocuments({ _id: { $in: teamIds.map((t) => new Types.ObjectId(t)) } });
   if (known !== teamIds.length) throw new FollowupError("One of those teams isn't here");
   const enabled = input.enabled === true;
+  // The first reply: kept as it was by a screen that doesn't send it.
+  const fr = input.firstReply as Record<string, unknown> | undefined;
+  let firstReply = before.firstReply;
+  if (fr && typeof fr === "object") {
+    const raw = Array.isArray(fr.items) ? fr.items : [];
+    if (raw.length > 6) throw new FollowupError("The first reply has at most 6 parts");
+    const items: IFirstReplyItem[] = raw.map((x, i) => {
+      const r = (x ?? {}) as Record<string, unknown>;
+      const f = r.file as Record<string, unknown> | null | undefined;
+      const file = f && typeof f.file === "string" && /^followups\/[\w-]+\.\w{1,10}$/.test(f.file)
+        ? { file: f.file, name: String(f.name ?? "").slice(0, 200), mime: String(f.mime ?? "").slice(0, 100), size: Number(f.size) || 0 }
+        : null;
+      const text = String(r.text ?? "").trim().slice(0, 1000);
+      if (!text && !file) throw new FollowupError(`First reply part ${i + 1}: words or a file`);
+      return { text, file, voice: !!file && file.mime.startsWith("audio/") && r.voice !== false };
+    });
+    const on = fr.enabled === true;
+    if (on && !items.length) throw new FollowupError("Add what the first reply sends, or switch it off");
+    firstReply = { enabled: on, items, startedAt: on && !before.firstReply.enabled ? new Date() : on ? before.firstReply.startedAt : null };
+  }
   await WhatsAppFollowupSettings.updateOne({ key: "default" }, {
     $set: {
-      key: "default", enabled, steps, dailyLimit: limit, teams: teamIds.map((t) => new Types.ObjectId(t)), updatedByName: byName,
+      key: "default", enabled, steps, dailyLimit: limit, teams: teamIds.map((t) => new Types.ObjectId(t)), updatedByName: byName, firstReply,
       // Switched on now: only chats written in from now on.
       ...(enabled && !before.enabled ? { startedAt: new Date() } : {}),
     },
@@ -109,7 +142,7 @@ export async function saveFollowupSettings(input: Record<string, unknown>, byNam
 
 /* ── One chat's chain, read from its messages ───────────────────────────── */
 
-type Msg = { _id: Types.ObjectId; direction: "in" | "out"; at: Date; chat: string; auto?: { step: number } | null; history?: boolean };
+type Msg = { _id: Types.ObjectId; direction: "in" | "out"; at: Date; chat: string; auto?: { kind?: string; step: number } | null; history?: boolean };
 
 export type ChainState =
   | { state: "replied" }                        // their message is the last: nothing to follow up
@@ -126,7 +159,8 @@ export function chainOf(newestFirst: Msg[], settings: FollowupSettings, stopped:
   let sent = 0;
   let anchor: Msg | null = null;
   for (const m of newestFirst) {
-    if (m.direction === "out" && m.auto) { sent++; continue; }
+    // An automatic first reply is our message like one a person writes: the follow-ups count from it.
+    if (m.direction === "out" && m.auto && m.auto.kind !== "first_reply") { sent++; continue; }
     if (m.direction === "in") return { state: "replied" };   // can't be: nothing goes after an answer on its own
     anchor = m;
     break;
@@ -287,6 +321,77 @@ export async function runFollowups(now = new Date()): Promise<RunResult> {
   }
 }
 
+/* ── The first reply ────────────────────────────────────────────────────── */
+
+const FIRST = "whatsapp_first_contacts";
+export const FIRST_REPLY_AFTER_MS = MIN;
+/** How long a first message waits for its sender's WhatsApp to be linked again before it is let go. */
+const FIRST_REPLY_WAIT_LINK_MS = 30 * MIN;
+const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+let firstRunning = false;
+
+/**
+ * One look at the first messages noted: a minute on, the first reply goes — unless a person answered, it's off, the
+ * owner isn't on a team switched on, or it came before the first reply was switched on. `gapMs`: between its parts.
+ */
+export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Math.floor(Math.random() * 2000)): Promise<{ sent: number; skipped: number }> {
+  if (firstRunning) return { sent: 0, skipped: 0 };
+  firstRunning = true;
+  const col = WhatsAppMessage.db.collection(FIRST);
+  let sent = 0, skipped = 0;
+  try {
+    const settings = await followupSettings(true);
+    const fr = settings.firstReply;
+    const due = (await col.find({ status: "waiting", at: { $lte: new Date(now.getTime() - FIRST_REPLY_AFTER_MS) } }).sort({ at: 1 }).limit(50).toArray()) as unknown as
+      { _id: string; owner: Types.ObjectId; key: string; chat: string; at: Date; createdAt?: Date }[];
+    for (const d of due) {
+      const close = async (status: string) => { await col.updateOne({ _id: d._id as never }, { $set: { status, decidedAt: now } }); skipped++; };
+      // Before it was switched on — by when it reached the CRM (WhatsApp's own times are whole seconds).
+      if (!fr.enabled || !fr.items.length || !fr.startedAt || (d.createdAt ?? d.at) < fr.startedAt) { await close("off"); continue; }
+      const onTeam = await Team.countDocuments({ _id: { $in: settings.teams.map((t) => new Types.ObjectId(t)) }, status: "active", $or: [{ members: d.owner }, { leaders: d.owner }] });
+      if (!onTeam) { await close("not_on_team"); continue; }
+      const answered = await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at } });
+      if (answered) { await close("answered"); continue; }
+      const owner = String(d.owner);
+      if (!isConnected(owner)) { if (now.getTime() - d.at.getTime() > FIRST_REPLY_WAIT_LINK_MS) await close("not_linked"); continue; }
+      // Taken first: another process (or run) doesn't send it twice.
+      const claim = await col.updateOne({ _id: d._id as never, status: "waiting" }, { $set: { status: "sending", decidedAt: now } });
+      if (claim.modifiedCount !== 1) continue;
+      const lead = (await leadsByKey()).get(d.key) ?? null;
+      const leadDoc = lead ? await Lead.findById(lead).select("name").lean<{ name?: string } | null>() : null;
+      const ownerDoc = await User.findById(owner).select("name").lean<{ name?: string } | null>();
+      // {name}: the lead's, else theirs as saved in the phone or on WhatsApp — a first message is often from no lead yet.
+      const theirName = leadDoc?.name || (await contactNames(owner, [d.key])).get(d.key) || "";
+      let parts = 0;
+      try {
+        for (const [i, item] of fr.items.entries()) {
+          if (i > 0) await sleep(gapMs());
+          const auto = { kind: "first_reply" as const, step: i + 1, of: fr.items.length };
+          const text = fillText(item.text, theirName, ownerDoc?.name);
+          if (item.file && existsSync(mediaPath(item.file.file))) {
+            const buffer = await readFile(mediaPath(item.file.file));
+            await sendFile(owner, d.chat, buffer, item.file.mime || "application/octet-stream", item.file.name || "file", item.voice ? "" : text, item.voice, { auto, storedFile: item.file.file });
+            // A voice note carries no words: they follow on their own.
+            if (item.voice && text) await sendText(owner, d.chat, text, { auto });
+          } else if (text) {
+            await sendText(owner, d.chat, text, { auto });
+          }
+          parts++;
+        }
+        await col.updateOne({ _id: d._id as never }, { $set: { status: "sent", parts, sentAt: new Date() } });
+        sent++;
+        if (lead) await Lead.updateOne({ _id: lead }, { $push: { activityLogs: { action: "whatsapp_followup", description: `WhatsApp first reply sent automatically from ${ownerDoc?.name ?? "their"} WhatsApp (${parts} part${parts === 1 ? "" : "s"})`, createdAt: new Date() } } });
+      } catch (err) {
+        await col.updateOne({ _id: d._id as never }, { $set: { status: "failed", parts, error: err instanceof Error ? err.message : String(err) } });
+        console.warn(`[whatsapp first reply] to ${d.chat} stopped after ${parts} part(s)`, err instanceof Error ? err.message : err);
+      }
+    }
+    return { sent, skipped };
+  } finally {
+    firstRunning = false;
+  }
+}
+
 /** Every minute, in the process that holds the WhatsApp links — does nothing until switched on. */
 export function startWhatsAppFollowups(): void {
   if (!whatsappEnabled()) return;
@@ -297,6 +402,12 @@ export function startWhatsAppFollowups(): void {
   };
   setTimeout(() => void tick(), 90_000);
   setInterval(() => void tick(), MIN);
+  // The first reply, every 15 seconds — it is meant to come a minute after their message.
+  const first = async () => {
+    const r = await runFirstReplies().catch((err) => { console.error("[whatsapp first reply] not run", err); return { sent: 0, skipped: 0 }; });
+    if (r.sent) console.log(`[whatsapp first reply] ${r.sent} sent`);
+  };
+  setInterval(() => void first(), 15_000);
 }
 
 /** For the check only: forget the gaps and the failures, as a fresh process would. */
@@ -304,4 +415,5 @@ export function resetFollowupPacingForCheck(): void {
   nextSendAt.clear();
   failedUntil.clear();
   cache = null;
+  firstRunning = false;
 }

@@ -77,7 +77,7 @@ router.get("/media", async (req, res, next) => {
 });
 
 type MessageDoc = { _id: Types.ObjectId; direction: string; body?: string; at: Date; senderName?: string; sentByName?: string;
-  media?: { type: string; mime: string; fileName: string; size: number; file: string } | null; auto?: { step: number; of: number } | null };
+  media?: { type: string; mime: string; fileName: string; size: number; file: string } | null; auto?: { kind?: string; step: number; of: number } | null };
 const shape = (m: MessageDoc, viewerId: string) => ({
   id: String(m._id),
   direction: m.direction,
@@ -87,7 +87,7 @@ const shape = (m: MessageDoc, viewerId: string) => ({
   sentByName: m.sentByName ?? "",
   media: m.media ? { type: m.media.type, mime: m.media.mime, fileName: m.media.fileName, size: m.media.size, url: m.media.file ? mediaUrl(String(m._id), viewerId) : "" } : null,
   // Sent by the CRM on its own: an automatic follow-up, its step.
-  auto: m.auto ? { step: m.auto.step, of: m.auto.of } : null,
+  auto: m.auto ? { kind: m.auto.kind ?? "followup", step: m.auto.step, of: m.auto.of } : null,
 });
 
 async function leadsBrief(ids: unknown[]) {
@@ -422,7 +422,10 @@ router.get("/followups/settings", async (req: AuthenticatedRequest, res, next) =
   } catch (err) { next(err); }
 });
 
-/** PUT /whatsapp/followups/settings { enabled, teams, dailyLimit, steps: [{ waitMinutes, text, file? }] } — Super Admin. */
+/**
+ * PUT /whatsapp/followups/settings { enabled, teams, dailyLimit, steps: [{ waitMinutes, text, file? }],
+ *   firstReply?: { enabled, items: [{ text, file?, voice? }] } } — Super Admin.
+ */
 router.put("/followups/settings", async (req: AuthenticatedRequest, res, next) => {
   try {
     if (!superAdminOnly(req, res)) return;
@@ -433,15 +436,21 @@ router.put("/followups/settings", async (req: AuthenticatedRequest, res, next) =
   }
 });
 
-const FOLLOWUP_FILE_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/mp4|audio\/(mpeg|ogg|mp4)|application\/pdf)$/;
+const FOLLOWUP_FILE_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/mp4|audio\/(mpeg|ogg|mp4|webm|x-m4a|aac)|application\/pdf)$/;
+/** WhatsApp's own voice notes (.opus) are Ogg Opus, whatever the browser calls them — so they can go as voice notes. */
+const mimeOfUpload = (mime: string, name: string) => {
+  const m = mime.split(";")[0]!.trim().toLowerCase();
+  if (m === "audio/opus" || (/\.(opus|ogg)$/i.test(name) && (!m || m === "application/octet-stream"))) return "audio/ogg";
+  return m;
+};
 /** POST /whatsapp/followups/file (form: file) — a photo, video, audio or PDF for a step, up to 25 MB; kept once, sent to each. Super Admin. */
 router.post("/followups/file", upload.single("file"), async (req: AuthenticatedRequest, res, next) => {
   try {
     if (!superAdminOnly(req, res)) return;
     const file = (req as AuthenticatedRequest & { file?: Express.Multer.File }).file;
     if (!file) { sendError(res, "file is required", 400); return; }
-    const mime = (file.mimetype || "").split(";")[0]!.trim();
-    if (!FOLLOWUP_FILE_TYPES.test(mime)) { sendError(res, "A photo (JPG, PNG, WebP, GIF), an MP4 video, audio or a PDF", 400); return; }
+    const mime = mimeOfUpload(file.mimetype || "", file.originalname || "");
+    if (!FOLLOWUP_FILE_TYPES.test(mime)) { sendError(res, "A photo (JPG, PNG, WebP, GIF), an MP4 video, audio (OGG/Opus, MP3, M4A) or a PDF", 400); return; }
     const ext = (extname(file.originalname || "").toLowerCase().match(/^\.\w{1,10}$/)?.[0]) || `.${mime.split("/")[1]}`;
     const stored = `followups/${randomUUID()}${ext}`;
     await mkdir(mediaPath("followups"), { recursive: true });
@@ -465,6 +474,7 @@ router.get("/followups/summary", checkPermission("whatsapp", "view"), async (req
       myTeams: mine.map((t) => ({ name: t.name ?? "", on: st.teams.includes(String(t._id)) })),
       dailyLimit: st.dailyLimit,
       steps: st.steps.map((x) => ({ waitMinutes: x.waitMinutes, text: x.text, fileName: x.file?.name ?? "" })),
+      firstReply: { enabled: st.firstReply.enabled, items: st.firstReply.items.map((i) => ({ text: i.text, fileName: i.file?.name ?? "", voice: i.voice })) },
     });
   } catch (err) { next(err); }
 });

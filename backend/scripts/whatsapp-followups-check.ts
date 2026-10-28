@@ -11,6 +11,8 @@
  *   - Case 5: gently — one per person a run, the daily limit, a number not on WhatsApp tried again only later.
  *   - Case 6: a step with a file — sent with it, the file kept once.
  *   - Case 7: what people see — the lead card, the chat marks, the recent list.
+ *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
+ *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
  * Run by whatsapp-followups-check.sh. Scratch database only.
  */
@@ -317,6 +319,68 @@ try {
   await msg("Sally", "971563000002", "out", new Date(Date.now() - 5 * H));
   res = await run(work(Date.now() + 5 * 60_000));
   check("switched off: nothing at all", res.sent === 0 && res.skipped === "off", j(res));
+
+  section("Case 8 — the first reply");
+  const upload = async (bytes: Uint8Array, type: string, name: string) => {
+    const f = new FormData();
+    f.append("file", new Blob([bytes], { type }), name);
+    const res = await fetch(`http://127.0.0.1:${port}/api/v1/whatsapp/followups/file`, { method: "POST", headers: { authorization: `Bearer ${token("Root")}` }, body: f });
+    return ((await res.json()) as any).data;
+  };
+  const opus = await upload(new Uint8Array(Buffer.from("OggS-voice-intro")), "", "intro.opus");
+  check("a WhatsApp voice note (.opus) is taken as Ogg — it can go as a voice note", opus?.mime === "audio/ogg", j(opus));
+  const mp3 = await upload(new Uint8Array([0x49, 0x44, 0x33, 1]), "audio/mpeg", "course.mp3");
+  const pdf = await upload(new Uint8Array(Buffer.from("%PDF-1.4 brochure")), "application/pdf", "DELTA BROCHURE.pdf");
+  const items = [
+    { file: opus, text: "", voice: true },
+    { file: mp3, text: "", voice: true },
+    { text: "Hi {name}, all the details: https://deltainstitutions.com/course" },
+    { file: pdf, text: "Our brochure" },
+  ];
+  r = await call("PUT", "/whatsapp/followups/settings", "Sam", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps, firstReply: { enabled: true, items } });
+  check("a salesperson can't set it up", r.status === 403);
+  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps, firstReply: { enabled: true, items: [] } });
+  check("switched on with nothing to send: refused", r.status === 400 && /Add what the first reply sends/.test(r.body.message ?? ""), j(r.body));
+  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps, firstReply: { enabled: true, items } });
+  check("switched on: 4 parts, the audios as voice notes, when stamped", r.status === 200 && r.body.data.firstReply.enabled && r.body.data.firstReply.items.length === 4 && r.body.data.firstReply.items[1].voice === true && !!r.body.data.firstReply.startedAt, j(r.body.data?.firstReply));
+  const first = async (owner: string, phone: string, id: string, body = "Hi, is this Delta?", name = "Nadia") =>
+    wa.receive({ id: String(P(owner)), name: owner }, {} as never, {
+      key: { remoteJid: `${phone}@s.whatsapp.net`, fromMe: false, id }, message: { conversation: body }, messageTimestamp: Math.floor(Date.now() / 1000), pushName: name,
+    } as never);
+  const firsts = () => db.collection("whatsapp_first_contacts");
+  const before8 = outbox.Sally!.length;
+  await first("Sally", "971551110001", "NEW-1");
+  check("a first message ever: noted, waiting", (await firsts().findOne({ _id: `${P("Sally")}|551110001` } as never))?.status === "waiting");
+  let fr = await F.runFirstReplies(new Date(Date.now() + 30_000), () => 0);
+  check("half a minute on: nothing yet", fr.sent === 0 && outbox.Sally!.length === before8, j(fr));
+  fr = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  const sentNow = outbox.Sally!.slice(before8);
+  check("a minute on: sent, in order — a voice note, an audio, the link, the brochure", fr.sent === 1 && sentNow.length === 4
+    && (sentNow[0]!.content as any).ptt === true && (sentNow[1]!.content as any).audio && (sentNow[1]!.content as any).ptt === false
+    && /Hi Nadia, all the details: https:\/\/deltainstitutions.com\/course/.test(String((sentNow[2]!.content as any).text)) && (sentNow[3]!.content as any).document && (sentNow[3]!.content as any).fileName === "DELTA BROCHURE.pdf",
+    j(sentNow.map((x) => Object.keys(x.content))));
+  const frMarked = (await db.collection("whatsapp_messages").find({ owner: P("Sally"), key: "551110001", "auto.kind": "first_reply" }).sort({ at: 1, _id: 1 }).toArray()) as any[];
+  check("…kept, each marked as the first reply, part n of 4", frMarked.length === 4 && frMarked.map((m) => m.auto.step).join() === "1,2,3,4" && frMarked[0].sentByName === "Auto first reply", j(frMarked.map((m) => m.auto)));
+  check("…done once", (await firsts().findOne({ _id: `${P("Sally")}|551110001` } as never))?.status === "sent" && (await F.runFirstReplies(new Date(Date.now() + 120_000), () => 0)).sent === 0);
+  await first("Sally", "971551110001", "NEW-1b", "Hello again");
+  check("their second message: not a first one", (await firsts().countDocuments({ key: "551110001" })) === 1);
+  await first("Sally", "971551110002", "NEW-2");
+  await call("POST", "/whatsapp/send", "Sally", { chat: "971551110002", text: "Hi! Sally here" });
+  fr = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  check("a person answered within the minute: no first reply", fr.sent === 0 && (await firsts().findOne({ key: "551110002" }))?.status === "answered", j(fr));
+  await first("Omar", "971551110003", "NEW-3");
+  fr = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  check("on a team not switched on: none", fr.sent === 0 && (await firsts().findOne({ key: "551110003" }))?.status === "not_on_team");
+  await wa.receive({ id: String(P("Sally")), name: "Sally" }, {} as never, {
+    key: { remoteJid: "971551110004@s.whatsapp.net", fromMe: false, id: "OLD-1" }, message: { conversation: "From last year" }, messageTimestamp: Math.floor(Date.now() / 1000) - 300 * 86400,
+  } as never, { history: true });
+  check("a past chat handed over at linking: not a first message", (await firsts().countDocuments({ key: "551110004" })) === 0);
+  r = await call("GET", "/whatsapp/followups/summary", "Sally");
+  check("the summary shows the first reply (read only)", r.body.data?.firstReply?.enabled === true && r.body.data.firstReply.items.length === 4 && r.body.data.firstReply.items[3].fileName === "DELTA BROCHURE.pdf", j(r.body.data?.firstReply));
+  await lead("Nadia New", "+971 55 111 0001", "Sally", titans);
+  const fu = await run(work(Date.now() + 5 * H));
+  const after = (await db.collection("whatsapp_messages").find({ owner: P("Sally"), key: "551110001", "auto.kind": "followup" }).toArray()) as any[];
+  check("she goes quiet after the first reply: follow-up step 1 counts from it", fu.sent >= 1 && after.length === 1 && after[0].auto.step === 1, j({ fu, after: after.map((m) => m.auto) }));
 } finally {
   server.close();
   await mongoose.disconnect();

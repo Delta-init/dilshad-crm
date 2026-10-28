@@ -14,6 +14,13 @@ export interface IFollowupStep {
   file: { file: string; name: string; mime: string; size: number } | null;
 }
 
+/** One part of the automatic first reply: words, a file (a voice note when it can be one), or a file with words. */
+export interface IFirstReplyItem {
+  text: string;
+  file: { file: string; name: string; mime: string; size: number } | null;
+  voice: boolean;
+}
+
 export interface IWhatsAppFollowupSettings {
   _id: Types.ObjectId;
   key: "default";
@@ -22,6 +29,8 @@ export interface IWhatsAppFollowupSettings {
   teams: Types.ObjectId[];
   dailyLimit: number;
   steps: IFollowupStep[];
+  /** The automatic first reply (2026-10-28): to someone's first message ever, a minute on unless a person answered. */
+  firstReply: { enabled: boolean; startedAt: Date | null; items: IFirstReplyItem[] };
   updatedByName: string;
   updatedAt: Date;
 }
@@ -40,6 +49,19 @@ const stepSchema = new Schema<IFollowupStep>({
   },
 }, { _id: false });
 
+const fileSchema = new Schema({
+  file: { type: String, required: true },
+  name: { type: String, default: "" },
+  mime: { type: String, default: "" },
+  size: { type: Number, default: 0 },
+}, { _id: false });
+
+const firstReplyItemSchema = new Schema<IFirstReplyItem>({
+  text: { type: String, default: "", maxlength: 1000 },
+  file: { type: fileSchema, default: null },
+  voice: { type: Boolean, default: false },
+}, { _id: false });
+
 const settingsSchema = new Schema<IWhatsAppFollowupSettings>(
   {
     key: { type: String, enum: ["default"], default: "default", unique: true },
@@ -48,6 +70,11 @@ const settingsSchema = new Schema<IWhatsAppFollowupSettings>(
     teams: [{ type: Schema.Types.ObjectId, ref: "Team" }],
     dailyLimit: { type: Number, default: 60 },
     steps: { type: [stepSchema], default: [] },
+    firstReply: {
+      enabled: { type: Boolean, default: false },
+      startedAt: { type: Date, default: null },
+      items: { type: [firstReplyItemSchema], default: [] },
+    },
     updatedByName: { type: String, default: "" },
   },
   { timestamps: { createdAt: false, updatedAt: true }, versionKey: false, collection: "whatsapp_followup_settings" },

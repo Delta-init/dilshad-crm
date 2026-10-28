@@ -14,7 +14,7 @@ export interface WAMedia { type: string; mime: string; fileName: string; size: n
 export interface WAMessage {
   id: string; direction: "in" | "out"; body: string; at: string; senderName: string; sentByName: string; media: WAMedia | null;
   /** Sent by the CRM on its own — an automatic follow-up, its step. */
-  auto?: { step: number; of: number } | null;
+  auto?: { kind?: "followup" | "first_reply"; step: number; of: number } | null;
 }
 export interface WALead { id: string; name: string; status: string; owner: string }
 export interface WAChat {
@@ -30,8 +30,10 @@ export interface WAFollowup {
   step?: number; of?: number; nextAt?: string; sent?: number; byName?: string; ownerName?: string; linked?: boolean;
 }
 export interface WAFollowupStep { waitMinutes: number; text: string; file: { file: string; name: string; mime: string; size: number } | null }
+export interface WAFirstReplyItem { text: string; file: WAFollowupStep["file"]; voice: boolean }
 export interface WAFollowupSettings {
   enabled: boolean; startedAt: string | null; teams: string[]; dailyLimit: number; steps: WAFollowupStep[];
+  firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[] };
   updatedByName: string; updatedAt: string | null; allTeams: { id: string; name: string }[];
 }
 export interface WARecentFollowup {
@@ -155,7 +157,7 @@ export function useWhatsAppFollowupSettings(enabled: boolean) {
 export function useSaveWhatsAppFollowupSettings() {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: async (v: Pick<WAFollowupSettings, "enabled" | "teams" | "dailyLimit" | "steps">) => data<WAFollowupSettings>(await api.put("/whatsapp/followups/settings", v)),
+    mutationFn: async (v: Pick<WAFollowupSettings, "enabled" | "teams" | "dailyLimit" | "steps"> & { firstReply?: { enabled: boolean; items: WAFirstReplyItem[] } }) => data<WAFollowupSettings>(await api.put("/whatsapp/followups/settings", v)),
     onSuccess: refresh,
   });
 }
@@ -184,6 +186,7 @@ export function useRecentFollowups(enabled = true) {
 export interface WAFollowupSummary {
   enabled: boolean; canEdit: boolean; myTeams: { name: string; on: boolean }[]; dailyLimit: number;
   steps: { waitMinutes: number; text: string; fileName: string }[];
+  firstReply?: { enabled: boolean; items: { text: string; fileName: string; voice: boolean }[] };
 }
 export function useWhatsAppFollowupSummary() {
   return useQuery({

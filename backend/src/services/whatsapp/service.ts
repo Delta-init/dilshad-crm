@@ -275,6 +275,15 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
     ...(history ? { history: true } : {}),
     at: new Date(ts > 0 ? ts * 1000 : Date.now()),
   });
+  // Their first message ever to this WhatsApp: noted for the automatic first reply (followups.ts runFirstReplies).
+  if (kept && !fromMe && !history && key) {
+    const earlier = await WhatsAppMessage.countDocuments({ owner: new Types.ObjectId(owner.id), key, _id: { $ne: new Types.ObjectId(kept.id) } });
+    if (!earlier) {
+      await WhatsAppMessage.db.collection("whatsapp_first_contacts").insertOne({
+        _id: `${owner.id}|${key}` as never, owner: new Types.ObjectId(owner.id), key, chat: kept.chat, at: new Date(ts > 0 ? ts * 1000 : Date.now()), status: "waiting", createdAt: new Date(),
+      }).catch(() => undefined);   // noted already
+    }
+  }
   // A new message to them: a push to their phone and computer, and the open CRM refreshes its chats and count.
   if (kept && !fromMe && !history && !opts.quiet) {
     const { Lead } = await import("../../models/Lead.js");
@@ -444,7 +453,7 @@ function connected(userId: string): WASocket {
 }
 
 /** How a send was made: by a person (the default), or by the CRM on its own — an automatic follow-up. */
-export type SendOpts = { auto?: { kind: "followup"; step: number; of: number } };
+export type SendOpts = { auto?: { kind: "followup" | "first_reply"; step: number; of: number } };
 
 async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: string, sentId: string, body: string,
   media: { type: string; mime: string; fileName: string; file: string; size: number } | null, opts: SendOpts = {}) {
@@ -454,7 +463,8 @@ async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: 
     owner: new Types.ObjectId(owner.id), ownerName: owner.name,
     chat: phone || chat, phone, key, jid: to.jid,
     direction: "out", body, messageId: sentId,
-    senderName: owner.name, sentBy: new Types.ObjectId(owner.id), sentByName: opts.auto ? "Auto follow-up" : owner.name,
+    senderName: owner.name, sentBy: new Types.ObjectId(owner.id),
+    sentByName: opts.auto ? (opts.auto.kind === "first_reply" ? "Auto first reply" : "Auto follow-up") : owner.name,
     lead: (await leadsByKey()).get(key || chat) ?? null,
     read: true, media, at: new Date(), auto: opts.auto ?? null,
   });
@@ -487,7 +497,7 @@ export async function sendFile(userId: string, chat: string, buffer: Buffer, mim
     if (note) {
       const sent = await sock.sendMessage(to.jid, { audio: note, mimetype: VOICE_MIME, ptt: true });
       const saved = await saveMedia(owner.id, note, "audio/ogg", "");
-      return keepSent(owner, to, chat, sent?.key?.id ?? "", LABEL.ptt!, { type: "audio", mime: "audio/ogg", fileName: "", file: saved.file, size: saved.size });
+      return keepSent(owner, to, chat, sent?.key?.id ?? "", LABEL.ptt!, { type: "audio", mime: "audio/ogg", fileName: "", file: saved.file, size: saved.size }, opts);
     }
   }
   const type = mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : "document";

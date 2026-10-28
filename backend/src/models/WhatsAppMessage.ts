@@ -28,7 +28,7 @@ export interface IWhatsAppMessage {
   read: boolean;
   media: { type: string; mime: string; fileName: string; file: string; size: number } | null;
   /** Sent by the CRM on its own — an automatic follow-up, which step (services/whatsapp/followups.ts). Null: by a person. */
-  auto?: { kind: "followup"; step: number; of: number } | null;
+  auto?: { kind: "followup" | "first_reply"; step: number; of: number } | null;
   /** From before the WhatsApp was linked (WhatsApp's copy of past chats, handed over at linking — 2026-10-27). */
   history?: boolean;
   at: Date;
@@ -63,7 +63,7 @@ const whatsAppMessageSchema = new Schema<IWhatsAppMessage>(
     },
     auto: {
       type: new Schema({
-        kind: { type: String, enum: ["followup"], required: true },
+        kind: { type: String, enum: ["followup", "first_reply"], required: true },
         step: { type: Number, required: true },
         of: { type: Number, required: true },
       }, { _id: false }),

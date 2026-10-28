@@ -19,6 +19,7 @@ import {
 } from "@/hooks/useWhatsApp";
 import { RecentFollowups } from "@/components/whatsapp/RecentFollowups";
 import { FollowupsPanel } from "@/components/whatsapp/FollowupsPanel";
+import { ChatLeadStatus } from "@/components/whatsapp/ChatLeadStatus";
 
 /* ────────────────────────────────────────────────────────────────────────────
    WhatsApp (2026-10-27, as in Tetra Commission): each person links their own
@@ -339,6 +340,8 @@ function WhatsAppPage() {
                         {fmtPhone(chat.phone)}{chat.whatsappName && chat.whatsappName !== chat.name ? ` · on WhatsApp: ${chat.whatsappName}` : ""}
                       </p>
                     </div>
+                    {/* The lead's status, from here (as on the lead page) */}
+                    {chat.lead && (mine || !st.canLink) && <ChatLeadStatus lead={chat.lead} />}
                     {chat.lead && (
                       <Link href={`/leads/${chat.lead.id}`} className="hidden sm:block"><Badge variant="outline" className="hover:bg-muted">Open lead</Badge></Link>
                     )}
