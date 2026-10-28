@@ -1599,10 +1599,10 @@ export const addPayment = async (
     }
     const lead = await Lead.findById(req.params.id);
     if (!lead) { sendError(res, "Lead not found", 404); return; }
-    // Once the close is in finance a payment here must reach finance, or the invoice, the LMS and Tetra Commission
+    // Once the close is in finance a payment here must reach finance, or the invoice, the LMS and CS Portal
     // never hear of it (2026-10-23) — it goes through POST /leads/:id/payments/finance, with its receipt.
     if (await closeIsInFinance(String(lead._id))) {
-      sendError(res, "This lead's enrolment is in finance — send the payment to finance with its receipt, so the invoice, the LMS and Tetra Commission get it.", 409);
+      sendError(res, "This lead's enrolment is in finance — send the payment to finance with its receipt, so the invoice, the LMS and CS Portal get it.", 409);
       return;
     }
 

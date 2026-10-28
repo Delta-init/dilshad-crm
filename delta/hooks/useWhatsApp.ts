@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/axios";
 
 /*
- * WhatsApp (the user, 2026-10-27: "the commission portal's WhatsApp — we need it here also"): each person links their
+ * WhatsApp (the user, 2026-10-27: "the CS Portal's WhatsApp — we need it here also"): each person links their
  * own WhatsApp with a QR and chats with their leads; a team leader reads their team's chats, the Sales Manager and a
  * Super Admin everyone's. The API is /whatsapp (backend/src/routes/whatsappRoutes.ts).
  */

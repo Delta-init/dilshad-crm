@@ -19,8 +19,8 @@ import { emitToUser } from "../../socket.js";
 import { asVoiceNote, VOICE_MIME } from "./voice.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   WhatsApp, as in Tetra Commission (the user, 2026-10-27: "working of the
-   commission portal WhatsApp — we need it here also"): each salesperson links
+   WhatsApp, as in CS Portal (the user, 2026-10-27: "working of the
+   CS Portal WhatsApp — we need it here also"): each salesperson links
    their own WhatsApp by scanning a QR — the server becomes one of their linked
    devices (Baileys, the WhatsApp Web protocol). Normal one-to-one messages only:
    no groups, no broadcasts.

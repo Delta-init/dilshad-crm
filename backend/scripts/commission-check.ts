@@ -1,7 +1,7 @@
 /**
  * Checks the commission rules end to end on a scratch database, against a
  * stand-in for finance that answers the enrolment status call — with the LMS
- * and Tetra Commission's side, as finance passes them on.
+ * and CS Portal's side, as finance passes them on.
  *
  *   - a sale is counted once finance approves it (since 2026-10-26 — the LMS
  *     account, CS, onboarding and MT5 bonus are shown, never waited on), once,
@@ -165,7 +165,7 @@ async function sale(closer: string | null, course: Types.ObjectId | null, teamNa
   return String(_id);
 }
 const DONE_LMS = { state: "created", courses: ["Market Break Out Trading Program"] };
-/** Tetra Commission's side, as finance passes it on: a CS, the welcome sent, no bonus promised — unless told otherwise. */
+/** CS Portal's side, as finance passes it on: a CS, the welcome sent, no bonus promised — unless told otherwise. */
 const tc = (over: Record<string, unknown> = {}) => ({
   state: "sent", code: "STU-0001", cs: "Asha CS", team: "Team Asha", live: true,
   onboarded: { done: true, at: "2026-10-05T10:00:00.000Z", by: "Asha CS" }, bonus: { state: "none" }, ...over,
@@ -319,7 +319,7 @@ check("sent back by finance: not counted, stopped at finance", j?.state === "pro
 const silent = await sale("Neethu", c1._id, "TEAM MAVERICK");
 finance.set(silent, { approval: "approved", status: "sent", invoiceNumber: "INV-S", lms: DONE_LMS, commission: { state: "sent", code: "STU-9", cs: "Asha CS", team: "T", live: false } });
 await sweep();
-check("Tetra Commission not answering: counted all the same — finance approved it", (await saleOf(silent))?.state === "counted");
+check("CS Portal not answering: counted all the same — finance approved it", (await saleOf(silent))?.state === "counted");
 const early = await sale("Neethu", c1._id, "TEAM MAVERICK");
 approve(early);
 await CommissionSale.create({

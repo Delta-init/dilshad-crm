@@ -199,7 +199,7 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
   const deleteMut = useDeletePayment(leadId);
 
   // Once the close is in finance, a payment here goes to finance with its receipt (2026-10-23) — a payment kept only
-  // on the lead never reached the invoice, the LMS or Tetra Commission.
+  // on the lead never reached the invoice, the LMS or CS Portal.
   const { data: link } = useLeadPaymentFinance(leadId, !!closed);
   const inFinance = !!link?.inFinance;
   const sendMut = useSendLeadPayment(leadId);

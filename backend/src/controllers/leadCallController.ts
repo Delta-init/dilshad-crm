@@ -137,7 +137,7 @@ const DAY_MS = 86_400_000;
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /**
- * POST /calls/log/test — Super Admin: the 3CX connection step by step, as in Tetra Commission (2026-10-14): the
+ * POST /calls/log/test — Super Admin: the 3CX connection step by step, as in CS Portal (2026-10-14): the
  * settings, signing in, 3CX's users and extensions, the last 24 hours of the call log and one recording — with a
  * few rows as 3CX sends them and as they were read. Nothing in 3CX changes; empty extensions are filled in from
  * 3CX by email, as Sync now does.

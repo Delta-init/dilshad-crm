@@ -39,7 +39,7 @@ export interface MentorMeeting {
 }
 
 /**
- * When the mentor can't be booked (the LMS, 2026-10-23) — marked by the mentor in the LMS or the commission portal.
+ * When the mentor can't be booked (the LMS, 2026-10-23) — marked by the mentor in the LMS or the CS Portal.
  * The LMS refuses any booking inside it; the calendar draws it as "Not available". The reason never comes here.
  */
 export interface MentorTimeOff {

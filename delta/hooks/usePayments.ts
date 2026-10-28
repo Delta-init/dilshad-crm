@@ -63,7 +63,7 @@ export const useDeletePayment = (leadId: string) => {
 
 /*
  * A closed lead's payments go to finance (2026-10-23): a payment added on the lead after the close never reached the
- * invoice, the LMS or Tetra Commission. Once the close is in finance, a payment is sent with its receipt as a balance
+ * invoice, the LMS or CS Portal. Once the close is in finance, a payment is sent with its receipt as a balance
  * payment; one added before this shows "Not sent to finance", with a Send to finance button.
  */
 

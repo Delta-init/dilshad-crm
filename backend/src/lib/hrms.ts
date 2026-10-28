@@ -3,7 +3,7 @@ import { env } from "../config/env.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    The HRMS's signed integration API (/api/v1/integrations/…), as the Root
-   portal and Tetra Commission call it: X-Delta-Client, -Timestamp, -Nonce and
+   portal and CS Portal call it: X-Delta-Client, -Timestamp, -Nonce and
    -Signature — an HMAC of METHOD \n PATH_WITH_QUERY \n TIMESTAMP \n NONCE \n
    sha256(body), byte for byte the HRMS's (a mismatch is a blanket 401). hrmsGet
    reads; hrmsPost / hrmsDelete below book and cancel meeting rooms.

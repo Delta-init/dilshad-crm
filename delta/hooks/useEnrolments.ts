@@ -51,7 +51,7 @@ export interface InvoiceState {
   balanceMinor: number;
   /** Once approved, what the Delta LMS made of the student. Null before; absent from a finance that did not say. */
   lms?: EnrolmentLms | null;
-  /** …and who looks after them in Tetra Commission: their code, CS and CS team. */
+  /** …and who looks after them in CS Portal: their code, CS and CS team. */
   commission?: EnrolmentCommission | null;
 }
 
@@ -62,7 +62,7 @@ export interface EnrolmentLms {
   courses: string[];
 }
 
-/** Whether they went on to Tetra Commission, and who looks after them there (asked of it live unless `live` is false). */
+/** Whether they went on to CS Portal, and who looks after them there (asked of it live unless `live` is false). */
 export interface EnrolmentCommission {
   state: "sent" | "waiting" | "skipped" | "failed" | "not_sent";
   detail?: string;
@@ -71,7 +71,7 @@ export interface EnrolmentCommission {
   cs?: string;
   team?: string;
   live?: boolean;
-  /** Their welcome went (Tetra Commission onboarded them); absent when it couldn't be asked. */
+  /** Their welcome went (CS Portal onboarded them); absent when it couldn't be asked. */
   onboarded?: { done: boolean; at?: string; by?: string };
   /** The MT5 bonus promised at the close, and its broker-admin approval ("none": no bonus, nothing to approve). */
   bonus?: { state: "none" | "not_requested" | "pending" | "approved" | "rejected" | "unknown"; amount?: number; currency?: string; at?: string; by?: string; reason?: string };

@@ -11,7 +11,7 @@ import { getRecordingLink, type ThreecxCall, type ThreecxStatus } from "@/hooks/
 /* ────────────────────────────────────────────────────────────────────────────
    How a 3CX call shows on the Calls page and a lead's Calls section: its
    result, who took it, how long, its recording, and whether 3CX is syncing.
-   (Tetra Commission's components/calls/callUi.jsx, for leads.)
+   (CS Portal's components/calls/callUi.jsx, for leads.)
 ──────────────────────────────────────────────────────────────────────────── */
 
 const pad = (n: number) => String(n).padStart(2, "0");

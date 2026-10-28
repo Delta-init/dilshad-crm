@@ -1208,7 +1208,7 @@ export function KanbanBoard({ filters, canEdit }: KanbanBoardProps) {
 
       {/* Enrolment — fires when a card is dragged to Closed. Dismissed, the
           card stays where it was: a closed lead with no enrolment is a sale
-          finance, the LMS and Tetra Commission never hear of. */}
+          finance, the LMS and CS Portal never hear of. */}
       {closeLead && (
         <CloseLeadDialog
           key={closeLead._id}

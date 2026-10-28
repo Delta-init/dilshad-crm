@@ -22,7 +22,7 @@ import api from "@/lib/axios";
 import type { ApiResponse } from "@/types";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Call, then say how it went — Tetra Commission's call flow
+   Call, then say how it went — CS Portal's call flow
    (frontend/src/components/followups/CallFlow.jsx there), for leads; the
    Draw CRM's, brought here 2026-10-14. One set of dialogs for the whole app,
    mounted by the dashboard layout; every Call button (ClickToCall) goes

@@ -5,7 +5,7 @@ import type { EnrolmentStatus } from "./financeClient.js";
  *
  *   1. Finance approved   accounts approved the enrolment
  *   2. LMS account        the student's LMS account exists, on the course
- *   3. CS assigned        Tetra Commission gave them a CS
+ *   3. CS assigned        CS Portal gave them a CS
  *   4. Onboarded          their CS sent the welcome
  *   5. MT5 bonus          a broker admin approved the bonus promised at the
  *                         close — approved by itself when none was promised
@@ -13,8 +13,8 @@ import type { EnrolmentStatus } from "./financeClient.js";
  * Shown on every My Enrolments card and on the enrolment's own page, green /
  * yellow / red; and a sale's commission counts only once all five are done
  * (commissionService). Worked out from finance's answer for the enrolment —
- * which carries the LMS and Tetra Commission's side — and the outbox's own
- * record, for what happened before finance had it. A course Tetra Commission
+ * which carries the LMS and CS Portal's side — and the outbox's own
+ * record, for what happened before finance had it. A course CS Portal
  * does not take (not Forex) skips steps 3–5: there is nobody there to do them.
  */
 
@@ -110,7 +110,7 @@ export function stepsOf(st: EnrolmentStatus | null | undefined, h?: HandoverLike
           ? step("lms", "waiting", { detail: lms.detail || "On its way to the LMS" })
           : step("lms", "failed", { detail: lms.detail || "The LMS turned it down" });
 
-  // 3 — Tetra Commission's CS
+  // 3 — CS Portal's CS
   const c = st?.commission;
   const sent = c?.state === "sent";
   if (c?.state === "skipped") {
@@ -119,25 +119,25 @@ export function stepsOf(st: EnrolmentStatus | null | undefined, h?: HandoverLike
   }
   let cs: EnrolmentStep;
   if (lmsStep.state !== "done" || !c) cs = step("cs", "waiting", { detail: "After the LMS" });
-  else if (sent && /no longer/i.test(c.detail ?? "")) cs = step("cs", "failed", { detail: "No longer in Tetra Commission" });
+  else if (sent && /no longer/i.test(c.detail ?? "")) cs = step("cs", "failed", { detail: "No longer in CS Portal" });
   else if (sent && c.cs) cs = step("cs", "done", { detail: `${c.cs}${c.team ? ` · ${c.team}` : ""}` });
   else if (sent) cs = step("cs", "waiting", { detail: "In Delta Open Students — no CS yet" });
-  else if (c.state === "failed" || c.state === "not_sent") cs = step("cs", "failed", { detail: c.detail || "Not sent to Tetra Commission" });
-  else cs = step("cs", "waiting", { detail: c.detail || "On its way to Tetra Commission" });
+  else if (c.state === "failed" || c.state === "not_sent") cs = step("cs", "failed", { detail: c.detail || "Not sent to CS Portal" });
+  else cs = step("cs", "waiting", { detail: c.detail || "On its way to CS Portal" });
 
   // 4 — onboarded (their welcome went)
   let onboarded: EnrolmentStep;
-  if (!sent) onboarded = step("onboarded", "waiting", { detail: "After Tetra Commission has them" });
-  else if (!c?.onboarded) onboarded = step("onboarded", "unknown", { detail: "Tetra Commission didn't say — asked again shortly" });
+  if (!sent) onboarded = step("onboarded", "waiting", { detail: "After CS Portal has them" });
+  else if (!c?.onboarded) onboarded = step("onboarded", "unknown", { detail: "CS Portal didn't say — asked again shortly" });
   else if (c.onboarded.done) onboarded = step("onboarded", "done", { at: c.onboarded.at, by: c.onboarded.by, detail: "Welcome sent" });
   else onboarded = step("onboarded", "waiting", { detail: "Their CS hasn't sent the welcome yet" });
 
   // 5 — the MT5 bonus, approved by a broker admin
   const b = c?.bonus;
   let bonus: EnrolmentStep;
-  if (!sent) bonus = step("bonus", "waiting", { detail: "After Tetra Commission has them" });
+  if (!sent) bonus = step("bonus", "waiting", { detail: "After CS Portal has them" });
   else if (!b || b.state === "unknown") {
-    bonus = step("bonus", "unknown", { detail: b ? `Tetra Commission has no record of the ${money(b.amount, b.currency) || "bonus"} promised` : "Tetra Commission didn't say — asked again shortly" });
+    bonus = step("bonus", "unknown", { detail: b ? `CS Portal has no record of the ${money(b.amount, b.currency) || "bonus"} promised` : "CS Portal didn't say — asked again shortly" });
   } else if (b.state === "none") bonus = step("bonus", "done", { detail: "No bonus promised — nothing to approve" });
   else if (b.state === "approved") bonus = step("bonus", "done", { at: b.at, by: b.by, detail: `${money(b.amount, b.currency)} approved`.trim() });
   else if (b.state === "pending") bonus = step("bonus", "waiting", { at: b.at, detail: `${money(b.amount, b.currency)} — onboarding verification pending, waiting for a broker admin`.replace(/^ — /, "") });

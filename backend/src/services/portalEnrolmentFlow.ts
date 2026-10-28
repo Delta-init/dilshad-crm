@@ -16,10 +16,10 @@ import { refusedForEmail } from "./studentService.js";
  *   finance        accounts, to approve it (or finance not answering yet);
  *   salesperson    sent back, or refused — its closer corrects it and sends it again;
  *   lms            the LMS, making the account;
- *   cs_manager     Tetra Commission has the student, nobody gave them a CS yet;
+ *   cs_manager     CS Portal has the student, nobody gave them a CS yet;
  *   cs             their CS: the welcome, or logging the MT5 the bonus needs (or a bonus turned down);
  *   broker_admin   a broker admin, approving the MT5 bonus;
- *   tetra          Tetra Commission itself (on its way there, or it didn't answer).
+ *   tetra          CS Portal itself (on its way there, or it didn't answer).
  *
  * Unfinished ones in full; finished ones only counted. Read only.
  */

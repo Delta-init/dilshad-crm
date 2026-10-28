@@ -1,7 +1,7 @@
 /**
  * READ ONLY (the user, 2026-10-23): every closed lead with a payment added on the lead after its enrolment went to
  * finance that finance never got — like Jasheer Parassery's AED 1,125 by POS, which left the invoice owing, the LMS
- * with half the course shut and Tetra Commission holding the bonus. Same rule as the lead page's "Not sent to
+ * with half the course shut and CS Portal holding the bonus. Same rule as the lead page's "Not sent to
  * finance" tag (paymentStatesOf). Writes nothing to either database; asks finance what each close stands at.
  *
  *   bun --env-file=<sales CRM .env> scripts/lead-payments-not-in-finance.ts [--csv <file>]

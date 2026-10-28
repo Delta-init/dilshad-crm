@@ -21,7 +21,7 @@
  *   - Case 4: recordings — a link only for whoever may see the call, played
  *     through the backend (ranges pass through); expired, forged and altered
  *     links refused; 3CX not connected; the lock;
- *   - Case 5: Test connection (as in Tetra Commission) — Super Admin only;
+ *   - Case 5: Test connection (as in CS Portal) — Super Admin only;
  *     every step, the newest rows of the last 24 hours, a recording opened,
  *     never the key; 3CX unreachable; not connected;
  *   - Case 6: a lead's call counts from 3CX (calls / connected / not
@@ -538,7 +538,7 @@ await sync.releaseLock();
 const both = await Promise.all([sync.syncCalls("one"), sync.syncCalls("two")]);
 check("two syncs at once: one runs, the other is skipped", both.filter((x) => x.ok).length === 1 && both.filter((x) => x.skipped === "A sync is already running").length === 1, both);
 check("…and still nothing doubled", (await LeadCall.countDocuments()) === total1 + 1);
-section("Case 5 — Test connection, as in Tetra Commission");
+section("Case 5 — Test connection, as in CS Portal");
 // Half an hour ago: Sam rings Lina, answered, recorded — and 250 calls to nobody's numbers before it, more than the test reads.
 for (let k = 0; k < 250; k++) ROWS.push(row(now - 20 * H + k * 60_000, { SourceDn: "101", DestinationDn: "10002", DestinationCallerId: `+97155${String(1000000 + k)}`, Answered: true, TalkingDuration: "PT1S" }));
 ROWS.push(row(now - 30 * 60_000, { call: "TEST", SourceDn: "101", SourceDisplayName: "Sam S", DestinationDn: "10002", DestinationCallerId: "+971501234567", Answered: true, TalkingDuration: "PT40S", SrcRecId: 21 }));

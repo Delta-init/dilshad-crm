@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { testThreecx, type ThreecxTestResult } from "@/hooks/useCalls";
 
 /**
- * Super Admin: the 3CX connection step by step, as in Tetra Commission
+ * Super Admin: the 3CX connection step by step, as in CS Portal
  * (2026-10-14) — the settings, signing in, 3CX's users and extensions, the last
  * 24 hours of calls and one recording — with a few rows as 3CX sends them and
  * as they were read. Runs each time it opens.

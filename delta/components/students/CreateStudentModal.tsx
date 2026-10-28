@@ -697,7 +697,7 @@ export function CreateStudentModal({ open, lead, existingStudent, progress, onCl
                         {editing
                           ? "Saved here. Finance sees a change only if it sends this enrolment back for correction."
                           : bonusChoice === "yes"
-                            ? `${bonusAmount > 0 ? fmtUSD(bonusAmount) : "The"} bonus goes to finance with the enrolment, and on to the LMS and Tetra Commission — outside the fee and balance.`
+                            ? `${bonusAmount > 0 ? fmtUSD(bonusAmount) : "The"} bonus goes to finance with the enrolment, and on to the LMS and CS Portal — outside the fee and balance.`
                             : "No bonus — recorded as such with the enrolment."}
                       </p>
                     )}

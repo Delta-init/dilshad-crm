@@ -1,6 +1,6 @@
 /**
  * Checks a lead's payments once its close is in finance (the user, 2026-10-23: a second payment added on the lead
- * page never reached finance, so the invoice still owed, the LMS kept half the course shut and Tetra Commission held
+ * page never reached finance, so the invoice still owed, the LMS kept half the course shut and CS Portal held
  * the bonus), on a scratch database, through the API, against a stand-in finance:
  *
  *   - Case 1: which payments finance has — the close's own, one on the lead before the enrolment was sent, and one

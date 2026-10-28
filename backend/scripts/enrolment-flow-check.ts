@@ -118,7 +118,7 @@ try {
   check("not sent yet, and with finance: waiting on finance", who(queued) === "finance/waiting/finance/" && who(withFinance) === "finance/waiting/finance/", `${who(queued)} ${who(withFinance)}`);
   check("sent back: on its closer, with finance's reason", who(sentBack) === "finance/failed/salesperson/Sally Sales" && /Wrong fee/.test(of.get(sentBack)?.detail ?? ""), who(sentBack));
   check("the LMS", who(lms) === "lms/waiting/lms/", who(lms));
-  check("in Tetra Commission with no CS yet: the CS manager", who(noCs) === "cs/waiting/cs_manager/", who(noCs));
+  check("in CS Portal with no CS yet: the CS manager", who(noCs) === "cs/waiting/cs_manager/", who(noCs));
   check("the welcome: their CS by name", who(welcome) === "onboarded/waiting/cs/Cee One", who(welcome));
   check("the bonus: a broker admin; the MT5 not logged: their CS", who(broker) === "bonus/waiting/broker_admin/" && who(mt5) === "bonus/waiting/cs/Cee Two", `${who(broker)} ${who(mt5)}`);
   const x = of.get(welcome);

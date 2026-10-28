@@ -1,7 +1,7 @@
 import mongoose, { Schema, type Types } from "mongoose";
 
 /*
- * One WhatsApp message on a salesperson's own linked WhatsApp (2026-10-27, as in Tetra Commission) — received, sent
+ * One WhatsApp message on a salesperson's own linked WhatsApp (2026-10-27, as in CS Portal) — received, sent
  * from the CRM, or sent from their phone (services/whatsapp/service.ts). `owner` is the person whose WhatsApp it is.
  *
  * `chat` is the other side's number (digits with the country code), or WhatsApp's own address for it when the number

@@ -1,5 +1,5 @@
 /* ────────────────────────────────────────────────────────────────────────────
-   The 3CX API (XAPI, V20) for the call sync — Tetra Commission's client
+   The 3CX API (XAPI, V20) for the call sync — CS Portal's client
    (backend/src/lib/threecx.ts there), adapted.
 
    Sign in with the API client (client credentials, token valid an hour), then

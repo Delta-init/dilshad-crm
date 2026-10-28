@@ -11,8 +11,8 @@ import type { WAMedia, WAMessage } from "@/hooks/useWhatsApp";
 
 /* ────────────────────────────────────────────────────────────────────────────
    The pieces both WhatsApp screens share — the WhatsApp page and the lead
-   page's card: a chat's messages, and the box to write one. As Tetra
-   Commission's (frontend/src/components/whatsapp/waUi.jsx), 2026-10-27.
+   page's card: a chat's messages, and the box to write one. As CS
+   Portal's (frontend/src/components/whatsapp/waUi.jsx), 2026-10-27.
 ──────────────────────────────────────────────────────────────────────────── */
 
 export const WA_GREEN = "#25D366";

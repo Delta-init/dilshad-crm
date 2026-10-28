@@ -155,7 +155,7 @@ const paymentSchema = new Schema<IPayment>(
     /**
      * Sent to finance as a balance payment (the user, 2026-10-23): a payment
      * after the close only counts once finance has it — on the invoice, in the
-     * LMS's access and in Tetra Commission's balance. `externalId` is the one
+     * LMS's access and in CS Portal's balance. `externalId` is the one
      * finance knows it by ("bp-…"); what became of it is asked of finance.
      */
     finance: {

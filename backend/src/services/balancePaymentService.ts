@@ -16,8 +16,8 @@ import { fetchStatusesByOrg, orgOfHandover } from "./financeOrgs.js";
 
 /*
  * Balance payments (the user, 2026-10-13): every part-paid course this CRM
- * closed is followed up here, by the people who sold it — not in Tetra
- * Commission. A salesperson sees their own closes, a team leader their teams',
+ * closed is followed up here, by the people who sold it — not in CS
+ * Portal. A salesperson sees their own closes, a team leader their teams',
  * the Sales Manager and a Super Admin every one.
  *
  * Finance holds the money: what the course comes to, what is paid, what is

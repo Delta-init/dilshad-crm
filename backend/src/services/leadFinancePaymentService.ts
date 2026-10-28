@@ -18,8 +18,8 @@ export async function statusesFor(items: { id: string; handover?: Parameters<typ
 /*
  * A lead's payments, once its close is in finance (the user, 2026-10-23: "why the second payment is not updated, and
  * course access is not given on the LMS, and the CS not got it"). A payment added on the lead page after the close
- * stayed in this CRM — finance never had it, so the invoice still owed, the LMS kept half the modules shut and Tetra
- * Commission held the bonus. From now on a payment on a closed lead is sent to finance with its receipt, as a balance
+ * stayed in this CRM — finance never had it, so the invoice still owed, the LMS kept half the modules shut and CS
+ * Portal held the bonus. From now on a payment on a closed lead is sent to finance with its receipt, as a balance
  * payment, and waits for accounts like one recorded on the Balance payments page. Payments added before this are
  * marked "Not sent to finance", with a Send to finance button.
  */

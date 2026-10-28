@@ -1,5 +1,5 @@
 /**
- * Checks the WhatsApp integration (the user, 2026-10-27: "the commission portal's WhatsApp — we need it here also"),
+ * Checks the WhatsApp integration (the user, 2026-10-27: "the CS Portal's WhatsApp — we need it here also"),
  * on a scratch database, through the API, with a stand-in for WhatsApp (a real phone can't be linked here):
  *
  *   - Case 1: linking — off in a process that doesn't run the timed jobs; who may link; who is listed for whom.

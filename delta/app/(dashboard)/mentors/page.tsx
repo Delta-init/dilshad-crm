@@ -67,7 +67,7 @@ interface MentorMeeting {
   bookedByEmail: string;
 }
 
-/** When the mentor can't be booked (2026-10-23) — marked in the LMS or the commission portal; the LMS refuses any
+/** When the mentor can't be booked (2026-10-23) — marked in the LMS or the CS Portal; the LMS refuses any
     booking inside it. No reason comes to the CRMs. */
 interface MentorTimeOff {
   id: string;

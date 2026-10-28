@@ -7,7 +7,7 @@ import { env } from "../config/env.js";
 import { threecxConfigured, threecxJson, threecxSettings } from "../lib/threecx.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Calls with leads, from 3CX — Tetra Commission's call sync
+   Calls with leads, from 3CX — CS Portal's call sync
    (backend/src/students/calls.ts there), for leads.
 
    Every minute the 3CX call log (the report behind 3CX's own Call History) is

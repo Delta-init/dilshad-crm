@@ -129,7 +129,7 @@ const envSchema = z.object({
   R2_BUCKET_NAME:       z.string().default(""),
   R2_PUBLIC_URL:        z.string().default(""),
   /*
-   * WhatsApp, as in Tetra Commission and the Sales CRM (2026-10-27): each salesperson links their own WhatsApp by
+   * WhatsApp, as in CS Portal and the Sales CRM (2026-10-27): each salesperson links their own WhatsApp by
    * scanning a QR — the server becomes one of their linked devices (Baileys, the WhatsApp Web protocol; no Meta
    * account). On by default in the process that runs the timed jobs (RUN_SCHEDULERS): a link lives in the process that
    * made it, so only one process may hold them. WHATSAPP=off keeps a server out of it altogether.

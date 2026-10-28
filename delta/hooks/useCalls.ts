@@ -275,7 +275,7 @@ export const useSyncCallsNow = () => {
 export interface ThreecxTestStep { name: string; ok: boolean; detail: string }
 export interface ThreecxTestResult { ok: boolean; steps: ThreecxTestStep[]; sample?: unknown[]; parsed?: unknown[] }
 
-/** Super Admin: the 3CX connection step by step (POST /calls/log/test), as in Tetra Commission. Changes nothing in 3CX. */
+/** Super Admin: the 3CX connection step by step (POST /calls/log/test), as in CS Portal. Changes nothing in 3CX. */
 export async function testThreecx(): Promise<ThreecxTestResult> {
   const res = await api.post<ApiResponse<ThreecxTestResult>>("/calls/log/test");
   return res.data.data ?? { ok: false, steps: [{ name: "Test", ok: false, detail: res.data.message || "No answer from the server" }] };

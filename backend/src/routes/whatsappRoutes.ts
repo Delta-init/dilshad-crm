@@ -26,8 +26,8 @@ import type { AuthenticatedRequest } from "../types/index.js";
 import { sendError, sendSuccess } from "../utils/response.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   The WhatsApp page and the lead page's WhatsApp card (2026-10-27, as in Tetra
-   Commission; services/whatsapp/service.ts does the WhatsApp side).
+   The WhatsApp page and the lead page's WhatsApp card (2026-10-27, as in CS
+   Portal; services/whatsapp/service.ts does the WhatsApp side).
 
    Each person links their own WhatsApp and is the only one who sends from it.
    Who reads it (services/whatsapp/access.ts): its owner; their team leader; the

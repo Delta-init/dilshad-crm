@@ -11,7 +11,7 @@ import type { EnrolmentStep } from "@/hooks/useEnrolments";
    An enrolment's five steps after the close (the user, 2026-10-04): finance
    approved → LMS account → CS assigned → onboarded → MT5 bonus approved. Green
    done, yellow waiting, red stopped; grey when not known yet, or not needed (a
-   course Tetra Commission doesn't take). Commission counts once finance has
+   course CS Portal doesn't take). Commission counts once finance has
    approved — the first step (2026-10-26); the others are shown, not waited on.
    The server works the steps out (backend/src/services/enrolmentSteps.ts);
    this only draws them — a strip on each My Enrolments card, and the full list

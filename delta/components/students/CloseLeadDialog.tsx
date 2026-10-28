@@ -9,7 +9,7 @@ import type { Lead } from "@/types/lead";
 /*
  * Closing a lead goes through its enrolment.
  *
- * A closed lead is a sale, and finance, the LMS and Tetra Commission hear about
+ * A closed lead is a sale, and finance, the LMS and CS Portal hear about
  * a sale only through the enrolment taken here — the course, the fee, what was
  * paid, the receipt, whether a bonus was given. A lead that reaches "closed"
  * any other way is one none of them ever learn of. So every way of closing —

@@ -23,7 +23,7 @@ const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? 
 /**
  * A payment after the close, sent to finance with its receipt (the Balance payments page, 2026-10-13; the lead's
  * Payments panel, 2026-10-23). It waits for accounts there; approved, it is on the invoice, the LMS opens the rest of
- * the course and Tetra Commission's balance follows. `preset`: an existing lead payment being sent — its amount fixed.
+ * the course and CS Portal's balance follows. `preset`: an existing lead payment being sent — its amount fixed.
  */
 export function BalancePaymentDialog({ studentId, name, course, invoice, waitingMinor, preset, sending, send, onClose }: {
   studentId: string;

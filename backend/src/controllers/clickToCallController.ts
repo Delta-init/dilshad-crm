@@ -9,7 +9,7 @@ import { ThreecxError, threecxConfigured, threecxFetch, threecxPost, threecxSett
 import { sendSuccess, sendError } from "../utils/response.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   The Call button through 3CX — Tetra Commission's (backend/src/functions/
+   The Call button through 3CX — CS Portal's (backend/src/functions/
    studentCalls.ts there), for leads (2026-10-14).
 
    A "3CX call": 3CX rings the caller's OWN extension (their 3CX web client or
@@ -60,7 +60,7 @@ export const getClickToCall = async (req: AuthenticatedRequest, res: Response, n
 interface Device { device_id?: string | number; user_agent?: string; dn?: string }
 
 /** Which signed-in app 3CX should ring: the web client first, then the desktop app — never the phone app alone (as
- *  the Sales CRM and Tetra Commission: a call placed on it is not one the CRM can follow). */
+ *  the Sales CRM and CS Portal: a call placed on it is not one the CRM can follow). */
 export function pickDevice(devices: Device[]): Device | null {
   const ua = (d: Device) => String(d?.user_agent ?? "");
   return devices.find((d) => /web|browser|webrtc/i.test(ua(d)))
