@@ -148,6 +148,50 @@ const l1Doc = await db.collection("leads").findOne({ _id: l1 });
 check("Ria's lead still has its two payments", l1Doc?.payments?.length === 2, l1Doc?.payments);
 check("No other lead got payments", (await db.collection("leads").countDocuments({ _id: { $in: [l3, l4, l5] }, "payments.0": { $exists: true } })) === 0);
 
+section("A balance payment in rupees (marked INR, 2026-10-28)");
+// Leads saved through the model need these; the seed went straight to the collection.
+await db.collection("leads").updateMany({}, { $set: { reporter: ria, "payments.$[].addedBy": ria } });
+const rateNow = (await getAppSettings()).bangaloreRevenue.inrPerAed;
+const aed = (inr: number) => Math.round((inr / rateNow) * 100) / 100;
+const before = (await board()).get("Ria") ?? 0;
+await db.collection("leads").updateOne({ _id: l1 }, { $push: { payments: { $each: [
+  { _id: id(), amount: 4550, paidAt: now, addedBy: ria, note: "Balance payment · UPI", currency: "INR", finance: { externalId: "bp-1", method: "upi", sentAt: now, state: "approved" } },
+  { _id: id(), amount: 9100, paidAt: now, addedBy: ria, note: "Balance payment · UPI", currency: "INR", finance: { externalId: "bp-2", method: "upi", sentAt: now, state: "pending" } },
+] } } } as never);
+b = await board();
+check(`Approved ₹4,550 counts as AED ${aed(4550)}, the waiting ₹9,100 not at all`, Math.abs((b.get("Ria") ?? 0) - (before + aed(4550))) < 0.011, { before, now: b.get("Ria") });
+const ovInr = await new ReportService().getRevenueOverview();
+const ranksInr = new Map((await new ReportService().getUserRankings()).map((r: { name: string; revenue: number }) => [r.name, r.revenue]));
+check("Reports take it in AED too (overview total and user rankings move by the same)", ovInr.totalRevenue > 0 && (ranksInr.get("Ria") ?? 0) > 0, { total: ovInr.totalRevenue, ria: ranksInr.get("Ria") });
+
+const { keepOnLead } = await import("../src/services/leadFinancePaymentService.js");
+await keepOnLead(l1, { userId: String(ria) }, { amount: 2275, method: "upi", paidOn: now.toISOString() }, "bp-3");
+await keepOnLead(l2, { userId: String(ben) }, { amount: 500, method: "cash", paidOn: now.toISOString() }, "bp-4");
+const findBp = async (lid: Types.ObjectId, ext: string) => (await db.collection("leads").findOne({ _id: lid }))?.payments?.find((p: { finance?: { externalId?: string } }) => p.finance?.externalId === ext);
+const bp3 = await findBp(l1, "bp-3"), bp4 = await findBp(l2, "bp-4");
+check("keepOnLead on the Bangalore enrolment's lead: marked INR, ₹2,275 kept", bp3?.currency === "INR" && bp3.amount === 2275, bp3);
+check("keepOnLead on a Dubai enrolment's lead: not marked", !!bp4 && bp4.currency === undefined, bp4);
+
+const marked = (await board()).get("Ria") ?? 0;
+await db.collection("leads").updateOne({ _id: l5 }, { $push: { payments: { _id: id(), amount: 9100, paidAt: now, addedBy: ria, note: "Balance payment · UPI", finance: { externalId: "bp-5", method: "upi", sentAt: now, state: "approved" } } } } as never);
+check("Unmarked, an approved ₹9,100 is counted as AED 9,100", Math.abs(((await board()).get("Ria") ?? 0) - (marked + 9100)) < 0.011);
+const { mkdtempSync, rmSync, readdirSync } = await import("node:fs");
+const work = mkdtempSync(`${process.env.TMPDIR ?? "/tmp"}/blr-tag-`);
+const run = async (...a: string[]) => {
+  const proc = Bun.spawn(["bun", "--no-env-file", `${import.meta.dir}/tag-bangalore-balance-payments.ts`, ...a], { cwd: work, env: { ...process.env, MONGODB_URI: uri }, stdout: "pipe", stderr: "pipe" });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  return out;
+};
+const dry = await run();
+check("tag script dry run lists the one unmarked payment and changes nothing", /1 balance payment/.test(dry) && /Dry run/.test(dry) && Math.abs(((await board()).get("Ria") ?? 0) - (marked + 9100)) < 0.011, dry);
+check("--write marks it", /Marked 1 of 1/.test(await run("--write")));
+check(`Marked: ₹9,100 counts as AED ${aed(9100)}`, Math.abs(((await board()).get("Ria") ?? 0) - (marked + aed(9100))) < 0.011, (await board()).get("Ria"));
+check("Run again: nothing left", /0 balance payment/.test(await run()));
+const undo = readdirSync(work).find((f) => f.startsWith("tag-bangalore-balance-payments-undo-"));
+check("--undo unmarks it", !!undo && /unmarked 1 of 1/.test(await run("--undo", `${work}/${undo}`)) && Math.abs(((await board()).get("Ria") ?? 0) - (marked + 9100)) < 0.011);
+rmSync(work, { recursive: true, force: true });
+
 console.log(`\n${checks - failures}/${checks} passed`);
 await mongoose.disconnect();
 process.exit(failures ? 1 : 0);

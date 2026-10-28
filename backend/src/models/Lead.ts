@@ -170,6 +170,11 @@ const paymentSchema = new Schema<IPayment>(
       }, { _id: false }),
       default: undefined,
     },
+    /**
+     * "INR" when the amount is rupees: a balance payment on a Bangalore enrolment, sent in its invoice's currency
+     * (2026-10-28). Absent: AED, as every other lead payment.
+     */
+    currency: { type: String, enum: ["INR"] },
   },
   { _id: true, timestamps: true }
 );

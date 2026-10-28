@@ -180,17 +180,22 @@ export async function sendLeadPayment(viewer: Viewer, leadId: string, body: Reco
  * A balance payment sent to finance, kept on its lead as a request — pending, counted nowhere until finance approves it
  * (2026-10-26: leadPaymentDecisions.ts keeps the decision). From the lead's Payments panel, or since 2026-10-26 the
  * Balance payments page too, which used to leave the lead without it. Once only: the external id is finance's key.
+ * On a Bangalore enrolment it is rupees — the invoice's currency — and is marked so (2026-10-28): the lead's other
+ * payments are AED, and every revenue figure adds them up as such (utils/bangaloreRevenue.ts counts this one in AED).
  */
 export async function keepOnLead(leadId: unknown, viewer: Viewer, body: Record<string, unknown>, externalId: string, paymentId?: string | null): Promise<void> {
   const fresh = await Lead.findById(leadId);
   if (!fresh || fresh.payments.some((p) => p.finance?.externalId === externalId)) return;
   const method = String(body.method ?? "");
   const finance = { externalId, method, sentAt: new Date(), state: "pending" as const };
+  const rupees = (await Student.findOne({ leadId: fresh._id }).select("academy").lean())?.academy === "bangalore";
   const target = paymentId ? fresh.payments.id(paymentId) : null;
-  if (target) target.finance = finance;
-  else {
+  if (target) {
+    target.finance = finance;
+    if (rupees) target.currency = "INR";
+  } else {
     const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, 500) : `Balance payment · ${PAYMENT_METHOD_LABELS[method as EnrolmentPaymentMethod] ?? method}`;
-    fresh.payments.push({ amount: Number(body.amount), note, paidAt: new Date(String(body.paidOn)), addedBy: new Types.ObjectId(viewer.userId), finance } as never);
+    fresh.payments.push({ amount: Number(body.amount), note, paidAt: new Date(String(body.paidOn)), addedBy: new Types.ObjectId(viewer.userId), finance, ...(rupees ? { currency: "INR" } : {}) } as never);
   }
   await fresh.save();
 }

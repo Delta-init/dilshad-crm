@@ -411,6 +411,11 @@ export interface IPayment {
    * leaderboard, reports — only once approved (utils/countedPayments.ts); `state` is kept by leadPaymentDecisions.ts.
    */
   finance?: { externalId: string; method: string; sentAt: Date; state?: "pending" | "approved" | "rejected"; decidedAt?: Date; reason?: string };
+  /**
+   * "INR": the amount is rupees — a balance payment on a Bangalore enrolment, sent to finance in its invoice's currency
+   * (2026-10-28). Left out of every AED sum and counted in AED by utils/bangaloreRevenue.ts. Absent: AED.
+   */
+  currency?: "INR";
   createdAt?: Date;
   updatedAt?: Date;
 }

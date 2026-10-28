@@ -4,10 +4,14 @@
  * not calculated"). A payment sent to finance as a balance payment (`finance.externalId`) counts once finance approves
  * it (`finance.state`, kept by leadPaymentDecisions.ts); pending or rejected, it is shown on the lead and counted
  * nowhere. Every other payment — taken at the close, or on the lead before its close was in finance — counts as before.
+ *
+ * A payment in rupees (`currency: "INR"`, a Bangalore enrolment's balance payment, 2026-10-28) is in none of these AED
+ * sums: utils/bangaloreRevenue.ts counts it in AED at the Settings rate.
  */
 
 /** After `{ $unwind: "$payments" }`: only the payments that count. */
 export const COUNTED_PAYMENT = {
+  "payments.currency": { $ne: "INR" },
   $or: [{ "payments.finance.externalId": { $exists: false } }, { "payments.finance.state": "approved" }],
 };
 
@@ -16,7 +20,12 @@ export const COUNTED_PAYMENTS = {
   $filter: {
     input: { $ifNull: ["$payments", []] },
     as: "p",
-    cond: { $or: [{ $eq: [{ $ifNull: ["$$p.finance.externalId", null] }, null] }, { $eq: ["$$p.finance.state", "approved"] }] },
+    cond: {
+      $and: [
+        { $ne: ["$$p.currency", "INR"] },
+        { $or: [{ $eq: [{ $ifNull: ["$$p.finance.externalId", null] }, null] }, { $eq: ["$$p.finance.state", "approved"] }] },
+      ],
+    },
   },
 };
 
@@ -24,6 +33,6 @@ export const COUNTED_PAYMENTS = {
 export const COUNTED_TOTAL = { $sum: { $map: { input: COUNTED_PAYMENTS, as: "p", in: "$$p.amount" } } };
 
 /** The same rule, for a payment in hand. */
-export function isCountedPayment(p: { finance?: { externalId?: string | null; state?: string | null } | null }): boolean {
-  return !p.finance?.externalId || p.finance.state === "approved";
+export function isCountedPayment(p: { currency?: string | null; finance?: { externalId?: string | null; state?: string | null } | null }): boolean {
+  return p.currency !== "INR" && (!p.finance?.externalId || p.finance.state === "approved");
 }

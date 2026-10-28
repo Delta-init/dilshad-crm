@@ -64,12 +64,38 @@ function paymentsInAed(rate: number) {
   };
 }
 
+/** A lead's rupee payments (`currency: "INR"`) in AED, with the rest of each — finance's decision included. */
+function rupeesInAed(payments: string, rate: number) {
+  return {
+    $map: {
+      input: { $filter: { input: { $ifNull: [payments, []] }, as: "p", cond: { $eq: ["$$p.currency", "INR"] } } },
+      as: "p",
+      in: rupeePaymentInAed(rate),
+    },
+  };
+}
+
+/** One rupee payment (`$$p`) in AED — no longer marked INR, so the counted-payment rule takes it. */
+function rupeePaymentInAed(rate: number) {
+  return {
+    $mergeObjects: [
+      { $arrayToObject: { $filter: { input: { $objectToArray: "$$p" }, as: "f", cond: { $ne: ["$$f.k", "currency"] } } } },
+      {
+        amount: { $round: [{ $divide: [{ $ifNull: ["$$p.amount", 0] }, rate] }, 2] },
+        note: { $concat: ["Bangalore balance payment · ₹", { $toString: { $ifNull: ["$$p.amount", 0] } }, " at 1 AED = ₹", { $toString: rate }] },
+        bangalore: true,
+      },
+    ],
+  };
+}
+
 const BANGALORE_ENROLMENT = { academy: "bangalore", status: { $ne: "dropped" } };
 
 /**
  * For a pipeline that unwinds lead payments (revenue by the day a payment was made): put first, it adds — beside the
- * leads — one copy of each Bangalore-enrolled lead carrying only the enrolment's payments in AED. The lead's own
- * payments still come from the lead itself, so nothing is counted twice; a count of leads must not use this.
+ * leads — one copy of each Bangalore-enrolled lead carrying only the enrolment's payments and the lead's rupee ones,
+ * in AED. The lead's AED payments still come from the lead itself, and its rupee ones are left out there, so nothing
+ * is counted twice; a count of leads must not use this.
  */
 export async function bangaloreLeadsUnion(): Promise<PipelineStage[]> {
   const rate = await inrPerAed();
@@ -80,10 +106,10 @@ export async function bangaloreLeadsUnion(): Promise<PipelineStage[]> {
         pipeline: [
           { $match: BANGALORE_ENROLMENT },
           { $project: { leadId: 1, payments: paymentsInAed(rate) } },
-          { $match: { "payments.0": { $exists: true } } },
-          { $lookup: { from: "leads", localField: "leadId", foreignField: "_id", as: "lead", pipeline: [{ $project: { payments: 0, activityLogs: 0 } }] } },
+          { $lookup: { from: "leads", localField: "leadId", foreignField: "_id", as: "lead", pipeline: [{ $project: { activityLogs: 0 } }] } },
           { $unwind: "$lead" },
-          { $replaceWith: { $mergeObjects: ["$lead", { payments: "$payments" }] } },
+          { $replaceWith: { $mergeObjects: ["$lead", { payments: { $concatArrays: ["$payments", rupeesInAed("$lead.payments", rate)] } }] } },
+          { $match: { "payments.0": { $exists: true } } },
         ],
       },
     },
@@ -92,7 +118,7 @@ export async function bangaloreLeadsUnion(): Promise<PipelineStage[]> {
 
 /**
  * For a pipeline that adds up each lead's payments (COUNTED_TOTAL): put after its $match, it adds the lead's
- * Bangalore enrolment payments, in AED, to its `payments`.
+ * Bangalore enrolment payments, in AED, to its `payments`, and turns its rupee ones into AED.
  */
 export async function withBangaloreMoney(): Promise<PipelineStage[]> {
   const rate = await inrPerAed();
@@ -110,7 +136,7 @@ export async function withBangaloreMoney(): Promise<PipelineStage[]> {
       $set: {
         payments: {
           $concatArrays: [
-            { $ifNull: ["$payments", []] },
+            { $map: { input: { $ifNull: ["$payments", []] }, as: "p", in: { $cond: [{ $eq: ["$$p.currency", "INR"] }, rupeePaymentInAed(rate), "$$p"] } } },
             { $reduce: { input: "$_bangalore.payments", initialValue: [], in: { $concatArrays: ["$$value", "$$this"] } } },
           ],
         },
