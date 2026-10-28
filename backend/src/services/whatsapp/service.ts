@@ -35,10 +35,10 @@ import { asVoiceNote, VOICE_MIME } from "./voice.js";
    or makes a lead of it.
 
    Past chats (the user, 2026-10-27: "get all old chats of Shan's number"):
-   when a phone is linked, WhatsApp hands the new device a copy of its chats —
-   asked for in full (which WhatsApp gives only to a desktop app, so the CRM
-   links as one: "Mac OS" on the phone's Linked devices). They are kept as
-   read, tell nobody, and never start an automatic follow-up (`history`).
+   when a phone is linked, WhatsApp hands the new device a copy of its recent
+   chats (asked for in full; WhatsApp gives its whole history only to a desktop
+   app, and linking as one gets no QR — 2026-10-28, refused with 428). They are
+   kept as read, tell nobody, and never start an automatic follow-up (`history`).
    Their text is kept, and voice notes; older photos, videos and documents
    only as a line saying so — not downloaded.
 ──────────────────────────────────────────────────────────────────────────── */
@@ -264,8 +264,9 @@ export async function connect(userId: string): Promise<void> {
     ...(version ? { version } : {}),
     auth: state,
     logger,
-    // A desktop app: the only kind WhatsApp hands its full past chats to (Baileys asks for them with syncFullHistory).
-    browser: ["Mac OS", "Desktop", "14.4.1"],
+    // A browser, as WhatsApp Web. Not a desktop app ("Mac OS" / "Desktop", which full history needs): WhatsApp closes
+    // that link (428) before it ever sends a QR, so nobody can link (2026-10-28).
+    browser: ["Delta Remote CRM", "Chrome", "1.0.0"],
     markOnlineOnConnect: false,   // the phone keeps its notifications
     syncFullHistory: true,
     shouldSyncHistoryMessage: () => true,
