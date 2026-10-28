@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type ClipboardEvent, type ChangeEvent } from "react";
-import { FileText, Loader2, Mic, Paperclip, SendHorizontal, Smile, Trash2, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState, type ClipboardEvent, type ChangeEvent, type ReactNode } from "react";
+import { FileText, Forward, Loader2, Mic, Paperclip, SendHorizontal, Smile, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -57,40 +57,65 @@ function Media({ media }: { media: WAMedia | null }) {
   );
 }
 
-export function MessageBubble({ m }: { m: WAMessage }) {
+/** Who sent it, for the line under a message: automatic (which), a saved message picked (which), or the person. */
+function sentLine(m: WAMessage, out: boolean): string {
+  if (m.auto) return m.auto.kind === "first_reply" ? `Auto first reply · ${m.auto.step} of ${m.auto.of} · ` : `Auto follow-up · step ${m.auto.step} of ${m.auto.of} · `;
+  const saved = m.saved ? (m.saved.kind === "first_reply" ? `First reply ${m.saved.step} (saved) · ` : `Follow-up ${m.saved.step} (saved) · `) : "";
+  return saved + (out && m.sentByName ? `${m.sentByName} · ` : "");
+}
+
+/** Forward on a message — shown on hover, and always on a touch screen. */
+function ForwardButton({ onClick, out }: { onClick: () => void; out: boolean }) {
+  return (
+    <button type="button" onClick={onClick} aria-label="Forward" title="Forward"
+      className={cn("self-center rounded-full bg-background/80 p-1.5 text-muted-foreground shadow-sm hover:text-foreground [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100",
+        out ? "order-first mr-1" : "ml-1")}>
+      <Forward className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+export function MessageBubble({ m, onForward }: { m: WAMessage; onForward?: (m: WAMessage) => void }) {
   const out = m.direction === "out";
   const label = m.media && ["📷 Photo", "🎥 Video", "🎵 Audio", "🎤 Voice note", "🔖 Sticker"].includes(m.body);
   if (m.media?.type === "sticker" && m.media.url) {
     // A sticker stands on its own, as on WhatsApp: no bubble, its time underneath.
     return (
-      <div className={cn("flex", out ? "justify-end" : "justify-start")}>
+      <div className={cn("group flex", out ? "justify-end" : "justify-start")}>
         <div className={cn("flex max-w-[78%] flex-col", out ? "items-end" : "items-start")}>
           <Media media={m.media} />
           <span className="mt-0.5 rounded-md bg-background/80 px-1.5 text-[10px] text-muted-foreground">
             {out && m.sentByName ? `${m.sentByName} · ` : ""}{time(m.at)}
           </span>
         </div>
+        {onForward && <ForwardButton out={out} onClick={() => onForward(m)} />}
       </div>
     );
   }
   return (
-    <div className={cn("flex", out ? "justify-end" : "justify-start")}>
+    <div className={cn("group flex", out ? "justify-end" : "justify-start")}>
       <div className={cn(
         "max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm",
         out ? "rounded-br-md bg-[#d9fdd3] text-slate-900 dark:bg-emerald-900/70 dark:text-emerald-50" : "rounded-bl-md bg-white text-slate-900 dark:bg-zinc-800 dark:text-zinc-100",
       )}>
+        {m.forwarded && <p className="mb-0.5 flex items-center gap-1 text-[11px] italic opacity-60"><Forward className="h-3 w-3" />Forwarded</p>}
         <Media media={m.media} />
         {!label && m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
         <p className="mt-0.5 text-right text-[10px] opacity-60">
-          {m.auto ? (m.auto.kind === "first_reply" ? `Auto first reply · ${m.auto.step} of ${m.auto.of} · ` : `Auto follow-up · step ${m.auto.step} of ${m.auto.of} · `) : out && m.sentByName ? `${m.sentByName} · ` : ""}{time(m.at)}
+          {sentLine(m, out)}{time(m.at)}
         </p>
       </div>
+      {onForward && <ForwardButton out={out} onClick={() => onForward(m)} />}
     </div>
   );
 }
 
 /** A chat's messages, with a line for each day, kept scrolled to the newest. */
-export function Thread({ messages = [], empty = "No messages yet", className = "" }: { messages?: WAMessage[]; empty?: string; className?: string }) {
+export function Thread({ messages = [], empty = "No messages yet", className = "", onForward }: {
+  messages?: WAMessage[]; empty?: string; className?: string;
+  /** Forward on each message — where the reader has a linked WhatsApp of their own to send it from. */
+  onForward?: (m: WAMessage) => void;
+}) {
   const end = useRef<HTMLDivElement>(null);
   const last = messages[messages.length - 1]?.id;
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [last]);
@@ -102,7 +127,7 @@ export function Thread({ messages = [], empty = "No messages yet", className = "
           {dayOf(m.at) !== dayOf(messages[i - 1]?.at) && (
             <div className="flex justify-center"><span className="rounded-md bg-background/90 px-2 py-0.5 text-[11px] text-muted-foreground shadow-sm">{dayLabel(m.at)}</span></div>
           )}
-          <MessageBubble m={m} />
+          <MessageBubble m={m} onForward={onForward} />
         </Fragment>
       ))}
       <div ref={end} />
@@ -202,11 +227,13 @@ function Attachment({ file, onRemove, disabled }: { file: File; onRemove: () => 
  * 25 MB). With nothing written the microphone takes Send's place, as on WhatsApp: tap it to record, then send or
  * throw the recording away. Enter sends; Shift+Enter is a new line; the smiley opens emojis where the cursor is.
  */
-export function Composer({ onSendText, onSendFile, disabled = false, placeholder = "Write a message" }: {
+export function Composer({ onSendText, onSendFile, disabled = false, placeholder = "Write a message", extra }: {
   onSendText: (text: string) => Promise<void>;
   onSendFile: (file: File, caption: string, voice?: boolean) => Promise<void>;
   disabled?: boolean;
   placeholder?: string;
+  /** More buttons beside the clip — the saved messages on the WhatsApp page. */
+  extra?: ReactNode;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -321,6 +348,7 @@ export function Composer({ onSendText, onSendFile, disabled = false, placeholder
         <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0" disabled={disabled || busy} onClick={() => fileRef.current?.click()} aria-label="Attach a file">
           <Paperclip className="h-4 w-4" />
         </Button>
+        {extra}
         <Textarea ref={textRef} value={text} onChange={(e) => setText(e.target.value)} rows={1} disabled={disabled || busy} placeholder={file ? "Add a caption (optional)" : placeholder}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
           onPaste={paste}

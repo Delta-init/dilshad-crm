@@ -14,12 +14,13 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { Composer, shortTime, Thread, WA_GREEN } from "@/components/whatsapp/waUi";
 import {
-  errMsg, useFetchOlderMessages, useWhatsAppChatActions, useWhatsAppChats, useWhatsAppLeadOptions, useWhatsAppLink, useWhatsAppMessages, useWhatsAppSend,
-  useWhatsAppStatus, type WAChat, type WALeadOption, type WAStatusAnswer,
+  errMsg, useFetchOlderForAll, useFetchOlderMessages, useWhatsAppChatActions, useWhatsAppChats, useWhatsAppLeadOptions, useWhatsAppLink, useWhatsAppMessages, useWhatsAppSend,
+  useWhatsAppStatus, type WAChat, type WALeadOption, type WAMessage, type WAStatusAnswer,
 } from "@/hooks/useWhatsApp";
 import { RecentFollowups } from "@/components/whatsapp/RecentFollowups";
 import { FollowupsPanel } from "@/components/whatsapp/FollowupsPanel";
 import { ChatLeadStatus } from "@/components/whatsapp/ChatLeadStatus";
+import { ForwardDialog, SavedMessagesButton } from "@/components/whatsapp/ForwardAndSaved";
 
 /* ────────────────────────────────────────────────────────────────────────────
    WhatsApp (2026-10-27, as in Tetra Commission): each person links their own
@@ -150,6 +151,7 @@ function WhatsAppPage() {
   const [draft, setDraft] = useState<WAChat | null>(null);          // a chat started from a lead, before its first message
   const [picking, setPicking] = useState<{ lead: WALeadOption; numbers: string[] } | null>(null);
   const [linking, setLinking] = useState(false);
+  const [forwarding, setForwarding] = useState<WAMessage | null>(null);   // the message being forwarded
   // Full screen: the chats and the chat fill the window — the browser's own full screen where it has one; Esc leaves.
   const [full, setFull] = useState(false);
   const toggleFull = () => {
@@ -177,6 +179,14 @@ function WhatsAppPage() {
   const { read, createLead } = useWhatsAppChatActions();
   const send = useWhatsAppSend();
   const older = useFetchOlderMessages();
+  const olderAll = useFetchOlderForAll();
+  const loadOlderForAll = async () => {
+    try {
+      const r = await olderAll.mutateAsync();
+      const mins = Math.max(1, Math.round(r.seconds / 60));
+      toast.success(`Asking your phone for older messages of ${r.chats} chat${r.chats === 1 ? "" : "s"} — about ${mins} min; they appear as they come`);
+    } catch (e) { toast.error(errMsg(e, "Couldn't ask your phone")); }
+  };
 
   /** Their chat if there is one (with the lead, or on one of their numbers), else a new one on their number. */
   const openLead = (l: WALeadOption) => {
@@ -288,6 +298,12 @@ function WhatsAppPage() {
                         </div>
                       </div>
                     )}
+                    {/* Older messages of every chat, from the phone — in the background, newest chats first */}
+                    {canSend && chats.length > 0 && (
+                      <button type="button" className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-60" disabled={olderAll.isPending} onClick={() => void loadOlderForAll()}>
+                        {olderAll.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <History className="h-3 w-3" />}Load older messages for all chats
+                      </button>
+                    )}
                     {canSend && (newNumber === null
                       ? <button type="button" className="text-xs text-primary hover:underline" onClick={() => setNewNumber("")}><Plus className="mr-0.5 inline h-3 w-3" />or type a number</button>
                       : (
@@ -370,9 +386,11 @@ function WhatsAppPage() {
                       </Button>
                     </div>
                   )}
-                  <Thread messages={thread?.messages ?? []} className="min-h-0 flex-1" empty={canSend ? "Write the first message" : "No messages yet"} />
+                  <Thread messages={thread?.messages ?? []} className="min-h-0 flex-1" empty={canSend ? "Write the first message" : "No messages yet"}
+                    onForward={st.me?.status === "connected" ? setForwarding : undefined} />
                   {canSend
-                    ? <Composer onSendText={sendText} onSendFile={sendFile} />
+                    ? <Composer onSendText={sendText} onSendFile={sendFile}
+                        extra={<SavedMessagesButton chat={chat.chat} onSent={(c) => { if (c && c !== chatId) setChatId(c); }} />} />
                     : <p className="border-t bg-muted/50 p-3 text-center text-xs text-muted-foreground">{mine ? "Link your WhatsApp to reply" : "Read only — they reply from their own WhatsApp"}</p>}
                 </>
               )}
@@ -390,6 +408,7 @@ function WhatsAppPage() {
       {!full && <RecentFollowups />}
 
       <LinkLeadDialog open={linking} onOpenChange={setLinking} ownerId={viewing} chat={chat} />
+      <ForwardDialog message={forwarding} myId={st.me?.id ?? ""} onClose={() => setForwarding(null)} />
     </div>
   );
 }

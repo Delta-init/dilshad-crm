@@ -15,6 +15,10 @@ export interface WAMessage {
   id: string; direction: "in" | "out"; body: string; at: string; senderName: string; sentByName: string; media: WAMedia | null;
   /** Sent by the CRM on its own — an automatic follow-up, its step. */
   auto?: { kind?: "followup" | "first_reply"; step: number; of: number } | null;
+  /** Sent by a person: forwarded from another chat (2026-10-28). */
+  forwarded?: boolean;
+  /** Sent by a person from the saved messages — which one. */
+  saved?: { kind?: "followup" | "first_reply"; step: number } | null;
 }
 export interface WALead { id: string; name: string; status: string; owner: string }
 export interface WAChat {
@@ -142,6 +146,41 @@ export function useWhatsAppSend() {
   };
 }
 
+/* ── Forward, and the saved messages sent by hand (2026-10-28) ── */
+
+export interface WAForwardResult { chat: string; ok: boolean; error?: string; sentTo?: string }
+
+/** A message sent again from your own WhatsApp to up to 10 of your chats (or numbers). */
+export function useWhatsAppForward() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (v: { messageId: string; chats: string[] }) =>
+      data<{ results: WAForwardResult[] }>(await api.post("/whatsapp/forward", v)),
+    onSuccess: refresh,
+  });
+}
+
+/** The Super Admin's first reply (its parts) and follow-up steps, to pick one and send it now. */
+export interface WASavedMessage {
+  id: string; kind: "first_reply" | "followup"; step: number; label: string; text: string;
+  file: { name: string; mime: string } | null; voice: boolean;
+}
+export function useWhatsAppSavedMessages(enabled: boolean) {
+  return useQuery({
+    queryKey: ["whatsapp", "saved-messages"],
+    queryFn: async () => data<WASavedMessage[]>(await api.get("/whatsapp/saved-messages")),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+export function useWhatsAppSendSaved() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (v: { chat: string; id: string }) => data<{ chat: string; parts: number }>(await api.post("/whatsapp/send-saved", v)),
+    onSuccess: refresh,
+  });
+}
+
 /* ── Automatic follow-ups ── */
 
 /** The Super Admin's settings — only asked for when `enabled` (anyone else is refused). */
@@ -200,6 +239,11 @@ export function useWhatsAppFollowupSummary() {
 /** "Load older messages": asks your phone for the 50 before the oldest kept in this chat; they land a few seconds later. */
 export function useFetchOlderMessages() {
   return useMutation({ mutationFn: async (chat: string) => data<{ before: string }>(await api.post("/whatsapp/history", { chat })) });
+}
+
+/** "Load older messages for all chats": the phone asked again for each of your chats, in the background. */
+export function useFetchOlderForAll() {
+  return useMutation({ mutationFn: async () => data<{ chats: number; seconds: number }>(await api.post("/whatsapp/history-all")) });
 }
 
 export function useLeadFollowupStop() {

@@ -17,10 +17,10 @@ import { LeadService } from "../services/leadService.js";
 import { phoneKey, phoneKeys } from "../services/whatsapp/leads.js";
 import { canWhatsApp, isSuperAdmin, leadScope, readableOwners, type Viewer } from "../services/whatsapp/access.js";
 import {
-  followupSettings, FollowupError, leadFollowup, saveFollowupSettings, setLeadFollowupStopped,
+  followupSettings, FollowupError, leadFollowup, listSavedMessages, saveFollowupSettings, sendSavedMessage, setLeadFollowupStopped,
 } from "../services/whatsapp/followups.js";
 import {
-  connect, contactNames, disconnect, fetchOlder, forgetLeads, intlNumbers, leadsByKey, mediaPath, realMime, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
+  connect, contactNames, disconnect, fetchOlder, fetchOlderForAll, forgetLeads, forwardMessage, intlNumbers, leadsByKey, mediaPath, realMime, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
 } from "../services/whatsapp/service.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 import { sendError, sendSuccess } from "../utils/response.js";
@@ -103,7 +103,8 @@ router.get("/media", async (req, res, next) => {
 });
 
 type MessageDoc = { _id: Types.ObjectId; direction: string; body?: string; at: Date; senderName?: string; sentByName?: string;
-  media?: { type: string; mime: string; fileName: string; size: number; file: string } | null; auto?: { kind?: string; step: number; of: number } | null };
+  media?: { type: string; mime: string; fileName: string; size: number; file: string } | null; auto?: { kind?: string; step: number; of: number } | null;
+  forwarded?: boolean; saved?: { kind?: string; step: number } | null };
 const shape = (m: MessageDoc, viewerId: string) => ({
   id: String(m._id),
   direction: m.direction,
@@ -114,6 +115,9 @@ const shape = (m: MessageDoc, viewerId: string) => ({
   media: m.media ? { type: m.media.type, mime: m.media.mime, fileName: m.media.fileName, size: m.media.size, url: m.media.file ? mediaUrl(String(m._id), viewerId) : "" } : null,
   // Sent by the CRM on its own: an automatic follow-up, its step.
   auto: m.auto ? { kind: m.auto.kind ?? "followup", step: m.auto.step, of: m.auto.of } : null,
+  // By a person: forwarded from another chat, or one of the saved messages (which).
+  forwarded: m.forwarded === true,
+  saved: m.saved ? { kind: m.saved.kind ?? "followup", step: m.saved.step } : null,
 });
 
 async function leadsBrief(ids: unknown[]) {
@@ -286,6 +290,17 @@ router.post("/history", checkPermission("whatsapp", "view"), async (req: Authent
   } catch (err) { fail(res, next, err); }
 });
 
+/**
+ * POST /whatsapp/history-all — "Load older messages for all chats": your phone asked again, chat by chat in the
+ * background, for the older messages of each of your chats (newest first, up to 300). 409 while one is running.
+ */
+router.post("/history-all", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const r = await fetchOlderForAll(req.user!.userId);
+    sendSuccess(res, `Asking your phone for older messages of ${r.chats} chat${r.chats === 1 ? "" : "s"}`, r);
+  } catch (err) { fail(res, next, err); }
+});
+
 /** POST /whatsapp/send { chat, text } — from your own WhatsApp; chat is the number (or a chat's address). */
 router.post("/send", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -305,6 +320,53 @@ router.post("/send-file", checkPermission("whatsapp", "create"), upload.single("
     if (!chat || !file) { sendError(res, "chat and file are required", 400); return; }
     const saved = await sendFile(req.user!.userId, chat, file.buffer, file.mimetype || "application/octet-stream", file.originalname || "file", voice ? "" : caption, voice);
     sendSuccess(res, "Sent", { chat: saved?.chat ?? chat });
+  } catch (err) { fail(res, next, err); }
+});
+
+/**
+ * POST /whatsapp/forward { messageId, chats: string[] } — a message you may read, sent again from your own WhatsApp to
+ * up to 10 of your chats (or numbers). Each chat's answer on its own: one that fails does not stop the rest.
+ */
+router.post("/forward", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const messageId = str(req.body?.messageId, 40);
+    const chats = [...new Set((Array.isArray(req.body?.chats) ? req.body.chats : []).map((c: unknown) => str(c, 120)).filter(Boolean))] as string[];
+    if (!isId(messageId) || !chats.length) { sendError(res, "messageId and at least one chat are required", 400); return; }
+    if (chats.length > 10) { sendError(res, "Forward to up to 10 chats at a time", 400); return; }
+    const source = await WhatsAppMessage.findById(messageId).select("owner body media").lean();
+    if (!source) { sendError(res, "Message not found", 404); return; }
+    const owners = await readableOwners(viewer(req));
+    if (owners && !owners.has(String(source.owner))) { sendError(res, "Message not found", 404); return; }
+    const results: Array<{ chat: string; ok: boolean; error?: string; sentTo?: string }> = [];
+    for (const chat of chats) {
+      try {
+        const kept = await forwardMessage(req.user!.userId, source, chat);
+        results.push({ chat, ok: true, sentTo: kept?.chat ?? chat });
+      } catch (err) {
+        if (!(err instanceof WhatsAppError)) throw err;
+        results.push({ chat, ok: false, error: err.message });
+      }
+    }
+    const sent = results.filter((r) => r.ok).length;
+    if (!sent) { sendError(res, results[0]?.error ?? "Not forwarded", 400); return; }
+    sendSuccess(res, `Forwarded to ${sent} chat${sent === 1 ? "" : "s"}`, { results });
+  } catch (err) { fail(res, next, err); }
+});
+
+/* ── The saved messages (the first reply, the follow-up steps), sent by hand ── */
+
+/** GET /whatsapp/saved-messages — the first reply's parts and the follow-up steps, to pick one and send it now. */
+router.get("/saved-messages", checkPermission("whatsapp", "create"), async (_req: AuthenticatedRequest, res, next) => {
+  try { sendSuccess(res, "Saved messages", await listSavedMessages()); } catch (err) { next(err); }
+});
+
+/** POST /whatsapp/send-saved { chat, id } — that saved message, sent now from your WhatsApp ({name} filled in). */
+router.post("/send-saved", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const chat = str(req.body?.chat, 120), id = str(req.body?.id, 40);
+    if (!chat || !/^(first_reply|followup):\d{1,2}$/.test(id)) { sendError(res, "chat and a saved message are required", 400); return; }
+    const result = await sendSavedMessage(req.user!.userId, chat, id);
+    sendSuccess(res, "Sent", { chat, ...result });
   } catch (err) { fail(res, next, err); }
 });
 

@@ -8,7 +8,7 @@ import { WhatsAppLink, WhatsAppMessage } from "../../models/WhatsAppMessage.js";
 import { WhatsAppFollowupSettings, type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
 import { phoneKeys } from "./leads.js";
-import { contactNames, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled } from "./service.js";
+import { contactNames, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled, WhatsAppError } from "./service.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Automatic WhatsApp follow-ups (the user, 2026-10-27: "this type of follow-up
@@ -417,4 +417,77 @@ export function resetFollowupPacingForCheck(): void {
   failedUntil.clear();
   cache = null;
   firstRunning = false;
+}
+
+/* ── The saved messages, sent by hand ───────────────────────────────────── */
+
+/** One of the Super Admin's saved messages, as the chat's picker lists it. */
+export type SavedMessage = {
+  id: string;                                   // "first_reply:1", "followup:3"
+  kind: "first_reply" | "followup";
+  step: number;
+  label: string;                                // "First reply · part 1 of 2", "Follow-up 3 of 5 · after 3 days"
+  text: string;                                 // as written, {name}/{salesperson} unfilled
+  file: { name: string; mime: string } | null;
+  voice: boolean;
+};
+
+const afterWait = (minutes: number) =>
+  minutes % (24 * 60) === 0 ? `${minutes / (24 * 60)} day${minutes === 24 * 60 ? "" : "s"}`
+    : minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}` : `${minutes} min`;
+
+/**
+ * Every saved message — the first reply's parts and the follow-up steps — for a person to pick and send now (the
+ * owner, 2026-10-28: "the first message and the follow-up messages … we can select and send"). Whether the automatic
+ * ones are switched on makes no difference here.
+ */
+export async function listSavedMessages(): Promise<SavedMessage[]> {
+  const s = await followupSettings();
+  const first = s.firstReply?.items ?? [];
+  return [
+    ...first.map((it, i) => ({
+      id: `first_reply:${i + 1}`, kind: "first_reply" as const, step: i + 1,
+      label: first.length > 1 ? `First reply · part ${i + 1} of ${first.length}` : "First reply",
+      text: it.text ?? "", file: it.file ? { name: it.file.name, mime: it.file.mime } : null, voice: !!it.voice,
+    })),
+    ...s.steps.map((st, i) => ({
+      id: `followup:${i + 1}`, kind: "followup" as const, step: i + 1,
+      label: `Follow-up ${i + 1} of ${s.steps.length} · after ${afterWait(st.waitMinutes)}`,
+      text: st.text, file: st.file ? { name: st.file.name, mime: st.file.mime } : null, voice: false,
+    })),
+  ].filter((m) => m.text.trim() || m.file);
+}
+
+/**
+ * One saved message, sent now from this person's WhatsApp to this chat, {name} and {salesperson} filled in. It is
+ * their own message (marked with which saved one it was), not an automatic one: the automatic steps carry on as if
+ * they had typed it.
+ */
+export async function sendSavedMessage(userId: string, chat: string, id: string): Promise<{ parts: number }> {
+  const [kind, stepRaw] = id.split(":");
+  const step = Number(stepRaw);
+  const s = await followupSettings();
+  const item = kind === "first_reply" ? s.firstReply?.items?.[step - 1]
+    : kind === "followup" ? s.steps[step - 1] : undefined;
+  if (!item || !Number.isInteger(step)) throw new WhatsAppError("That saved message is not there any more — reopen the list", 404);
+  const owner = await User.findById(userId).select("name").lean<{ name?: string } | null>();
+  // {name}: the lead's, else theirs as saved in the phone or on WhatsApp.
+  const key = phoneKeys(chat)[0] ?? "";
+  const leadId = key ? (await leadsByKey()).get(key) : undefined;
+  const lead = leadId ? await Lead.findById(leadId).select("name").lean<{ name?: string } | null>() : null;
+  const theirName = lead?.name || (key ? (await contactNames(userId, [key])).get(key) : "") || "";
+  const text = fillText(item.text ?? "", theirName, owner?.name);
+  const voice = "voice" in item && !!item.voice;
+  const saved = { kind: kind as "first_reply" | "followup", step };
+  if (item.file && existsSync(mediaPath(item.file.file))) {
+    const buffer = await readFile(mediaPath(item.file.file));
+    await sendFile(userId, chat, buffer, item.file.mime || "application/octet-stream", item.file.name || "file", voice ? "" : text, voice,
+      { saved, ...(voice ? {} : { storedFile: item.file.file }) });
+    // A voice note carries no words: they follow on their own.
+    if (voice && text.trim()) { await sendText(userId, chat, text, { saved }); return { parts: 2 }; }
+    return { parts: 1 };
+  }
+  if (!text.trim()) throw new WhatsAppError("That saved message's file is no longer kept here", 410);
+  await sendText(userId, chat, text, { saved });
+  return { parts: 1 };
 }

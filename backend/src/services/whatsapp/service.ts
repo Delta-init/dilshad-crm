@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import pino from "pino";
@@ -103,6 +103,67 @@ export async function leadsByKey(): Promise<Map<string, Types.ObjectId>> {
   return map;
 }
 export const forgetLeads = () => { byKeyCache = null; };
+
+/* ── A number that is no lead's, writing in ─────────────────────────────── */
+
+/** The team new WhatsApp leads go to (the owner, 2026-10-28): the one named "AI Academy", however it is written. */
+const AI_ACADEMY = /^\s*ai[\s_-]*academy\s*$/i;
+let aiAcademyCache: { at: number; id: Types.ObjectId | null } | null = null;
+async function aiAcademyTeam(): Promise<Types.ObjectId | null> {
+  if (aiAcademyCache && Date.now() - aiAcademyCache.at < 5 * 60_000) return aiAcademyCache.id;
+  const { Team } = await import("../../models/Team.js");
+  const team = await Team.findOne({ name: AI_ACADEMY, status: { $ne: "inactive" } }).select("_id").lean<{ _id: Types.ObjectId } | null>();
+  if (!team) console.warn('[whatsapp] no team named "AI Academy" — WhatsApp leads are made without a team');
+  aiAcademyCache = { at: Date.now(), id: team?._id ?? null };
+  return aiAcademyCache.id;
+}
+
+/** One lead at a time per number, so two messages (or two people's WhatsApps) in the same moment make one lead. */
+const makingLead = new Map<string, Promise<Types.ObjectId | null>>();
+
+/**
+ * A number that is no lead's has written to someone's WhatsApp (the owner, 2026-10-28: "if they message, create it as
+ * a lead … in the AI Academy team, assigned"): a lead is made of it — their WhatsApp name (else "WhatsApp +number"),
+ * source WhatsApp, held by the person whose WhatsApp it is, in the AI Academy team — and that person is told.
+ * A number that turns out to be a lead after all (the 60-second list was behind) gets that lead instead.
+ */
+export function leadForNewNumber(owner: Owner, phone: string, key: string, pushName: string): Promise<Types.ObjectId | null> {
+  const running = makingLead.get(key);
+  if (running) return running;
+  const job = (async () => {
+    const { Lead } = await import("../../models/Lead.js");
+    // Fresh, not the cached list: by the number's last 9 digits, anywhere in a lead's phone field.
+    const already = await Lead.findOne({ phone: new RegExp(`${key.split("").join("\\D*")}(?!\\d)`) })
+      .select("_id").lean<{ _id: Types.ObjectId } | null>();
+    if (already) { forgetLeads(); return already._id; }
+    const saved = (await contactNames(owner.id, [key])).get(key) ?? "";
+    const name = (saved && !/^\+?\d+$/.test(saved) ? saved : "")
+      || (pushName && !/^\+?\d+$/.test(pushName.trim()) ? pushName.trim().slice(0, 100) : "")
+      || `WhatsApp +${phone}`;
+    const team = await aiAcademyTeam();
+    const lead = await Lead.create({
+      name, phone: `+${phone}`, source: "WhatsApp", status: "assigned",
+      assignedTo: new Types.ObjectId(owner.id), assignedAt: new Date(), team,
+      reporter: new Types.ObjectId(owner.id),
+      activityLogs: [{
+        action: "lead_created",
+        description: `Lead made automatically — +${phone} wrote to ${owner.name}'s WhatsApp`,
+        performedBy: new Types.ObjectId(owner.id),
+        createdAt: new Date(),
+      }],
+    });
+    forgetLeads();
+    const { notifyLeadAssignment } = await import("../pushService.js");
+    void notifyLeadAssignment(owner.id, String(lead._id), name, emitToUser).catch(() => null);
+    console.log(`[whatsapp] new lead ${name} (+${phone}) for ${owner.name}${team ? " in AI Academy" : ""}`);
+    return lead._id as Types.ObjectId;
+  })().catch((err) => {
+    console.error(`[whatsapp] could not make a lead of +${phone}`, err instanceof Error ? err.message : err);
+    return null;
+  }).finally(() => makingLead.delete(key));
+  makingLead.set(key, job);
+  return job;
+}
 
 /* ── Messages ───────────────────────────────────────────────────────────── */
 
@@ -239,7 +300,12 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
 
   const phone = await phoneOf(sock, msg.key as proto.IMessageKey & { remoteJidAlt?: string });
   const key = phone ? phoneKey(phone) : "";
-  const lead = (await leadsByKey()).get(key || jid) ?? null;   // by number, or a chat linked by its address
+  let lead = (await leadsByKey()).get(key || jid) ?? null;   // by number, or a chat linked by its address
+  // Someone who is no lead's writing in — now, not a past chat, and not more than a day ago — becomes one.
+  const sentAt = Number(msg.messageTimestamp ?? 0) * 1000;
+  if (!lead && !history && !msg.key.fromMe && phone && key && (!sentAt || Date.now() - sentAt < 24 * 3_600_000)) {
+    lead = await leadForNewNumber(owner, phone, key, msg.pushName ?? "");
+  }
   let saved: { file: string; size: number } | null = null;
   if (media) {
     try {
@@ -434,6 +500,49 @@ export async function fetchOlder(userId: string, chat: string, count = 50): Prom
   return { before: oldest.at };
 }
 
+/**
+ * "Load older messages for all chats" (2026-10-28): the phone asked for the `count` messages before the oldest kept,
+ * chat by chat — newest chats first, up to 300, one every `gapMs` so WhatsApp is not flooded — in the background.
+ * One run per person at a time. Answers how many chats it will ask about.
+ */
+const olderRuns = new Map<string, { chats: number; done: number; startedAt: Date }>();
+export const ALL_OLDER_CAP = 300;
+export async function fetchOlderForAll(userId: string, opts: { count?: number; gapMs?: number } = {}): Promise<{ chats: number; seconds: number }> {
+  connected(userId);
+  if (olderRuns.has(userId)) {
+    const r = olderRuns.get(userId)!;
+    throw new WhatsAppError(`Already asking your phone — ${r.done} of ${r.chats} chats so far`, 409);
+  }
+  // Each chat once, newest first, that has a message WhatsApp can start from.
+  const rows = await WhatsAppMessage.aggregate<{ _id: string; last: Date }>([
+    { $match: { owner: new Types.ObjectId(userId), messageId: { $gt: "" }, jid: { $gt: "" } } },
+    { $group: { _id: "$chat", last: { $max: "$at" } } },
+    { $sort: { last: -1 } },
+    { $limit: ALL_OLDER_CAP },
+  ]);
+  const chats = rows.map((r) => r._id);
+  if (!chats.length) throw new WhatsAppError("No chats yet to load older messages for", 409);
+  const gap = opts.gapMs ?? 1500;
+  const run = { chats: chats.length, done: 0, startedAt: new Date() };
+  olderRuns.set(userId, run);
+  void (async () => {
+    try {
+      for (const chat of chats) {
+        if (!isConnected(userId)) break;   // unlinked meanwhile: stop
+        await fetchOlder(userId, chat, opts.count ?? 50).catch((err) => console.warn(`[whatsapp] older messages not asked for ${chat}`, err instanceof Error ? err.message : err));
+        run.done++;
+        if (run.done < chats.length) await new Promise((r) => setTimeout(r, gap));
+      }
+    } finally {
+      olderRuns.delete(userId);
+    }
+  })();
+  return { chats: chats.length, seconds: Math.ceil((chats.length * gap) / 1000) };
+}
+
+/** Whether an all-chats run is going for this person, and how far it is. */
+export const olderRunOf = (userId: string) => olderRuns.get(userId) ?? null;
+
 /* ── Sending ────────────────────────────────────────────────────────────── */
 
 /** Where to send: a known number (checked on WhatsApp), or the chat's own address when only that is known. */
@@ -453,7 +562,12 @@ function connected(userId: string): WASocket {
 }
 
 /** How a send was made: by a person (the default), or by the CRM on its own — an automatic follow-up. */
-export type SendOpts = { auto?: { kind: "followup" | "first_reply"; step: number; of: number } };
+export type SendOpts = {
+  auto?: { kind: "followup" | "first_reply"; step: number; of: number };
+  /** By a person: Forward from another chat, or one of the saved messages picked — a person's message, not automatic. */
+  forwarded?: boolean;
+  saved?: { kind: "followup" | "first_reply"; step: number };
+};
 
 async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: string, sentId: string, body: string,
   media: { type: string; mime: string; fileName: string; file: string; size: number } | null, opts: SendOpts = {}) {
@@ -467,6 +581,8 @@ async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: 
     sentByName: opts.auto ? (opts.auto.kind === "first_reply" ? "Auto first reply" : "Auto follow-up") : owner.name,
     lead: (await leadsByKey()).get(key || chat) ?? null,
     read: true, media, at: new Date(), auto: opts.auto ?? null,
+    ...(opts.forwarded ? { forwarded: true } : {}),
+    ...(opts.saved ? { saved: opts.saved } : {}),
   });
 }
 
@@ -526,4 +642,27 @@ export async function sendFile(userId: string, chat: string, buffer: Buffer, mim
   const saved = opts.storedFile ? { file: opts.storedFile, size: buffer.length } : await saveMedia(owner.id, buffer, mime, fileName);
   return keepSent(owner, to, chat, sent?.key?.id ?? "", caption || (type === "document" ? `📄 ${fileName || "Document"}` : LABEL[type]!),
     { type, mime, fileName, file: saved.file, size: saved.size }, opts);
+}
+
+/* ── Forward ────────────────────────────────────────────────────────────── */
+
+/**
+ * A message kept here, sent again from this person's own WhatsApp to another chat (the owner, 2026-10-28: "forward
+ * message option"): its words, or its file with the caption it had — a voice note as a voice note. Marked forwarded.
+ */
+export async function forwardMessage(userId: string, source: Pick<IWhatsAppMessage, "body" | "media">, chat: string) {
+  const media = source.media;
+  if (!media) {
+    const text = String(source.body ?? "").trim();
+    if (!text) throw new WhatsAppError("There is nothing in that message to forward");
+    return sendText(userId, chat, text, { forwarded: true });
+  }
+  if (!media.file || !existsSync(mediaPath(media.file))) throw new WhatsAppError("That file is no longer kept here, so it can't be forwarded");
+  const buffer = await readFile(mediaPath(media.file));
+  const body = String(source.body ?? "").trim();
+  const voice = media.type === "audio" && body === LABEL.ptt;
+  // The words that went with it — not the label the CRM gave a file with none ("📷 Photo", "📄 name").
+  const caption = voice || body === LABEL[media.type] || body.startsWith("📄 ") ? "" : body;
+  return sendFile(userId, chat, buffer, media.mime || "application/octet-stream", media.fileName || "file", caption, voice,
+    { forwarded: true, ...(voice ? {} : { storedFile: media.file }) });
 }

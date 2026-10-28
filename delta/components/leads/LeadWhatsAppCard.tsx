@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { MessageCircle, Repeat } from "lucide-react";
+import { History, Loader2, MessageCircle, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/lib/toast";
 import { Composer, Thread, WA_GREEN } from "@/components/whatsapp/waUi";
-import { errMsg, useLeadFollowupStop, useLeadWhatsApp, useWhatsAppSend, type WAFollowup } from "@/hooks/useWhatsApp";
+import { errMsg, useFetchOlderMessages, useLeadFollowupStop, useLeadWhatsApp, useWhatsAppSend, type WAFollowup } from "@/hooks/useWhatsApp";
 
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Dubai", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
@@ -46,6 +46,7 @@ function FollowupLine({ leadId, f }: { leadId: string; f?: WAFollowup }) {
 export function LeadWhatsAppCard({ leadId }: { leadId: string }) {
   const { data } = useLeadWhatsApp(leadId);
   const send = useWhatsAppSend();
+  const older = useFetchOlderMessages();
   const [number, setNumber] = useState("");
   useEffect(() => { if (!number && data?.numbers?.length) setNumber(data.numbers[0]!); }, [data?.numbers, number]);
   if (!data) return null;
@@ -61,6 +62,13 @@ export function LeadWhatsAppCard({ leadId }: { leadId: string }) {
     try { await send.file.mutateAsync({ chat: number, file, caption, voice }); } catch (e) { toast.error(errMsg(e, "Not sent")); throw e; }
   };
   const myMessages = mine.flatMap((t) => t.messages).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  /** Older messages of your chat(s) with them, from your phone — they land a few seconds later. */
+  const loadOlder = async () => {
+    try {
+      for (const t of mine) await older.mutateAsync(t.chat);
+      toast.success("Asked your phone — older messages appear in a few seconds");
+    } catch (e) { toast.error(errMsg(e, "Couldn't ask your phone")); }
+  };
 
   return (
     <Card className="overflow-hidden border-border/50">
@@ -74,6 +82,13 @@ export function LeadWhatsAppCard({ leadId }: { leadId: string }) {
         <FollowupLine leadId={leadId} f={data.followup} />
         {data.canLink && (
           <>
+            {data.canSend && myMessages.length > 0 && (
+              <div className="flex justify-center border-b bg-muted/30 py-1.5">
+                <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" disabled={older.isPending} onClick={() => void loadOlder()}>
+                  {older.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}Load older messages
+                </Button>
+              </div>
+            )}
             <Thread messages={myMessages} className="max-h-96 min-h-32" empty={data.linked ? "No messages with them yet" : "Your WhatsApp is not linked"} />
             {data.canSend && data.numbers.length > 0 && (
               <>
