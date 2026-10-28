@@ -487,35 +487,55 @@ export async function listSavedMessages(): Promise<SavedMessage[]> {
 }
 
 /**
- * One saved message, sent now from this person's WhatsApp to this chat, {name} and {salesperson} filled in. It is
- * their own message (marked with which saved one it was), not an automatic one: the automatic steps carry on as if
- * they had typed it.
+ * A saved message sent now from this person's WhatsApp to this chat, {name} and {salesperson} filled in — one part
+ * ("first_reply:2", "followup:3"), or the whole first reply ("first_reply:all": every part in order, a few seconds
+ * apart, as the automatic one goes). Their own message (marked with which saved one it was), not an automatic one:
+ * the automatic steps carry on as if they had typed it.
  */
-export async function sendSavedMessage(userId: string, chat: string, id: string): Promise<{ parts: number }> {
+export async function sendSavedMessage(userId: string, chat: string, id: string, gapMs = () => 3000 + Math.floor(Math.random() * 2000)): Promise<{ parts: number }> {
   const [kind, stepRaw] = id.split(":");
-  const step = Number(stepRaw);
   const s = await followupSettings();
-  const item = kind === "first_reply" ? s.firstReply?.items?.[step - 1]
-    : kind === "followup" ? s.steps[step - 1] : undefined;
-  if (!item || !Number.isInteger(step)) throw new WhatsAppError("That saved message is not there any more — reopen the list", 404);
   const owner = await User.findById(userId).select("name").lean<{ name?: string } | null>();
   // {name}: the lead's, else theirs as saved in the phone or on WhatsApp.
   const key = phoneKeys(chat)[0] ?? "";
   const leadId = key ? (await leadsByKey()).get(key) : undefined;
   const lead = leadId ? await Lead.findById(leadId).select("name").lean<{ name?: string } | null>() : null;
   const theirName = lead?.name || (key ? (await contactNames(userId, [key])).get(key) : "") || "";
-  const text = fillText(item.text ?? "", theirName, owner?.name);
-  const voice = "voice" in item && !!item.voice;
-  const saved = { kind: kind as "first_reply" | "followup", step };
-  if (item.file && existsSync(mediaPath(item.file.file))) {
-    const buffer = await readFile(mediaPath(item.file.file));
-    await sendFile(userId, chat, buffer, item.file.mime || "application/octet-stream", item.file.name || "file", voice ? "" : text, voice,
-      { saved, ...(voice ? {} : { storedFile: item.file.file }) });
-    // A voice note carries no words: they follow on their own.
-    if (voice && text.trim()) { await sendText(userId, chat, text, { saved }); return { parts: 2 }; }
-    return { parts: 1 };
+
+  /** One part; how many messages it took (a voice note with words is two), 0 when it had nothing left to send. */
+  const one = async (item: { text?: string; file?: { file: string; name: string; mime: string } | null; voice?: boolean }, saved: { kind: "first_reply" | "followup"; step: number }) => {
+    const text = fillText(item.text ?? "", theirName, owner?.name);
+    const voice = !!item.voice;
+    if (item.file && existsSync(mediaPath(item.file.file))) {
+      const buffer = await readFile(mediaPath(item.file.file));
+      await sendFile(userId, chat, buffer, item.file.mime || "application/octet-stream", item.file.name || "file", voice ? "" : text, voice,
+        { saved, ...(voice ? {} : { storedFile: item.file.file }) });
+      // A voice note carries no words: they follow on their own.
+      if (voice && text.trim()) { await sendText(userId, chat, text, { saved }); return 2; }
+      return 1;
+    }
+    if (!text.trim()) return 0;
+    await sendText(userId, chat, text, { saved });
+    return 1;
+  };
+
+  if (kind === "first_reply" && stepRaw === "all") {
+    const items = s.firstReply?.items ?? [];
+    if (!items.length) throw new WhatsAppError("There is no first reply saved yet", 404);
+    let parts = 0;
+    for (const [i, item] of items.entries()) {
+      if (parts > 0) await sleep(gapMs());
+      parts += await one(item, { kind: "first_reply", step: i + 1 });
+    }
+    if (!parts) throw new WhatsAppError("The first reply's files are no longer kept here", 410);
+    return { parts };
   }
-  if (!text.trim()) throw new WhatsAppError("That saved message's file is no longer kept here", 410);
-  await sendText(userId, chat, text, { saved });
-  return { parts: 1 };
+
+  const step = Number(stepRaw);
+  const item = kind === "first_reply" ? s.firstReply?.items?.[step - 1]
+    : kind === "followup" ? s.steps[step - 1] : undefined;
+  if (!item || !Number.isInteger(step)) throw new WhatsAppError("That saved message is not there any more — reopen the list", 404);
+  const parts = await one(item, { kind: kind as "first_reply" | "followup", step });
+  if (!parts) throw new WhatsAppError("That saved message's file is no longer kept here", 410);
+  return { parts };
 }

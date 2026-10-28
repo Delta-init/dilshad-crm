@@ -24,7 +24,8 @@
  *   - Case 13: Forward — text, a photo with its caption, a voice note as a voice note; to several chats; marked
  *     forwarded; only a message you may read; a file no longer kept, not linked, bad input — refused.
  *   - Case 14: the saved messages — the first reply's parts and the follow-up steps listed for everyone; one sent now
- *     with {name} filled, marked which, a person's message (not automatic); a file with it; a gone one refused.
+ *     with {name} filled, marked which, a person's message (not automatic); a file with it; a gone one refused; the
+ *     whole first reply at once, in order.
  *   - Case 15: "Load older messages for all chats" — the phone asked for each chat, newest first, one at a time in
  *     the background; one run at a time; not linked, or no chats — refused.
  *
@@ -464,6 +465,14 @@ try {
   r = await call("POST", "/whatsapp/send-saved", "Sam", { chat: "971501234567", id: "followup:9" });
   const r4 = await call("POST", "/whatsapp/send-saved", "Sam", { chat: "971501234567", id: "something" });
   check("a step that isn't there: 404; a made-up id: 400", r.status === 404 && r4.status === 400, `${r.status} ${r4.status}`);
+  fwdSent.length = 0;
+  r = await call("POST", "/whatsapp/send-saved", "Sam", { chat: "971501234567", id: "first_reply:all" });
+  const allKept = await WhatsAppMessage.find({ owner: P("Sam"), chat: "971501234567", "saved.kind": "first_reply" }).sort({ at: 1, _id: 1 }).lean();
+  check("the whole first reply: every part in order — the text, then the voice note and its words", r.status === 200 && r.body.data?.parts === 3 && fwdSent.length === 3
+    && (fwdSent[0]?.content as any)?.text === "Hi Asha! Thanks for writing to Delta." && (fwdSent[1]?.content as any)?.ptt === true && (fwdSent[2]?.content as any)?.text === "Listen to this", j({ r: r.body, n: fwdSent.length }));
+  check("…each marked as its part, a person's message", allKept.map((m) => m.saved?.step).join() === "1,2,2" && allKept.every((m) => !m.auto), j(allKept.map((m) => m.saved)));
+  const r5 = await call("POST", "/whatsapp/send-saved", "Sam", { chat: "971501234567", id: "followup:all" });
+  check("\"all\" is for the first reply only: 400", r5.status === 400, String(r5.status));
   r = await call("GET", "/whatsapp/saved-messages", "Nora");
   check("no WhatsApp access: refused", r.status === 403);
 

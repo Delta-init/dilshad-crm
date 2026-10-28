@@ -360,11 +360,11 @@ router.get("/saved-messages", checkPermission("whatsapp", "create"), async (_req
   try { sendSuccess(res, "Saved messages", await listSavedMessages()); } catch (err) { next(err); }
 });
 
-/** POST /whatsapp/send-saved { chat, id } — that saved message, sent now from your WhatsApp ({name} filled in). */
+/** POST /whatsapp/send-saved { chat, id } — that saved message ("first_reply:all": the whole first reply), sent now from your WhatsApp ({name} filled in). */
 router.post("/send-saved", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const chat = str(req.body?.chat, 120), id = str(req.body?.id, 40);
-    if (!chat || !/^(first_reply|followup):\d{1,2}$/.test(id)) { sendError(res, "chat and a saved message are required", 400); return; }
+    if (!chat || !/^(first_reply:(\d{1,2}|all)|followup:\d{1,2})$/.test(id)) { sendError(res, "chat and a saved message are required", 400); return; }
     const result = await sendSavedMessage(req.user!.userId, chat, id);
     sendSuccess(res, "Sent", { chat, ...result });
   } catch (err) { fail(res, next, err); }
