@@ -486,9 +486,27 @@ export async function sendText(userId: string, chat: string, text: string, opts:
  * voice note (the blue microphone on the phone): Opus in Ogg, re-wrapped from the browser's WebM when it has to be
  * (voice.ts). A recording that can't be one (an older Safari's MP4) goes as plain audio.
  */
+/**
+ * Whether an MP4 holds sound only (2026-10-28: WhatsApp's own recordings saved as "AUDIO-….m4a.mp4", which a browser
+ * calls a video): its tracks' handlers (the hdlr boxes) say "soun" and none says "vide".
+ */
+export function isAudioOnlyMp4(buffer: Buffer): boolean {
+  let sound = false;
+  for (let i = buffer.indexOf("hdlr"); i !== -1 && i + 16 <= buffer.length; i = buffer.indexOf("hdlr", i + 4)) {
+    const handler = buffer.toString("latin1", i + 12, i + 16);
+    if (handler === "vide") return false;
+    if (handler === "soun") sound = true;
+  }
+  return sound;
+}
+/** The type a file really is: an MP4 with sound only is audio (sent as audio, not a video). */
+export const realMime = (buffer: Buffer, mime: string) =>
+  /^video\/mp4$/i.test(mime.split(";")[0]!.trim()) && isAudioOnlyMp4(buffer) ? "audio/mp4" : mime;
+
 export async function sendFile(userId: string, chat: string, buffer: Buffer, mime: string, fileName: string, caption: string, voice = false,
   opts: SendOpts & { storedFile?: string } = {}) {
   if (buffer.length > MAX_MEDIA_BYTES) throw new WhatsAppError("Files up to 25 MB");
+  mime = realMime(buffer, mime);
   const sock = connected(userId);
   const owner = await ownerOf(userId);
   const to = await target(sock, chat);

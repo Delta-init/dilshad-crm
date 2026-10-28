@@ -123,7 +123,8 @@ export async function saveFollowupSettings(input: Record<string, unknown>, byNam
         : null;
       const text = String(r.text ?? "").trim().slice(0, 1000);
       if (!text && !file) throw new FollowupError(`First reply part ${i + 1}: words or a file`);
-      return { text, file, voice: !!file && file.mime.startsWith("audio/") && r.voice !== false };
+      // A voice note only from Opus (Ogg / WebM); any other audio — an M4A, an MP3 — goes as ordinary audio.
+      return { text, file, voice: !!file && /^audio\/(ogg|webm)/.test(file.mime) && r.voice !== false };
     });
     const on = fr.enabled === true;
     if (on && !items.length) throw new FollowupError("Add what the first reply sends, or switch it off");

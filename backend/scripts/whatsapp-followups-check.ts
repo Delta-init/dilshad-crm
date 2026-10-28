@@ -331,6 +331,9 @@ try {
   check("a WhatsApp voice note (.opus) is taken as Ogg — it can go as a voice note", opus?.mime === "audio/ogg", j(opus));
   const mp3 = await upload(new Uint8Array([0x49, 0x44, 0x33, 1]), "audio/mpeg", "course.mp3");
   const pdf = await upload(new Uint8Array(Buffer.from("%PDF-1.4 brochure")), "application/pdf", "DELTA BROCHURE.pdf");
+  const m4aMp4 = await upload(new Uint8Array(Buffer.concat([Buffer.from([0, 0, 0, 0x14]), Buffer.from("ftypM4A "), Buffer.alloc(8),
+    Buffer.from([0, 0, 0, 0x21]), Buffer.from("hdlr"), Buffer.alloc(8), Buffer.from("soun"), Buffer.alloc(13)])), "video/mp4", "AUDIO-2026-10-24-11-20-02.m4a.mp4");
+  check("an \"AUDIO-….m4a.mp4\" (sound only) is kept as audio, not a video", m4aMp4?.mime === "audio/mp4", j(m4aMp4));
   const items = [
     { file: opus, text: "", voice: true },
     { file: mp3, text: "", voice: true },
@@ -342,7 +345,8 @@ try {
   r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps, firstReply: { enabled: true, items: [] } });
   check("switched on with nothing to send: refused", r.status === 400 && /Add what the first reply sends/.test(r.body.message ?? ""), j(r.body));
   r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps, firstReply: { enabled: true, items } });
-  check("switched on: 4 parts, the audios as voice notes, when stamped", r.status === 200 && r.body.data.firstReply.enabled && r.body.data.firstReply.items.length === 4 && r.body.data.firstReply.items[1].voice === true && !!r.body.data.firstReply.startedAt, j(r.body.data?.firstReply));
+  check("switched on: 4 parts — the .opus a voice note, the MP3 ordinary audio — when stamped", r.status === 200 && r.body.data.firstReply.enabled && r.body.data.firstReply.items.length === 4
+    && r.body.data.firstReply.items[0].voice === true && r.body.data.firstReply.items[1].voice === false && !!r.body.data.firstReply.startedAt, j(r.body.data?.firstReply));
   const first = async (owner: string, phone: string, id: string, body = "Hi, is this Delta?", name = "Nadia") =>
     wa.receive({ id: String(P(owner)), name: owner }, {} as never, {
       key: { remoteJid: `${phone}@s.whatsapp.net`, fromMe: false, id }, message: { conversation: body }, messageTimestamp: Math.floor(Date.now() / 1000), pushName: name,

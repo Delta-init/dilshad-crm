@@ -240,10 +240,27 @@ try {
   const ogg = new Uint8Array(Buffer.from("OggS-fake-voice"));
   r = await form("/whatsapp/send-file", "Sam", { chat: "971501234567", voice: "1" }, { name: "voice-note.ogg", type: "audio/ogg", bytes: ogg });
   check("a voice note recorded in the CRM: sent as one (ptt)", r.status === 200 && (samSent.at(-1)?.content as any)?.ptt === true, `${r.status} ${r.body.message}`);
+  // An "AUDIO-….m4a.mp4" — an MP4 with a sound track only, which a browser calls a video: it goes as audio.
+  const mp4 = (kind: string) => new Uint8Array(Buffer.concat([Buffer.from([0, 0, 0, 0x14]), Buffer.from("ftypM4A "), Buffer.alloc(8),
+    Buffer.from([0, 0, 0, 0x21]), Buffer.from("hdlr"), Buffer.alloc(8), Buffer.from(kind), Buffer.alloc(13)]));
+  r = await form("/whatsapp/send-file", "Sam", { chat: "971501234567", caption: "" }, { name: "AUDIO-2026-10-24-11-20-03.m4a.mp4", type: "video/mp4", bytes: mp4("soun") });
+  check("a sound-only MP4 (\"….m4a.mp4\"): sent as audio, not a video", r.status === 200 && (samSent.at(-1)?.content as any)?.audio && (samSent.at(-1)?.content as any)?.mimetype === "audio/mp4" && !(samSent.at(-1)?.content as any)?.video, j(Object.keys(samSent.at(-1)?.content ?? {})));
+  r = await form("/whatsapp/send-file", "Sam", { chat: "971501234567", caption: "Class clip" }, { name: "clip.mp4", type: "video/mp4", bytes: mp4("vide") });
+  check("…an MP4 with a picture: still a video", r.status === 200 && (samSent.at(-1)?.content as any)?.video !== undefined, j(Object.keys(samSent.at(-1)?.content ?? {})));
   r = await call("GET", `/whatsapp/messages?chat=971501234567`, "Sam");
   const photo = r.body.data?.messages?.find((m: any) => m.media?.type === "image");
   const got = photo ? await fetch(`http://127.0.0.1:${port}${photo.media.url}`) : null;
   check("its signed link opens the photo, with no sign-in", !!got && got.status === 200 && Buffer.from(await got.arrayBuffer()).equals(Buffer.from(png)), `${got?.status} ${photo?.media?.url}`);
+  check("…with its length, and parts of it on request", got?.headers.get("content-length") === String(png.length) && got?.headers.get("accept-ranges") === "bytes", j([...(got?.headers ?? [])]));
+  const part = photo ? await fetch(`http://127.0.0.1:${port}${photo.media.url}`, { headers: { range: "bytes=2-5" } }) : null;
+  const partBytes = part ? Buffer.from(await part.arrayBuffer()) : Buffer.alloc(0);
+  check("…a part: 206, those bytes, which part of how many", part?.status === 206 && part.headers.get("content-range") === `bytes 2-5/${png.length}` && partBytes.equals(Buffer.from(png.slice(2, 6))), `${part?.status} ${part?.headers.get("content-range")}`);
+  const tail = photo ? await fetch(`http://127.0.0.1:${port}${photo.media.url}`, { headers: { range: "bytes=-4" } }) : null;
+  check("…the last 4 bytes", tail?.status === 206 && Buffer.from(await tail!.arrayBuffer()).equals(Buffer.from(png.slice(-4))));
+  const beyond = photo ? await fetch(`http://127.0.0.1:${port}${photo.media.url}`, { headers: { range: `bytes=${png.length + 10}-` } }) : null;
+  check("…a part past the end: 416", beyond?.status === 416, `${beyond?.status}`);
+  const again = (await call("GET", `/whatsapp/messages?chat=971501234567`, "Sam")).body.data?.messages?.find((m: any) => m.id === photo?.id);
+  check("asked again, the same link — an audio or video playing isn't reloaded", !!again && again.media.url === photo.media.url, `${again?.media?.url} vs ${photo?.media?.url}`);
   const tampered = photo ? await fetch(`http://127.0.0.1:${port}${photo.media.url.replace(/s=[^&]+/, "s=xxxx")}`) : null;
   check("…a link someone changed opens nothing", tampered?.status === 404, `${tampered?.status}`);
   const old = photo ? photo.media.url.replace(/e=\d+/, `e=${Math.floor(Date.now() / 1000) - 10}`) : "";

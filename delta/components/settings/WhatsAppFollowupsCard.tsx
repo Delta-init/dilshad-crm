@@ -38,6 +38,8 @@ function StepFile({ step, onChange, label = "Add a photo, video or PDF" }: { ste
     return (
       <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs">
         <Paperclip className="h-3.5 w-3.5" />{step.file.name || "File"}
+        {/* What it goes as on WhatsApp */}
+        <span className="text-muted-foreground">· {step.file.mime.startsWith("audio/") ? "audio" : step.file.mime.startsWith("video/") ? "video" : step.file.mime.startsWith("image/") ? "photo" : "document"}</span>
         <button type="button" aria-label="Remove the file" onClick={() => onChange(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
       </span>
     );
@@ -177,7 +179,7 @@ export function WhatsAppFollowupsCard() {
                   <Label htmlFor="wa-fr-on" className="text-sm">First reply</Label>
                   <p className="text-xs text-muted-foreground">
                     When someone messages a WhatsApp of a team ticked above for the first time ever, these go out a minute later, in order — unless
-                    someone answered them first. Any hour. Audio goes as a voice note when it can (record it on WhatsApp: .opus / .ogg); an MP3 or M4A goes as audio.
+                    someone answered them first. Any hour. A WhatsApp voice recording (.opus / .ogg) can go as a voice note; other audio — M4A (also "….m4a.mp4"), MP3 — goes as ordinary audio.
                   </p>
                 </div>
                 <Switch id="wa-fr-on" checked={frOn} onCheckedChange={setFrOn} />
@@ -186,7 +188,7 @@ export function WhatsAppFollowupsCard() {
                 <div key={i} className="space-y-2 rounded-lg border p-3">
                   <div className="flex items-center gap-2 text-sm">
                     <span className="font-medium">Part {i + 1}</span>
-                    {it.file?.mime?.startsWith("audio/") && (
+                    {/^audio\/(ogg|webm)/.test(it.file?.mime ?? "") && (
                       <label className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Checkbox checked={it.voice} onCheckedChange={(c) => setItem(i, { voice: c === true })} /><Mic className="h-3.5 w-3.5" />as a voice note
                       </label>
@@ -198,7 +200,7 @@ export function WhatsAppFollowupsCard() {
                     </span>
                   </div>
                   <Textarea rows={2} maxLength={1000} value={it.text} placeholder={it.file ? "Words with it (optional)" : "Words — a link, a greeting…"} onChange={(e) => setItem(i, { text: e.target.value })} />
-                  <StepFile step={it} label="Add audio, a brochure, a photo or a video" onChange={(file) => setItem(i, { file, voice: !!file?.mime?.startsWith("audio/") })} />
+                  <StepFile step={it} label="Add audio, a brochure, a photo or a video" onChange={(file) => setItem(i, { file, voice: /^audio\/(ogg|webm)/.test(file?.mime ?? "") })} />
                 </div>
               ))}
               {frItems.length < 6 && (
