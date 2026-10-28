@@ -27,6 +27,11 @@ const appSettingSchema = new Schema<IAppSettings>(
       notifyTeamLeaders: { type: Boolean, default: false },
     },
 
+    // The rate a Bangalore enrolment's rupees count in the revenue figures at: 1 AED = this many (the user, 2026-10-28)
+    bangaloreRevenue: {
+      inrPerAed: { type: Number, default: 22.75, min: 1, max: 1000 },
+    },
+
     workingHours: {
       timezone: { type: String, default: "Asia/Dubai" },
       days:     { type: [Number], default: [1, 2, 3, 4, 5, 6] },

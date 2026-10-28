@@ -6,6 +6,7 @@ import { LeadCall } from "../models/LeadCall.js";
 import { dubaiDayStart, dubaiToday } from "../utils/dubaiDay.js";
 import { CommissionSettings } from "../models/CommissionSettings.js";
 import { COUNTED_PAYMENT } from "../utils/countedPayments.js";
+import { bangaloreLeadsUnion } from "../utils/bangaloreRevenue.js";
 
 /*
  * The month's leaderboard (the owner, 2026-10-07): every active salesperson,
@@ -14,7 +15,8 @@ import { COUNTED_PAYMENT } from "../utils/countedPayments.js";
  * (Asia/Dubai). Super admins and the commission plan's excluded people are left
  * out. Everyone signed in sees the whole board.
  *
- *  • Revenue   — payments dated in the month on the leads each person holds.
+ *  • Revenue   — payments dated in the month on the leads each person holds; a Bangalore enrolment's
+ *                rupees too, in AED (utils/bangaloreRevenue.ts, 2026-10-28).
  *  • Closings  — enrolments in the month credited to them (not dropped ones).
  *  • Follow-ups — follow-ups they logged in the month.
  *  • Calls     — since 2026-10-14, their calls with leads through 3CX in the
@@ -127,6 +129,7 @@ export class LeaderboardService {
   async getLeaderboard(month?: string, rankBy: RankBy = "revenue", opts: { withSuperAdmins?: boolean } = {}): Promise<Leaderboard> {
     const range = dubaiMonthRange(month);
     const inMonth = { $gte: range.from, $lt: range.to };
+    const bangalore = await bangaloreLeadsUnion();
 
     const [people, settings, revenue, closings, followUps, calls, callsToday, statuses] = await Promise.all([
       User.find({ status: "active" })
@@ -135,6 +138,7 @@ export class LeaderboardService {
         .lean<{ _id: Types.ObjectId; name: string; extension?: string | null; role?: { roleName?: string; isSystemRole?: boolean } | null }[]>(),
       CommissionSettings.findOne().select("excludedUsers").lean<{ excludedUsers?: Types.ObjectId[] } | null>(),
       Lead.aggregate<Counted>([
+        ...bangalore,
         { $match: { "payments.paidAt": inMonth } },
         { $unwind: "$payments" },
         { $match: COUNTED_PAYMENT },

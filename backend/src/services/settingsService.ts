@@ -12,7 +12,8 @@ import type { UpdateAppSettingsInput } from "../validations/settingsValidation.j
  * just saved.
  */
 
-export type AppSettingsDTO = Omit<IAppSettings, "inactiveLeads" | "updatedBy" | "updatedAt"> & {
+export type AppSettingsDTO = Omit<IAppSettings, "inactiveLeads" | "bangaloreRevenue" | "updatedBy" | "updatedAt"> & {
+  bangaloreRevenue: NonNullable<IAppSettings["bangaloreRevenue"]>;
   inactiveLeads: Omit<IAppSettings["inactiveLeads"], "enabledAt"> & { enabledAt: string | null };
   updatedBy: string | null;
   updatedAt: string | null;
@@ -34,6 +35,7 @@ function toDTO(doc: IAppSettings): AppSettingsDTO {
       limitMinutes: doc.idleAlerts.limitMinutes,
       notifyTeamLeaders: doc.idleAlerts.notifyTeamLeaders,
     },
+    bangaloreRevenue: { inrPerAed: doc.bangaloreRevenue?.inrPerAed ?? 22.75 },
     workingHours: {
       timezone: doc.workingHours.timezone,
       days: [...doc.workingHours.days].sort((a, b) => a - b),

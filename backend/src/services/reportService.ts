@@ -3,6 +3,7 @@ import { Lead } from "../models/Lead.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
 import { COUNTED_PAYMENT, COUNTED_TOTAL } from "../utils/countedPayments.js";
+import { bangaloreLeadsUnion, withBangaloreMoney } from "../utils/bangaloreRevenue.js";
 
 const ALL_STATUSES = [
   "new", "assigned", "pending_response", "followup", "meeting_scheduled", "meeting_done", "closed", "lost",
@@ -156,6 +157,7 @@ export class ReportService {
 
     const agg = await Lead.aggregate([
       { $match: { ...match, assignedTo: { $exists: true, $ne: null } } },
+      ...(await withBangaloreMoney()),
       // Lookup course to get course fee for pending calculation
       {
         $lookup: {
@@ -236,6 +238,7 @@ export class ReportService {
 
     const agg = await Lead.aggregate([
       { $match: { ...match, team: { $exists: true, $ne: null } } },
+      ...(await withBangaloreMoney()),
       {
         $group: {
           _id:           "$team",
@@ -432,12 +435,15 @@ export class ReportService {
   // ── 6. Revenue overview ───────────────────────────────────────────────────────
 
   async getRevenueOverview(dateFrom?: string, dateTo?: string) {
+    // A Bangalore enrolment's rupees too, in AED (utils/bangaloreRevenue.ts)
+    const blr = await bangaloreLeadsUnion();
     const paymentMatch = this.buildPaymentDateFilter(dateFrom, dateTo);
     const leadMatch    = this.buildDateFilter(dateFrom, dateTo);
 
     const [summaryAgg, teamAgg, agentAgg, pendingAgg, overpaidAgg] = await Promise.all([
       // ── total revenue / payment count / paying leads
       Lead.aggregate([
+        ...blr,
         { $unwind: "$payments" },
         { $match: COUNTED_PAYMENT },
         { $match: paymentMatch },
@@ -453,6 +459,7 @@ export class ReportService {
 
       // ── top teams by revenue
       Lead.aggregate([
+        ...blr,
         { $unwind: "$payments" },
         { $match: COUNTED_PAYMENT },
         { $match: paymentMatch },
@@ -483,6 +490,7 @@ export class ReportService {
 
       // ── top agents by revenue (attributed to lead's assignedTo)
       Lead.aggregate([
+        ...blr,
         { $unwind: "$payments" },
         { $match: COUNTED_PAYMENT },
         { $match: paymentMatch },
@@ -604,7 +612,10 @@ export class ReportService {
       bucketId = { year: { $year: "$payments.paidAt" } };
     }
 
+    // A Bangalore enrolment's rupees too, in AED (utils/bangaloreRevenue.ts)
+    const blr = await bangaloreLeadsUnion();
     const agg = await Lead.aggregate([
+      ...blr,
       { $unwind: "$payments" },
       { $match: COUNTED_PAYMENT },
       { $match: paymentMatch },
@@ -667,11 +678,14 @@ export class ReportService {
   // ── 8. Revenue teams with member breakdown ───────────────────────────────────
 
   async getRevenueTeams(dateFrom?: string, dateTo?: string) {
+    // A Bangalore enrolment's rupees too, in AED (utils/bangaloreRevenue.ts)
+    const blr = await bangaloreLeadsUnion();
     const paymentMatch = this.buildPaymentDateFilter(dateFrom, dateTo);
 
     const [agg, pendingTeamAgg, pendingMemberAgg] = await Promise.all([
       // ── existing: revenue by team × member (payment-filtered)
       Lead.aggregate([
+        ...blr,
         { $unwind: "$payments" },
         { $match: COUNTED_PAYMENT },
         { $match: paymentMatch },
@@ -812,12 +826,15 @@ export class ReportService {
   // ── 9. Team-scoped revenue overview (KPIs + member breakdown) ────────────────
 
   async getTeamRevenue(teamId: string, dateFrom?: string, dateTo?: string) {
+    // A Bangalore enrolment's rupees too, in AED (utils/bangaloreRevenue.ts)
+    const blr = await bangaloreLeadsUnion();
     const teamOid      = new mongoose.Types.ObjectId(teamId);
     const paymentMatch = this.buildPaymentDateFilter(dateFrom, dateTo);
     const teamFilter   = { team: teamOid };
 
     const [summaryAgg, memberAgg, pendingAgg, pendingMemberAgg] = await Promise.all([
       Lead.aggregate([
+        ...blr,
         { $match: teamFilter },
         { $unwind: "$payments" },
         { $match: COUNTED_PAYMENT },
@@ -833,6 +850,7 @@ export class ReportService {
       ]),
 
       Lead.aggregate([
+        ...blr,
         { $match: teamFilter },
         { $unwind: "$payments" },
         { $match: COUNTED_PAYMENT },
@@ -975,7 +993,10 @@ export class ReportService {
       bucketId = { year: { $year: "$payments.paidAt" } };
     }
 
+    // A Bangalore enrolment's rupees too, in AED (utils/bangaloreRevenue.ts)
+    const blr = await bangaloreLeadsUnion();
     const agg = await Lead.aggregate([
+      ...blr,
       { $match: { team: teamOid } },
       { $unwind: "$payments" },
       { $match: COUNTED_PAYMENT },
@@ -1048,6 +1069,7 @@ export class ReportService {
 
     const agg = await Lead.aggregate([
       { $match: match },
+      ...(await withBangaloreMoney()),
       {
         $group: {
           _id:            { $ifNull: ["$source", "other"] },
@@ -1085,6 +1107,7 @@ export class ReportService {
 
     const agg = await Lead.aggregate([
       { $match: match },
+      ...(await withBangaloreMoney()),
       {
         $group: {
           _id:            { $ifNull: ["$campaign", "(no campaign)"] },

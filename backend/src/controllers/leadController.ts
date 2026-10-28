@@ -18,6 +18,7 @@ import { holdRepeatLead, announceRepeats, findLeadByPhone, repeatMessage, type R
 import { changeFollowUpDate, syncFollowUpDateWithReminder } from "../services/followUpDateService.js";
 import { closeIsInFinance, leadFinanceLink, sendLeadPayment } from "../services/leadFinancePaymentService.js";
 import { COUNTED_PAYMENT } from "../utils/countedPayments.js";
+import { bangaloreLeadsUnion } from "../utils/bangaloreRevenue.js";
 
 const leadService = new LeadService();
 const excelService = new ExcelService();
@@ -1027,6 +1028,8 @@ export const getUserRevenue = async (
     }
 
     const result = await Lead.aggregate([
+      // A Bangalore enrolment's rupees too, in AED (utils/bangaloreRevenue.ts)
+      ...(await bangaloreLeadsUnion()),
       {
         $match: {
           assignedTo: new mongoose.Types.ObjectId(userId),

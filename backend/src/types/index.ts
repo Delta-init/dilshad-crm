@@ -831,6 +831,11 @@ export interface IAppSettings {
     limitMinutes: number;
     notifyTeamLeaders: boolean;
   };
+  /**
+   * A Bangalore enrolment's rupees in the leaderboard, Sales TV and reports (utils/bangaloreRevenue.ts): 1 AED = this
+   * many rupees. Absent on settings saved before: 22.75.
+   */
+  bangaloreRevenue?: { inrPerAed: number };
   workingHours: {
     /** IANA zone the times below are in, e.g. "Asia/Dubai". */
     timezone: string;

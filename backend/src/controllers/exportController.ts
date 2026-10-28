@@ -9,6 +9,7 @@ import { User } from "../models/User.js";
 import type { LeadStatus } from "../types/index.js";
 import mongoose from "mongoose";
 import { COUNTED_TOTAL } from "../utils/countedPayments.js";
+import { withBangaloreMoney } from "../utils/bangaloreRevenue.js";
 
 const reportService = new ReportService();
 
@@ -491,6 +492,7 @@ export const exportTeamPdf = async (
         const uid  = u._id.toString();
         const [d] = await Lead.aggregate<Record<string, number>>([
           { $match: { ...match, assignedTo: new mongoose.Types.ObjectId(uid) } },
+          ...(await withBangaloreMoney()),
           { $group: { _id: null,
             total:          { $sum: 1 },
             totalPayments:  { $sum: COUNTED_TOTAL },

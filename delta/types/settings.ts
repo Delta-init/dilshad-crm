@@ -7,6 +7,11 @@ export interface AppSettings {
   /** enabledAt: when automatic moves were last switched on (set by the server) — only leads assigned since then move on their own. */
   inactiveLeads: { autoReassign: boolean; limitMinutes: number; enabledAt: string | null };
   idleAlerts: { enabled: boolean; limitMinutes: number; notifyTeamLeaders: boolean };
+  /**
+   * The rate a Bangalore enrolment's rupees count in the leaderboard, Sales TV and reports at: 1 AED = this many
+   * rupees. Absent from a server older than 2026-10-28.
+   */
+  bangaloreRevenue?: { inrPerAed: number };
   workingHours: { timezone: string; days: number[]; start: string; end: string };
   email: Record<EmailEventKey, boolean>;
   updatedBy: string | null;
@@ -30,6 +35,7 @@ export type AppSettingsUpdate = Partial<{
   idleAlerts: Partial<AppSettings["idleAlerts"]>;
   workingHours: Partial<AppSettings["workingHours"]>;
   email: Partial<AppSettings["email"]>;
+  bangaloreRevenue: Partial<NonNullable<AppSettings["bangaloreRevenue"]>>;
 }>;
 
 export interface TestEmailResult {

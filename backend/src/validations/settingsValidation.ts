@@ -41,6 +41,11 @@ export const updateAppSettingsSchema = z
       })
       .strict()
       .optional(),
+    // 1 AED = this many rupees, for a Bangalore enrolment's money in the revenue figures
+    bangaloreRevenue: z
+      .object({ inrPerAed: z.number().min(1, "At least 1").max(1000, "At most 1,000").optional() })
+      .strict()
+      .optional(),
     workingHours: z
       .object({
         timezone: z
