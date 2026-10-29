@@ -26,6 +26,8 @@
  *   - Case 14: the saved messages — the first reply's parts and the follow-up steps listed for everyone; one sent now
  *     with {name} filled, marked which, a person's message (not automatic); a file with it; a gone one refused; the
  *     whole first reply at once, in order.
+ *   - Case 16: sending quickly — a chat going on isn't checked with WhatsApp again; a new number once; not on WhatsApp
+ *     still refused; a lead added meanwhile still found.
  *   - Case 15: "Load older messages for all chats" — the phone asked for each chat, newest first, one at a time in
  *     the background; one run at a time; not linked, or no chats — refused.
  *
@@ -503,6 +505,25 @@ try {
   r = await call("POST", "/whatsapp/history-all", "Nora");
   check("no WhatsApp access: refused", r.status === 403);
   wa.attachSocketForCheck(String(P("Sam")), null);   // ends the API's run (it stops once unlinked)
+
+  section("Case 16 — sending without asking WhatsApp again (2026-10-29: messages took long to go)");
+  const asks: string[] = [];
+  const quickSent: Sent[] = [];
+  const quickSock = Object.assign(fakeSock(quickSent) as object, { onWhatsApp: async (phone: string) => { asks.push(phone); return [{ exists: !phone.endsWith("0000"), jid: `${phone}@s.whatsapp.net` }]; } });
+  wa.attachSocketForCheck(String(P("Sam")), quickSock as never, "971500000001");
+  r = await call("POST", "/whatsapp/send", "Sam", { chat: "971501234567", text: "Quick one" });
+  check("a chat already going on: sent without asking WhatsApp whether the number is on it", r.status === 200 && asks.length === 0 && quickSent.length === 1, j({ s: r.status, asks }));
+  r = await call("POST", "/whatsapp/send", "Sam", { chat: "971503214321", text: "A new number" });
+  r = await call("POST", "/whatsapp/send", "Sam", { chat: "971503214321", text: "And again" });
+  check("a new number: asked once, then known", r.status === 200 && asks.filter((x) => x === "971503214321").length === 1, j(asks));
+  r = await call("POST", "/whatsapp/send", "Sam", { chat: "971503210000", text: "Not on it" });
+  check("a number not on WhatsApp: still said so", r.status === 400 && /not on WhatsApp/.test(r.body.message ?? ""), j(r.body));
+  const ml = await db.collection("leads").insertOne({ name: "Late Comer", phone: "+971 50 777 1234", assignedTo: P("Sam"), team: titans, reporter: P("Sam"), status: "assigned", createdAt: new Date(), updatedAt: new Date() });
+  wa.forgetLeads();
+  r = await call("POST", "/whatsapp/send", "Sam", { chat: "971507771234", text: "Hello Late Comer" });
+  const lateMsg = await WhatsAppMessage.findOne({ owner: P("Sam"), body: "Hello Late Comer" }).lean();
+  check("a lead added meanwhile (list told to read again): the message is under it", String(lateMsg?.lead) === String(ml.insertedId), j(lateMsg?.lead));
+  wa.attachSocketForCheck(String(P("Sam")), null);
 } finally {
   server.close();
   await mongoose.disconnect();

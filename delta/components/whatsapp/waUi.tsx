@@ -59,6 +59,8 @@ function Media({ media }: { media: WAMedia | null }) {
 
 /** Who sent it, for the line under a message: automatic (which), a saved message picked (which), or the person. */
 function sentLine(m: WAMessage, out: boolean): string {
+  if (m.pending === "sending") return "Sending… · ";
+  if (m.pending === "failed") return `Not sent — ${m.failedReason || "try again"} · `;
   if (m.auto) return m.auto.kind === "first_reply" ? `Auto first reply · ${m.auto.step} of ${m.auto.of} · ` : `Auto follow-up · step ${m.auto.step} of ${m.auto.of} · `;
   const saved = m.saved ? (m.saved.kind === "first_reply" ? `First reply ${m.saved.step} (saved) · ` : `Follow-up ${m.saved.step} (saved) · `) : "";
   return saved + (out && m.sentByName ? `${m.sentByName} · ` : "");
@@ -88,7 +90,7 @@ export function MessageBubble({ m, onForward }: { m: WAMessage; onForward?: (m: 
             {out && m.sentByName ? `${m.sentByName} · ` : ""}{time(m.at)}
           </span>
         </div>
-        {onForward && <ForwardButton out={out} onClick={() => onForward(m)} />}
+        {onForward && !m.pending && <ForwardButton out={out} onClick={() => onForward(m)} />}
       </div>
     );
   }
@@ -96,16 +98,18 @@ export function MessageBubble({ m, onForward }: { m: WAMessage; onForward?: (m: 
     <div className={cn("group flex", out ? "justify-end" : "justify-start")}>
       <div className={cn(
         "max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm",
+        m.pending === "sending" && "opacity-70",
+        m.pending === "failed" && "ring-1 ring-rose-400",
         out ? "rounded-br-md bg-[#d9fdd3] text-slate-900 dark:bg-emerald-900/70 dark:text-emerald-50" : "rounded-bl-md bg-white text-slate-900 dark:bg-zinc-800 dark:text-zinc-100",
       )}>
         {m.forwarded && <p className="mb-0.5 flex items-center gap-1 text-[11px] italic opacity-60"><Forward className="h-3 w-3" />Forwarded</p>}
         <Media media={m.media} />
         {!label && m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
-        <p className="mt-0.5 text-right text-[10px] opacity-60">
+        <p className={cn("mt-0.5 text-right text-[10px]", m.pending === "failed" ? "font-medium text-rose-600" : "opacity-60")}>
           {sentLine(m, out)}{time(m.at)}
         </p>
       </div>
-      {onForward && <ForwardButton out={out} onClick={() => onForward(m)} />}
+      {onForward && !m.pending && <ForwardButton out={out} onClick={() => onForward(m)} />}
     </div>
   );
 }
@@ -263,11 +267,22 @@ export function Composer({ onSendText, onSendFile, disabled = false, placeholder
     setFile(f);
     textRef.current?.focus();
   };
+  /*
+   * Sent the moment Send is pressed (2026-10-29): the box clears at once and the next message can be written while this
+   * one goes — it shows in the chat as "Sending…". If it doesn't go, what was written comes back to the box (unless
+   * something new has been written there meanwhile).
+   */
   const send = () => {
-    if (busy) return;
     const t = text.trim();
-    if (file) void run(() => onSendFile(file, t));
-    else if (t) void run(() => onSendText(t));
+    const f = file;
+    if (!f && !t) return;
+    setText("");
+    setFile(null);
+    textRef.current?.focus();
+    void (f ? onSendFile(f, t) : onSendText(t)).catch(() => {
+      setText((now) => (now.trim() ? now : t));
+      if (f) setFile((now) => now ?? f);
+    });
   };
   const pick = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];

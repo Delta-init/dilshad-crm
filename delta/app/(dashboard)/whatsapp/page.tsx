@@ -152,6 +152,8 @@ function WhatsAppPage() {
   const [picking, setPicking] = useState<{ lead: WALeadOption; numbers: string[] } | null>(null);
   const [linking, setLinking] = useState(false);
   const [forwarding, setForwarding] = useState<WAMessage | null>(null);   // the message being forwarded
+  // Messages on their way, shown at once (2026-10-29) — until the server has them, or marked if they didn't go.
+  const [pending, setPending] = useState<(WAMessage & { chat: string })[]>([]);
   // Full screen: the chats and the chat fill the window — the browser's own full screen where it has one; Esc leaves.
   const [full, setFull] = useState(false);
   const toggleFull = () => {
@@ -210,20 +212,26 @@ function WhatsAppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mine, chat?.chat, chat?.unread]);
 
-  const sendText = async (text: string) => {
+  /** Shown in the chat at once as "Sending…"; gone once the server has it (it comes back in the chat), marked if not. */
+  const sendWithPending = async (body: string, go: () => Promise<{ chat: string } | undefined>) => {
     if (!chat) return;
+    const id = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setPending((p) => [...p, { id, chat: chat.chat, direction: "out", body, at: new Date().toISOString(), senderName: "", sentByName: "", media: null, pending: "sending" }]);
     try {
-      const r = await send.text.mutateAsync({ chat: chat.chat, text });
+      const r = await go();
       if (r?.chat && r.chat !== chatId) setChatId(r.chat);
-    } catch (e) { toast.error(errMsg(e, "Not sent")); throw e; }
+      // A moment for the chat to show the real one, so it doesn't blink out first.
+      setTimeout(() => setPending((p) => p.filter((m) => m.id !== id)), 3500);
+    } catch (e) {
+      const reason = errMsg(e, (e as { code?: string })?.code === "ECONNABORTED" ? "the server didn't answer" : "Not sent");
+      setPending((p) => p.map((m) => (m.id === id ? { ...m, pending: "failed", failedReason: reason } : m)));
+      toast.error(`Not sent — ${reason}. What you wrote is back in the box.`);
+      throw e;
+    }
   };
-  const sendFile = async (file: File, caption: string, voice = false) => {
-    if (!chat) return;
-    try {
-      const r = await send.file.mutateAsync({ chat: chat.chat, file, caption, voice });
-      if (r?.chat && r.chat !== chatId) setChatId(r.chat);
-    } catch (e) { toast.error(errMsg(e, "Not sent")); throw e; }
-  };
+  const sendText = (text: string) => sendWithPending(text, () => send.text.mutateAsync({ chat: chat!.chat, text }));
+  const sendFile = (file: File, caption: string, voice = false) =>
+    sendWithPending(voice ? "🎤 Voice note" : caption || `📎 ${file.name || "File"}`, () => send.file.mutateAsync({ chat: chat!.chat, file, caption, voice }));
   const makeLead = () => {
     if (!chat) return;
     createLead.mutate({ ownerId: viewing, chat: chat.chat }, {
@@ -397,7 +405,9 @@ function WhatsAppPage() {
                       </Button>
                     </div>
                   )}
-                  <Thread messages={thread?.messages ?? []} className="min-h-0 flex-1" empty={canSend ? "Write the first message" : "No messages yet"}
+                  <Thread messages={[...(thread?.messages ?? []), ...pending.filter((p) => p.chat === chat.chat
+                    // Not twice: once the chat has it, the "Sending…" one goes.
+                    && !(p.pending === "sending" && (thread?.messages ?? []).some((m) => m.direction === "out" && m.body === p.body && Date.parse(m.at) >= Date.parse(p.at) - 60_000)))]} className="min-h-0 flex-1" empty={canSend ? "Write the first message" : "No messages yet"}
                     onForward={st.me?.status === "connected" ? setForwarding : undefined} />
                   {canSend
                     ? <Composer onSendText={sendText} onSendFile={sendFile}

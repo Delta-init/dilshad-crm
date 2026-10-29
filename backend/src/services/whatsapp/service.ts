@@ -92,17 +92,32 @@ export const intlNumbers = (v: unknown) => [...new Set(String(v ?? "").split(/[\
 /* ── Leads by number, cached for a minute ───────────────────────────────── */
 
 let byKeyCache: { at: number; map: Map<string, Types.ObjectId> } | null = null;
-/** A number's last 9 digits (or a chat's address, when linked by it) → its lead. */
-export async function leadsByKey(): Promise<Map<string, Types.ObjectId>> {
-  if (byKeyCache && Date.now() - byKeyCache.at < 60_000) return byKeyCache.map;
+let building: Promise<Map<string, Types.ObjectId>> | null = null;
+let mustRead = false;   // forgetLeads: the next one reads it again before answering
+async function buildLeadsByKey(): Promise<Map<string, Types.ObjectId>> {
   const map = new Map<string, Types.ObjectId>();
   for (const [k, id] of await leadsByPhone()) map.set(k, id);
   // A number linked to a lead by hand (it is not on the lead's record) wins over the record.
   for (const l of await WhatsAppLink.find({}).select("key lead").lean()) map.set(l.key, l.lead);
   byKeyCache = { at: Date.now(), map };
+  mustRead = false;
   return map;
 }
-export const forgetLeads = () => { byKeyCache = null; };
+/**
+ * A number's last 9 digits (or a chat's address, when linked by it) → its lead. Read from every lead once a minute —
+ * and never in a send's way (2026-10-29: messages took long to go): an older list is used while a new one is read in
+ * the background, and many asking at once share one read.
+ */
+export async function leadsByKey(): Promise<Map<string, Types.ObjectId>> {
+  if (byKeyCache && !mustRead && Date.now() - byKeyCache.at < 60_000) return byKeyCache.map;
+  if (!building) building = buildLeadsByKey().finally(() => { building = null; });
+  if (byKeyCache && !mustRead) { building.catch(() => undefined); return byKeyCache.map; }
+  return building;
+}
+/** A lead changed outside the list's knowledge: the next one to ask waits for it to be read again. */
+export const forgetLeads = () => { mustRead = true; };
+/** A lead just made or linked, put in the list at once — so it is known without reading every lead again. */
+export const rememberLead = (key: string, leadId: Types.ObjectId) => { byKeyCache?.map.set(key, leadId); };
 
 /* ── A number that is no lead's, writing in ─────────────────────────────── */
 
@@ -135,7 +150,7 @@ export function leadForNewNumber(owner: Owner, phone: string, key: string, pushN
     // Fresh, not the cached list: by the number's last 9 digits, anywhere in a lead's phone field.
     const already = await Lead.findOne({ phone: new RegExp(`${key.split("").join("\\D*")}(?!\\d)`) })
       .select("_id").lean<{ _id: Types.ObjectId } | null>();
-    if (already) { forgetLeads(); return already._id; }
+    if (already) { rememberLead(key, already._id); return already._id; }
     const saved = (await contactNames(owner.id, [key])).get(key) ?? "";
     const name = (saved && !/^\+?\d+$/.test(saved) ? saved : "")
       || (pushName && !/^\+?\d+$/.test(pushName.trim()) ? pushName.trim().slice(0, 100) : "")
@@ -152,7 +167,7 @@ export function leadForNewNumber(owner: Owner, phone: string, key: string, pushN
         createdAt: new Date(),
       }],
     });
-    forgetLeads();
+    rememberLead(key, lead._id as Types.ObjectId);
     const { notifyLeadAssignment } = await import("../pushService.js");
     void notifyLeadAssignment(owner.id, String(lead._id), name, emitToUser).catch(() => null);
     console.log(`[whatsapp] new lead ${name} (+${phone}) for ${owner.name}${team ? " in AI Academy" : ""}`);
@@ -549,12 +564,24 @@ export const olderRunOf = (userId: string) => olderRuns.get(userId) ?? null;
 /* ── Sending ────────────────────────────────────────────────────────────── */
 
 /** Where to send: a known number (checked on WhatsApp), or the chat's own address when only that is known. */
-async function target(sock: WASocket, chat: string): Promise<{ jid: string; phone: string }> {
+/** Numbers WhatsApp said are on it, and their address — remembered a day, so a send doesn't ask again. */
+const onWhatsAppCache = new Map<string, { jid: string; at: number }>();
+const ON_WHATSAPP_TTL_MS = 24 * 3_600_000;
+async function target(sock: WASocket, chat: string, ownerId?: string): Promise<{ jid: string; phone: string }> {
   if (chat.includes("@")) return { jid: chat, phone: "" };
   const phone = toIntl(chat);
   if (phone.length < 9) throw new WhatsAppError("That is not a phone number");
+  // A chat already going on has its address on its messages: no need to ask WhatsApp before each send (2026-10-29).
+  if (ownerId) {
+    const known = await WhatsAppMessage.findOne({ owner: new Types.ObjectId(ownerId), chat: phone, jid: /@s\.whatsapp\.net$/ })
+      .sort({ at: -1, _id: -1 }).select("jid").lean<{ jid?: string } | null>();
+    if (known?.jid) return { jid: known.jid, phone };
+  }
+  const cached = onWhatsAppCache.get(phone);
+  if (cached && Date.now() - cached.at < ON_WHATSAPP_TTL_MS) return { jid: cached.jid, phone };
   const [found] = (await sock.onWhatsApp(phone).catch(() => [])) ?? [];
   if (!found?.exists) throw new WhatsAppError(`+${phone} is not on WhatsApp`);
+  onWhatsAppCache.set(phone, { jid: String(found.jid), at: Date.now() });
   return { jid: String(found.jid), phone };
 }
 
@@ -601,7 +628,7 @@ export const isConnected = (userId: string) => { const s = session(userId); retu
 export async function sendText(userId: string, chat: string, text: string, opts: SendOpts = {}) {
   const sock = connected(userId);
   const owner = await ownerOf(userId);
-  const to = await target(sock, chat);
+  const to = await target(sock, chat, userId);
   const sent = await sock.sendMessage(to.jid, { text });
   return keepSent(owner, to, chat, sent?.key?.id ?? "", text, null, opts);
 }
@@ -634,7 +661,7 @@ export async function sendFile(userId: string, chat: string, buffer: Buffer, mim
   mime = realMime(buffer, mime);
   const sock = connected(userId);
   const owner = await ownerOf(userId);
-  const to = await target(sock, chat);
+  const to = await target(sock, chat, userId);
   if (voice) {
     const note = await asVoiceNote(buffer, mime).catch(() => { throw new WhatsAppError("That recording could not be sent as a voice note — record it again"); });
     if (note) {

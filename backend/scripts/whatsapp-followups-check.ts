@@ -273,7 +273,8 @@ try {
   await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps });
   await db.collection("whatsapp_messages").deleteMany({ owner: P("Sally"), key: "971541000003".slice(-9) });
   await lead("Not On WA", "+971 54 200 0000", "Sally", titans);                  // the stand-in says …0000 is not on WhatsApp
-  await msg("Sally", "971542000000", "out", new Date(Date.now() - 5 * H));
+  // Never reached WhatsApp (no address on it): a chat already going on, with its address, is sent to without asking.
+  await msg("Sally", "971542000000", "out", new Date(Date.now() - 5 * H), { jid: "" });
   F.resetFollowupPacingForCheck();
   t = work(Date.now() + 5 * 60_000);
   res = await F.runFollowups(t);

@@ -20,7 +20,7 @@ import {
   followupSettings, FollowupError, leadFollowup, listSavedMessages, saveFollowupSettings, sendSavedMessage, setLeadFollowupStopped,
 } from "../services/whatsapp/followups.js";
 import {
-  connect, contactNames, disconnect, fetchOlder, fetchOlderForAll, forgetLeads, forwardMessage, intlNumbers, leadsByKey, mediaPath, realMime, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
+  connect, contactNames, disconnect, fetchOlder, fetchOlderForAll, forwardMessage, rememberLead, intlNumbers, leadsByKey, mediaPath, realMime, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
 } from "../services/whatsapp/service.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 import { sendError, sendSuccess } from "../utils/response.js";
@@ -416,7 +416,7 @@ async function linkKey(key: string, leadId: Types.ObjectId, req: AuthenticatedRe
   const me = await User.findById(req.user!.userId).select("name").lean<{ name?: string } | null>();
   await WhatsAppLink.updateOne({ key }, { $set: { key, lead: leadId, by: new Types.ObjectId(req.user!.userId), byName: me?.name ?? "", at: new Date() } }, { upsert: true });
   await WhatsAppMessage.updateMany(/^\d{9}$/.test(key) ? { key } : { chat: key }, { $set: { lead: leadId } });
-  forgetLeads();
+  rememberLead(key, leadId);
 }
 
 /** GET /whatsapp/lead-options?search= — leads you may link a chat to: by name or number, up to 20. */

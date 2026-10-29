@@ -19,6 +19,9 @@ export interface WAMessage {
   forwarded?: boolean;
   /** Sent by a person from the saved messages — which one. */
   saved?: { kind?: "followup" | "first_reply"; step: number } | null;
+  /** Only on this screen, before the server has it: on its way, or it didn't go (and why). */
+  pending?: "sending" | "failed";
+  failedReason?: string;
 }
 export interface WALead { id: string; name: string; status: string; owner: string }
 export interface WAChat {
@@ -126,12 +129,18 @@ export function useWhatsAppLink() {
   };
 }
 
+/**
+ * Sending. The lists refresh after it in the background — not awaited (2026-10-29): waiting for every WhatsApp list
+ * on the page to load again held the message box for seconds after each message. A send the server never answers is
+ * given up after a minute (a file after five).
+ */
 export function useWhatsAppSend() {
   const refresh = useRefresh();
+  const later = () => { void refresh(); };
   return {
     text: useMutation({
-      mutationFn: async (v: { chat: string; text: string }) => data<{ chat: string }>(await api.post("/whatsapp/send", v)),
-      onSuccess: refresh,
+      mutationFn: async (v: { chat: string; text: string }) => data<{ chat: string }>(await api.post("/whatsapp/send", v, { timeout: 60_000 })),
+      onSuccess: later,
     }),
     file: useMutation({
       mutationFn: async (v: { chat: string; file: File; caption: string; voice?: boolean }) => {
@@ -140,9 +149,9 @@ export function useWhatsAppSend() {
         form.append("caption", v.caption);
         form.append("file", v.file);
         if (v.voice) form.append("voice", "1");
-        return data<{ chat: string }>(await api.post("/whatsapp/send-file", form, { headers: { "Content-Type": "multipart/form-data" } }));
+        return data<{ chat: string }>(await api.post("/whatsapp/send-file", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 300_000 }));
       },
-      onSuccess: refresh,
+      onSuccess: later,
     }),
   };
 }
