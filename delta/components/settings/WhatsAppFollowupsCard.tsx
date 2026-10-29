@@ -35,13 +35,18 @@ function StepFile({ step, onChange, label = "Add a photo, video or PDF" }: { ste
   const upload = useUploadFollowupFile();
   const input = useRef<HTMLInputElement>(null);
   if (step.file) {
+    const mime = step.file.mime || "";
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs">
-        <Paperclip className="h-3.5 w-3.5" />{step.file.name || "File"}
-        {/* What it goes as on WhatsApp */}
-        <span className="text-muted-foreground">· {step.file.mime.startsWith("audio/") ? "audio" : step.file.mime.startsWith("video/") ? "video" : step.file.mime.startsWith("image/") ? "photo" : "document"}</span>
-        <button type="button" aria-label="Remove the file" onClick={() => onChange(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-      </span>
+      <div className="space-y-1.5">
+        <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs">
+          <Paperclip className="h-3.5 w-3.5" />{step.file.name || "File"}
+          {/* What it goes as on WhatsApp */}
+          <span className="text-muted-foreground">· {mime.startsWith("audio/") ? "audio" : mime.startsWith("video/") ? "video" : mime.startsWith("image/") ? "photo" : "document"}</span>
+          <button type="button" aria-label="Remove the file" onClick={() => onChange(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+        </span>
+        {/* Listen to it, or look at it, here (2026-10-29) — a file just uploaded has no link until Save */}
+        {step.file.url && <FilePreview url={step.file.url} mime={mime} name={step.file.name} />}
+      </div>
     );
   }
   return (
@@ -59,6 +64,16 @@ function StepFile({ step, onChange, label = "Add a photo, video or PDF" }: { ste
       </Button>
     </>
   );
+}
+
+function FilePreview({ url, mime, name }: { url: string; mime: string; name: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return <p className="text-xs italic text-muted-foreground">Couldn&apos;t load it — reopen Settings</p>;
+  if (mime.startsWith("audio/")) return <audio src={url} controls preload="metadata" onError={() => setBroken(true)} className="h-9 w-72 max-w-full" />;
+  if (mime.startsWith("video/")) return <video src={url} controls preload="metadata" onError={() => setBroken(true)} className="max-h-48 max-w-xs rounded-md" />;
+  // eslint-disable-next-line @next/next/no-img-element
+  if (mime.startsWith("image/")) return <img src={url} alt={name} onError={() => setBroken(true)} className="max-h-32 max-w-xs rounded-md object-contain" />;
+  return <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">Open {name || "the file"}</a>;
 }
 
 export function WhatsAppFollowupsCard() {

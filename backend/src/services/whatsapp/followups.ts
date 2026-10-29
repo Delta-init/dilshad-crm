@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { Types } from "mongoose";
 import { Lead } from "../../models/Lead.js";
 import { Team } from "../../models/Team.js";
@@ -8,7 +8,7 @@ import { WhatsAppLink, WhatsAppMessage } from "../../models/WhatsAppMessage.js";
 import { WhatsAppFollowupSettings, type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
 import { phoneKeys } from "./leads.js";
-import { connectedOwnerIds, contactNames, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled, WhatsAppError } from "./service.js";
+import { connectedOwnerIds, contactNames, isAudioOnlyMp4, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled, WhatsAppError } from "./service.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Automatic WhatsApp follow-ups (the user, 2026-10-27: "this type of follow-up
@@ -60,6 +60,21 @@ const DEFAULT_DAILY_LIMIT = 60;
 
 export type FollowupSettings = Pick<IWhatsAppFollowupSettings, "enabled" | "startedAt" | "dailyLimit" | "steps" | "updatedByName" | "firstReply"> & { teams: string[]; updatedAt: Date | null };
 
+/**
+ * A file's type as it really is: one uploaded as an MP4 before sound-only MP4s were told apart ("AUDIO-….m4a.mp4",
+ * 2026-10-28) is audio — read from the file once, then remembered (a kept file never changes).
+ */
+const soundOnly = new Map<string, boolean>();
+function realFile<T extends { file: string; mime: string } | null>(f: T): T {
+  if (!f || !/^video\/mp4$/i.test(f.mime)) return f;
+  let audio = soundOnly.get(f.file);
+  if (audio === undefined) {
+    try { audio = existsSync(mediaPath(f.file)) && isAudioOnlyMp4(readFileSync(mediaPath(f.file))); } catch { audio = false; }
+    soundOnly.set(f.file, audio);
+  }
+  return audio ? { ...f, mime: "audio/mp4" } : f;
+}
+
 let cache: { at: number; value: FollowupSettings } | null = null;
 export async function followupSettings(fresh = false): Promise<FollowupSettings> {
   if (!fresh && cache && Date.now() - cache.at < 30_000) return cache.value;
@@ -69,13 +84,13 @@ export async function followupSettings(fresh = false): Promise<FollowupSettings>
     startedAt: doc?.startedAt ?? null,
     teams: (doc?.teams ?? []).map(String),
     dailyLimit: doc?.dailyLimit ?? DEFAULT_DAILY_LIMIT,
-    steps: doc?.steps?.length ? doc.steps.map((s) => ({ waitMinutes: s.waitMinutes, text: s.text, file: s.file ?? null })) : DEFAULT_STEPS,
+    steps: doc?.steps?.length ? doc.steps.map((s) => ({ waitMinutes: s.waitMinutes, text: s.text, file: realFile(s.file ?? null) })) : DEFAULT_STEPS,
     updatedByName: doc?.updatedByName ?? "",
     updatedAt: doc?.updatedAt ?? null,
     firstReply: {
       enabled: doc?.firstReply?.enabled ?? false,
       startedAt: doc?.firstReply?.startedAt ?? null,
-      items: (doc?.firstReply?.items ?? []).map((i) => ({ text: i.text ?? "", file: i.file ?? null, voice: i.voice === true })),
+      items: (doc?.firstReply?.items ?? []).map((i) => ({ text: i.text ?? "", file: realFile(i.file ?? null), voice: i.voice === true })),
     },
   };
   cache = { at: Date.now(), value };

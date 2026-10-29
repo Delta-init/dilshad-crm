@@ -33,7 +33,8 @@ export interface WAFollowup {
   state: "off" | "ended" | "no_chat" | "replied" | "before" | "stopped" | "done" | "waiting";
   step?: number; of?: number; nextAt?: string; sent?: number; byName?: string; ownerName?: string; linked?: boolean;
 }
-export interface WAFollowupStep { waitMinutes: number; text: string; file: { file: string; name: string; mime: string; size: number } | null }
+/** `url`: to look at or listen to it (Settings only, a short-lived link). */
+export interface WAFollowupStep { waitMinutes: number; text: string; file: { file: string; name: string; mime: string; size: number; url?: string } | null }
 export interface WAFirstReplyItem { text: string; file: WAFollowupStep["file"]; voice: boolean }
 export interface WAFollowupSettings {
   enabled: boolean; startedAt: string | null; teams: string[]; dailyLimit: number; steps: WAFollowupStep[];

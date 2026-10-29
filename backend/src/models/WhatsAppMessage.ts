@@ -90,6 +90,8 @@ const whatsAppMessageSchema = new Schema<IWhatsAppMessage>(
 // The same WhatsApp message once per owner: a reconnect replays what came while away.
 whatsAppMessageSchema.index({ owner: 1, messageId: 1 }, { unique: true, partialFilterExpression: { messageId: { $gt: "" } } });
 whatsAppMessageSchema.index({ owner: 1, chat: 1, at: -1 });
+// One person's messages newest first — the chat list reads them in this order rather than sorting them all (2026-10-29).
+whatsAppMessageSchema.index({ owner: 1, at: -1, _id: -1 });
 whatsAppMessageSchema.index({ owner: 1, direction: 1, read: 1 });
 whatsAppMessageSchema.index({ key: 1 });
 whatsAppMessageSchema.index({ lead: 1, at: -1 });

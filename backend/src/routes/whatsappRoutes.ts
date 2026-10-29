@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
-import { Router, type NextFunction, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import { Types } from "mongoose";
 import { env } from "../config/env.js";
@@ -72,12 +72,19 @@ router.get("/media", async (req, res, next) => {
     const doc = await WhatsAppMessage.findById(m).select("media").lean();
     const path = doc?.media?.file ? mediaPath(doc.media.file) : "";
     if (!path || !existsSync(path)) { sendError(res, "Not found", 404); return; }
-    const name = String(doc!.media!.fileName || doc!.media!.file.split("/").pop() || "file").replace(/[^\w.\- ]+/g, "_");
-    res.setHeader("Content-Type", doc!.media!.mime || "application/octet-stream");
+    serveFile(req, res, next, path, doc!.media!.mime, doc!.media!.fileName || doc!.media!.file.split("/").pop() || "file");
+  } catch (err) { next(err); }
+});
+
+/**
+ * A kept file, inline, with its length and parts of it on request: an audio or video plays through, shows its length
+ * and can be skipped in (Safari plays none without).
+ */
+function serveFile(req: Request, res: Response, next: NextFunction, path: string, mime: string, fileName: string) {
+    const name = String(fileName || "file").replace(/[^\w.\- ]+/g, "_");
+    res.setHeader("Content-Type", mime || "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename="${name}"`);
     res.setHeader("Cache-Control", "private, max-age=3600");
-    // Its length, and parts of it on request: an audio or video plays through, shows its length and can be skipped
-    // in (Safari plays none without).
     const size = statSync(path).size;
     res.setHeader("Accept-Ranges", "bytes");
     const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? "").trim());
@@ -99,6 +106,31 @@ router.get("/media", async (req, res, next) => {
     }
     res.setHeader("Content-Length", String(size));
     createReadStream(path).on("error", next).pipe(res);
+}
+
+/**
+ * A follow-up's or the first reply's file, to look at or listen to in Settings (2026-10-29) — on a short-lived signed
+ * link like a chat's, for the Super Admin it was given to.
+ */
+function followupFileUrl(file: string, userId: string): string {
+  const e = (Math.floor(Date.now() / 1000 / MEDIA_TTL_S) + 2) * MEDIA_TTL_S;
+  const q = new URLSearchParams({ f: file, e: String(e), u: userId, s: sign(`followup.${file}.${e}.${userId}`) });
+  return `/api/v1/whatsapp/followups/file-view?${q}`;
+}
+
+/** GET /whatsapp/followups/file-view?f=&e=&u=&s= — that file, for whoever was given the link. */
+router.get("/followups/file-view", async (req, res, next) => {
+  try {
+    const f = str(req.query.f, 80), e = str(req.query.e, 20), u = str(req.query.u, 40), s = str(req.query.s, 100);
+    if (!/^followups\/[\w-]+\.\w{1,10}$/.test(f) || !/^\d{9,11}$/.test(e) || !isId(u) || !s) { sendError(res, "Not found", 404); return; }
+    if (Number(e) < Date.now() / 1000) { sendError(res, "This link has expired — reopen Settings", 410); return; }
+    const want = Buffer.from(sign(`followup.${f}.${e}.${u}`)), got = Buffer.from(s);
+    if (want.length !== got.length || !timingSafeEqual(want, got)) { sendError(res, "Not found", 404); return; }
+    const path = mediaPath(f);
+    if (!existsSync(path)) { sendError(res, "Not found", 404); return; }
+    const settings = await followupSettings();
+    const meta = [...settings.steps.map((x) => x.file), ...settings.firstReply.items.map((x) => x.file)].find((x) => x?.file === f);
+    serveFile(req, res, next, path, meta?.mime || "application/octet-stream", meta?.name || f.split("/").pop() || "file");
   } catch (err) { next(err); }
 });
 
@@ -156,7 +188,9 @@ router.get("/status", checkPermission("whatsapp", "view"), async (req: Authentic
       const [users, teams, counts] = await Promise.all([
         User.find(filter).select("name email").lean<{ _id: Types.ObjectId; name?: string; email?: string }[]>(),
         Team.find({ status: "active" }).select("name members leaders").lean<{ name?: string; members?: unknown[]; leaders?: unknown[] }[]>(),
-        WhatsAppMessage.aggregate<{ _id: Types.ObjectId; n: number }>([{ $group: { _id: "$owner", n: { $sum: 1 } } }]),
+        // Each person's total from the index, not by reading every message there is (2026-10-29: the page sat on Loading).
+        User.find(filter).select("_id").lean<{ _id: Types.ObjectId }[]>()
+          .then((us) => Promise.all(us.map(async (u) => ({ _id: u._id, n: await WhatsAppMessage.countDocuments({ owner: u._id }) })))),
       ]);
       const teamOf = new Map<string, string>();
       for (const t of teams) for (const u of [...(t.leaders ?? []), ...(t.members ?? [])]) if (!teamOf.has(String(u))) teamOf.set(String(u), t.name ?? "");
@@ -506,7 +540,13 @@ router.get("/followups/settings", async (req: AuthenticatedRequest, res, next) =
   try {
     if (!superAdminOnly(req, res)) return;
     const teams = await Team.find({ status: "active" }).select("name").sort({ name: 1 }).lean<{ _id: Types.ObjectId; name?: string }[]>();
-    sendSuccess(res, "Follow-ups", { ...(await followupSettings(true)), allTeams: teams.map((t) => ({ id: String(t._id), name: t.name ?? "" })) });
+    const s = await followupSettings(true);
+    // Each file with a link to look at or listen to it here.
+    const withUrl = <T extends { file: { file: string } | null }>(x: T) => (x.file ? { ...x, file: { ...x.file, url: followupFileUrl(x.file.file, req.user!.userId) } } : x);
+    sendSuccess(res, "Follow-ups", {
+      ...s, steps: s.steps.map(withUrl), firstReply: { ...s.firstReply, items: s.firstReply.items.map(withUrl) },
+      allTeams: teams.map((t) => ({ id: String(t._id), name: t.name ?? "" })),
+    });
   } catch (err) { next(err); }
 });
 

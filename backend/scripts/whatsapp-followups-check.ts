@@ -14,6 +14,9 @@
  *   - Case 9: the first reply on time (2026-10-28: it came many minutes late) — a catch-up from earlier is not a first
  *     message; a backlog of people not linked doesn't hold a linked person's up; two people's go alongside each
  *     other; too late (30 min) or an old catch-up already queued is let go.
+ *   - Case 10: Settings plays its files (2026-10-29) — each file with a signed link that serves it (whole, or a part
+ *     of it); tampered or expired links refused; an old "video" that is sound only shown as audio; the status page's
+ *     message totals are right.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -426,6 +429,41 @@ try {
   fr = await F.runFirstReplies(new Date(), () => 0);
   check("an old catch-up already queued: let go, nothing sent", (await firsts().findOne({ key: "551119005" }))?.status === "catch_up" && outbox.Sally!.length === sallyNow, j(await firsts().findOne({ key: "551119005" })));
   check("one waiting 40 min while linked: too late, nothing sent", (await firsts().findOne({ key: "551119006" }))?.status === "too_late");
+
+  section("Case 10 — Settings plays its files");
+  // An MP4 that is sound only, kept as a "video" before such files were told apart.
+  const soundMp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x14]), Buffer.from("ftypM4A "), Buffer.alloc(8), Buffer.from([0, 0, 0, 0x21]), Buffer.from("hdlr"), Buffer.alloc(8), Buffer.from("soun"), Buffer.alloc(13)]);
+  fs.mkdirSync(path.join(MEDIA, "followups"), { recursive: true });
+  fs.writeFileSync(path.join(MEDIA, "followups", "old-audio.mp4"), soundMp4);
+  const { WhatsAppFollowupSettings: WFS } = await import("../src/models/WhatsAppFollowupSettings.js");
+  await WFS.updateOne({ key: "default" }, { $push: { "firstReply.items": { text: "", file: { file: "followups/old-audio.mp4", name: "AUDIO-2026-10-24-11-20-02.m4a.mp4", mime: "video/mp4", size: soundMp4.length }, voice: false } } });
+  r = await call("GET", "/whatsapp/followups/settings", "Root");
+  const items10 = r.body.data?.firstReply?.items as any[];
+  const oldAudio = items10?.find((x) => x.file?.file === "followups/old-audio.mp4");
+  check("an old \"video\" that is sound only: shown as audio", oldAudio?.file?.mime === "audio/mp4", j(oldAudio?.file));
+  check("every file comes with a link to look at or listen to it", items10?.filter((x) => x.file).every((x) => /^\/api\/v1\/whatsapp\/followups\/file-view\?/.test(x.file.url)), j(items10?.map((x) => x.file?.url)));
+  const viewUrl = `http://127.0.0.1:${port}${oldAudio?.file?.url}`;
+  let fres = await fetch(viewUrl);
+  const whole = Buffer.from(await fres.arrayBuffer());
+  check("…the link plays it: the file, as audio, with its length", fres.status === 200 && whole.equals(soundMp4) && fres.headers.get("content-type") === "audio/mp4" && fres.headers.get("accept-ranges") === "bytes", `${fres.status} ${fres.headers.get("content-type")}`);
+  fres = await fetch(viewUrl, { headers: { range: "bytes=0-9" } });
+  check("…a part of it on request (206) — so it can be skipped in", fres.status === 206 && (await fres.arrayBuffer()).byteLength === 10 && fres.headers.get("content-range") === `bytes 0-9/${soundMp4.length}`, String(fres.status));
+  fres = await fetch(viewUrl.replace(/s=[^&]+/, "s=forged"));
+  check("a tampered link: not found", fres.status === 404, String(fres.status));
+  fres = await fetch(viewUrl.replace(/f=[^&]+/, "f=followups%2Fother.mp4"));
+  check("…another file on the same signature: not found", fres.status === 404, String(fres.status));
+  const u10 = new URL(viewUrl);
+  u10.searchParams.set("e", String(Math.floor(Date.now() / 1000) - 10));
+  fres = await fetch(u10);
+  check("an expired link: refused (410)", fres.status === 410, String(fres.status));
+  r = await call("GET", "/whatsapp/followups/settings", "Sam");
+  check("Settings with its links is the Super Admin's only", r.status === 403, String(r.status));
+  r = await call("GET", "/whatsapp/saved-messages", "Sam");
+  check("the saved-messages list shows it as audio too", (r.body.data as any[])?.find((m) => m.file?.name === "AUDIO-2026-10-24-11-20-02.m4a.mp4")?.file?.mime === "audio/mp4", j(r.body.data));
+  r = await call("GET", "/whatsapp/status", "Root");
+  const totals = Object.fromEntries((r.body.data?.owners as any[] ?? []).map((o) => [o.name, o.messages]));
+  const expected = await db.collection("whatsapp_messages").countDocuments({ owner: P("Sally") });
+  check("the status page's totals per person are right (Sally's)", r.status === 200 && expected > 0 && totals.Sally === expected, j({ totals, expected }));
 } finally {
   server.close();
   await mongoose.disconnect();

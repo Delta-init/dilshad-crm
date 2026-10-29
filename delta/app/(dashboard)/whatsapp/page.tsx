@@ -138,7 +138,7 @@ function LinkLeadDialog({ open, onOpenChange, ownerId, chat }: { open: boolean; 
 
 function WhatsAppPage() {
   const params = useSearchParams();
-  const { data: st, isLoading } = useWhatsAppStatus();
+  const { data: st, isLoading, isError, error, refetch, isFetching } = useWhatsAppStatus();
   const [ownerId, setOwnerId] = useState("");
   const [chatId, setChatId] = useState("");
   // A WhatsApp notification opens its chat (/whatsapp?chat=…), also when the page is already open.
@@ -236,7 +236,18 @@ function WhatsAppPage() {
   const shown = needle ? chats.filter((c) => [c.name, c.whatsappName, c.phone, c.lead?.name].some((v) => String(v || "").toLowerCase().includes(needle))) : chats;
   const canSend = mine && !!chatsData?.canSend;
 
-  if (isLoading || !st) return <div className="p-8 text-center text-muted-foreground">Loading…</div>;
+  // Not "Loading…" for ever when the server can't answer (restarting, a deploy half done): say so, and let them try again.
+  if (isError && !st) {
+    return (
+      <div className="space-y-3 p-8 text-center">
+        <p className="text-sm text-muted-foreground">WhatsApp didn&apos;t load — {errMsg(error, "the server didn't answer")}.</p>
+        <Button variant="outline" size="sm" className="gap-1.5" disabled={isFetching} onClick={() => void refetch()}>
+          {isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Try again
+        </Button>
+      </div>
+    );
+  }
+  if (isLoading || !st) return <div className="flex items-center justify-center gap-2 p-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading WhatsApp…</div>;
 
   return (
     <div className="space-y-4">
