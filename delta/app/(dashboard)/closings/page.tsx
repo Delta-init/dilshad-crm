@@ -54,14 +54,35 @@ export default function ClosingsPage() {
   const [dateFrom, setDateFrom] = useState(startOfMonth);
   const [dateTo, setDateTo] = useState(() => dayKey(new Date()));
   const [team, setTeam] = useState("");
+  const [person, setPerson] = useState("");
   const [mine, setMine] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
 
   const { data, isLoading, isFetching, refetch } = useDailyClosings({
-    dateFrom, dateTo, team: team || undefined, mine,
+    dateFrom, dateTo, team: team || undefined, user: person || undefined, mine,
   });
   const { data: teamsData } = useTeams({ limit: 100 });
   const teams = teamsData?.data ?? [];
+
+  // The people to pick from: the chosen team's, or every team's — leaders and
+  // members both (leaders aren't in `members`), once each, by name.
+  const people = useMemo(() => {
+    const from = team ? teams.filter((t) => t._id === team) : teams;
+    return from
+      .flatMap((t) => [...(t.leaders ?? []), ...(t.members ?? [])])
+      .filter((u): u is NonNullable<typeof u> => typeof u === "object" && !!u)
+      .filter((u, i, list) => list.findIndex((x) => x._id === u._id) === i)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [teams, team]);
+
+  // A person who isn't in the newly chosen team would leave the page empty.
+  const pickTeam = (id: string) => {
+    setTeam(id);
+    const inTeam = teams.find((t) => t._id === id);
+    if (id && person && inTeam && ![...(inTeam.leaders ?? []), ...(inTeam.members ?? [])].some((u) => u?._id === person)) {
+      setPerson("");
+    }
+  };
 
   const days = data?.days ?? [];
   const totals = data?.totals;
@@ -156,12 +177,28 @@ export default function ClosingsPage() {
           <label className="text-[11px] font-medium text-muted-foreground">Team</label>
           <select
             value={team}
-            onChange={(e) => setTeam(e.target.value)}
+            onChange={(e) => pickTeam(e.target.value)}
             className="h-9 w-[170px] rounded-md border border-border bg-background px-2 text-sm"
           >
             <option value="">All teams</option>
             {teams.map((t) => (
               <option key={t._id} value={t._id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[11px] font-medium text-muted-foreground">Person</label>
+          {/* "Show only mine" already narrows it to the caller, and wins on the API. */}
+          <select
+            value={mine ? "" : person}
+            onChange={(e) => setPerson(e.target.value)}
+            disabled={mine}
+            title={mine ? "Showing only your closings" : undefined}
+            className="h-9 w-[170px] rounded-md border border-border bg-background px-2 text-sm disabled:opacity-50"
+          >
+            <option value="">{mine ? "Only mine" : "Everyone"}</option>
+            {people.map((u) => (
+              <option key={u._id} value={u._id}>{u.name}</option>
             ))}
           </select>
         </div>
