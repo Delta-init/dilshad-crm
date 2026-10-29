@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { Student } from "../models/Student.js";
 import { Lead } from "../models/Lead.js";
-import { differentPeople, emailKey, emailMatch, type EmailHolder, type Person } from "../utils/clientEmail.js";
+import { differentPeople, emailKey, emailMatch, madeUpEmail, type EmailHolder, type Person } from "../utils/clientEmail.js";
 
 /** As many records with one address as are worth looking through — far more than any real share. */
 const LOOK_AT = 1000;
@@ -20,7 +20,8 @@ const idOf = (v: unknown): Types.ObjectId | null => {
  * nine digits), else by name (clientEmail.differentPeople). A student is named
  * before a lead, the earliest closed first: that is who finance filed the
  * email under. The address is compared trimmed and lower-cased, so an older
- * record stored another way still counts.
+ * record stored another way still counts. A made-up email (noemail@…,
+ * 2026-10-29) is held by nobody in particular and taken for everybody.
  */
 export async function findEmailHolder(
   email: unknown,
@@ -28,6 +29,7 @@ export async function findEmailHolder(
 ): Promise<EmailHolder | null> {
   const key = emailKey(email);
   if (!key) return null;
+  if (madeUpEmail(key)) return { kind: "made_up", id: "", name: key };
   const match = emailMatch(key);
   const leadId = idOf(client.leadId);
   const studentId = idOf(client.studentId);

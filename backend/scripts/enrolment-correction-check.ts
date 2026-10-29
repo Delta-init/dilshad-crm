@@ -23,6 +23,9 @@
  *     again", the correction) made there too; the academy can't be corrected;
  *     refused without the Bangalore organization; the course mapping's
  *     Bangalore section and its catalogue;
+ *   - Case 12: a made-up email (noemail@gmail.com, 2026-10-29 — it put Najad's
+ *     invoice and bonus on Lebbie) refused like a taken one at the close, the
+ *     correction, "Send again" and the added email; never suggested; the check.
  *   - Case 10: a close that went without the client's email (2026-10-10) —
  *     refused by finance's intake, it can't be corrected; adding the email
  *     (POST /students/:id/enrolment/email) sends it again at once as the same
@@ -1036,6 +1039,80 @@ await sendBack(sale.id);
 const overRes = await call("PUT", `/students/${sale.id}/correction`, "Theertha", correction({ totalFee: 700 }));
 const overSaved = await Student.findById(sale.id).lean();
 check("collected more than the fee: taken (200), balance 0", overRes.status === 200 && overSaved?.totalFee === 700 && overSaved?.pendingAmount === 0, `${overRes.status} ${overRes.body.message}`);
+
+
+section("Case 12 — a made-up email (noemail@gmail.com) is refused like a taken one: the close, the correction, \"Send again\", the added email and the check (2026-10-29)");
+{
+  const { StudentService } = await import("../src/services/studentService.js");
+  const { madeUpEmail } = await import("../src/utils/clientEmail.js");
+  const svc = new StudentService();
+  const fake = ["noemail@gmail.com", "NoEmail@Gmail.com", " no-email@yahoo.com ", "no.mail@gmail.com", "noemail123@gmail.com", "none@gmail.com", "na@gmail.com",
+    "n.a@hotmail.com", "notavailable@gmail.com", "test@gmail.com", "test1@gmail.com", "abc@gmail.com", "dummy@gmail.com", "noreply@gmail.com", "ahmed@noemail.com"];
+  const real = ["najad6644@gmail.com", "nadia@gmail.com", "anna.na@gmail.com", "noemailjohn@gmail.com", "testimony.k@gmail.com", "abcd.trader@gmail.com",
+    "client@mail.com", "someone@email.com", "nonei@outlook.com", "client@example.com"];
+  const wrongFake = fake.filter((e) => !madeUpEmail(e)), wrongReal = real.filter((e) => madeUpEmail(e));
+  check("Case 2 — the rule: noemail, none, na, test, abc, dummy, noreply… and noemail.com are made up; real names that start the same are not",
+    !wrongFake.length && !wrongReal.length, JSON.stringify({ wrongFake, wrongReal }));
+  const MADE_UP = (who: string) => `noemail@gmail.com is a made-up email — enter ${who}'s own email. Finance and the CS Portal tell clients apart by their email, so a made-up one makes different clients one.`;
+  const unchanged = async (id: string, act: () => Promise<Answer>) => {
+    const before = await snapshot(id), sends = sendsFor(id).length;
+    const x = await act();
+    await sleep(150);
+    return { x, same: (await snapshot(id)) === before && sendsFor(id).length === sends };
+  };
+
+  // The close itself.
+  n++;
+  const leadId = new Types.ObjectId();
+  const phone = `+97150000${String(n).padStart(4, "0")}`;
+  await db.collection("leads").insertOne({ _id: leadId, name: `Client ${n}`, phone, email: "noemail@gmail.com", status: "followup", assignedTo: people.Theertha!.id, payments: [], activityLogs: [] });
+  const closeBody = (email: string) => ({
+    leadId: String(leadId), name: `Client ${n}`, phone, email, course: String(course500._id), team: String(teamA), assignedTo: String(people.Theertha!.id),
+    enrollmentDate: "2026-10-05T00:00:00.000Z", totalFee: 500, paidAmount: 500, language: "English", hasBonus: false, payments: [pay("cash", 500, `cash-${n}`)],
+  });
+  const count = await Student.countDocuments();
+  let x = await call("POST", "/students", "Theertha", closeBody("NoEmail@Gmail.com"));
+  check("Case 3 — the close with noemail@gmail.com (as the lead has it): 409 in plain words, no enrolment made",
+    x.status === 409 && x.body.message === MADE_UP(`Client ${n}`) && (await Student.countDocuments()) === count, `${x.status} ${x.body.message}`);
+  let c = await call("GET", `/students/email-check?email=noemail%40gmail.com&leadId=${leadId}`, "Theertha");
+  check("Case 1 — the close dialog's check says so, naming nobody", c.status === 200 && c.body.data?.ok === false && c.body.data?.message === MADE_UP(`Client ${n}`) && !c.body.data?.takenBy,
+    `${c.status} ${JSON.stringify(c.body.data)}`);
+  x = await call("POST", "/students", "Theertha", closeBody(`client${n}.own@test.local`));
+  check("…and with the client's own: closed (201)", x.status === 201, `${x.status} ${x.body.message}`);
+
+  // The correction, and "Send again" of one closed with it before the rule.
+  const v = await closedSale();
+  await sendBack(v.id);
+  let u = await unchanged(v.id, () => call("PUT", `/students/${v.id}/correction`, "Theertha", correction({ name: "Halif", phone: "+971509998800", email: "noemail@gmail.com" })));
+  check("Case 3 — a correction to noemail@gmail.com: 409, nothing changed, nothing sent", u.x.status === 409 && u.x.body.message === MADE_UP("Halif") && u.same, `${u.x.status} ${u.x.body.message}`);
+  const old = await closedSale();
+  await db.collection("students").updateOne({ _id: new Types.ObjectId(old.id) }, { $set: { email: "noemail@gmail.com" } });
+  await sendBack(old.id);
+  u = await unchanged(old.id, () => call("POST", `/students/${old.id}/invoice`, "Theertha"));
+  check("Case 3 — \"Send again\" of a sent-back close with noemail@gmail.com: correct it first; nothing sent",
+    u.x.status === 409 && u.x.body.message === `${MADE_UP(`Client ${n}`)} Correct the enrolment to change it, and it goes again.` && u.same, `${u.x.status} ${u.x.body.message}`);
+
+  // The added email on a close finance refused for want of one.
+  n++;
+  const sl = new Types.ObjectId();
+  await db.collection("leads").insertOne({ _id: sl, name: `No Email ${n}`, phone: `+97155000${String(n).padStart(4, "0")}`, email: "noemail@gmail.com", status: "closed", assignedTo: people.Theertha!.id, payments: [], activityLogs: [] });
+  const st = await Student.create({
+    enrollmentNumber: `STU-${8500 + n}`, name: `No Email ${n}`, phone: `+97155000${String(n).padStart(4, "0")}`, leadId: sl, course: course500._id, team: teamA,
+    assignedTo: people.Theertha!.id, totalFee: 500, paidAmount: 500, pendingAmount: 0, feeStatus: "paid", enrollmentDate: new Date("2026-10-10"),
+    language: "English", paymentMethod: "cash", paymentReceipt: receipt(`made-up-${n}`), payments: [{ ...pay("cash", 500, `made-up-${n}`), paidAt: new Date("2026-10-10") }],
+    hasBonus: false, bonusAmount: 0, academy: "dubai", status: "active",
+  });
+  const sid = String(st._id);
+  await svc.queueFinanceHandover(sid, String(sl));
+  await waitFor(async () => (await FinanceHandover.findOne({ studentId: sid }).lean())?.status === "failed");
+  u = await unchanged(sid, () => call("POST", `/students/${sid}/enrolment/email`, "Theertha", { email: "noemail@gmail.com" }));
+  check("Case 3 — the added email noemail@gmail.com: 409, nothing changed, nothing sent", u.x.status === 409 && u.x.body.message === MADE_UP(`No Email ${n}`) && u.same, `${u.x.status} ${u.x.body.message}`);
+  const mine = await call("GET", "/students/enrolments/mine?limit=100", "Theertha");
+  const row = ((mine.body.data as any[]) ?? []).find((r) => String(r._id) === sid);
+  check("Case 2 — the lead's noemail@gmail.com is never suggested", row && (row.handover?.suggestedEmail ?? "") === "", JSON.stringify(row?.handover));
+  c = await call("GET", `/students/email-check?email=noemail%40gmail.com&studentId=${sid}`, "Theertha");
+  check("…the check by enrolment: the same words", c.body.data?.ok === false && c.body.data?.message === MADE_UP(`No Email ${n}`), JSON.stringify(c.body.data));
+}
 
 server.close();
 finance.close();

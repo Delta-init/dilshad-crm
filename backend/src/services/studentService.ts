@@ -1770,7 +1770,7 @@ export class StudentService {
     if (!holder) return { ok: true };
     return {
       ok: false,
-      takenBy: { name: holder.name, ...(holder.code ? { code: holder.code } : {}), kind: holder.kind },
+      ...(holder.kind === "made_up" ? {} : { takenBy: { name: holder.name, ...(holder.code ? { code: holder.code } : {}), kind: holder.kind } }),
       message: takenMessage(holder, client.name),
     };
   }
