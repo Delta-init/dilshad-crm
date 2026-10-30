@@ -17,6 +17,7 @@
  *   - Case 10: Settings plays its files (2026-10-29) — each file with a signed link that serves it (whole, or a part
  *     of it); tampered or expired links refused; an old "video" that is sound only shown as audio; the status page's
  *     message totals are right.
+ *   - Case 11: none to a student (marked) or a closed lead — no follow-up step, no first reply; others still get them.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -465,6 +466,31 @@ try {
   const totals = Object.fromEntries((r.body.data?.owners as any[] ?? []).map((o) => [o.name, o.messages]));
   const expected = await db.collection("whatsapp_messages").countDocuments({ owner: P("Sally") });
   check("the status page's totals per person are right (Sally's)", r.status === 200 && expected > 0 && totals.Sally === expected, j({ totals, expected }));
+
+  section("Case 11 — nothing automatic to a student, or to a closed lead (2026-10-30)");
+  // Follow-ups: two quiet chats due at the same moment, one of them a student.
+  const t11 = work(Date.now() + 10 * 60_000);
+  await WFS.updateOne({ key: "default" }, { $set: { enabled: true, startedAt: new Date(t11.getTime() - 10 * D), teams: [titans] } });
+  await lead("Plain Lead", "+971 55 300 0001", "Sally", titans);
+  await lead("Student Lead", "+971 55 300 0002", "Sam", titans);
+  await msg("Sally", "971553000001", "out", new Date(t11.getTime() - 5 * H));
+  await msg("Sam", "971553000002", "out", new Date(t11.getTime() - 5 * H));
+  await db.collection("whatsapp_tags").insertOne({ key: "553000002", student: true, byName: "Sam", by: P("Sam"), at: new Date() });
+  const sallyN = outbox.Sally!.length, samN = outbox.Sam!.length;
+  const fu11 = await run(t11);
+  check("follow-ups: the plain lead gets step 1, the student none", outbox.Sally!.length === sallyN + 1 && outbox.Sam!.length === samN, j({ fu11, sally: outbox.Sally!.length - sallyN, sam: outbox.Sam!.length - samN }));
+  const card = await call("GET", `/whatsapp/lead/${(await db.collection("leads").findOne({ name: "Student Lead" }))!._id}`, "Sam");
+  check("…the student's lead card says why", card.body.data?.followup?.state === "student", j(card.body.data?.followup));
+  // First reply: a student, and a closed lead, writing for the first time — none; anyone else still gets it.
+  await db.collection("whatsapp_tags").insertOne({ key: "553000003", student: true, byName: "Sally", by: P("Sally"), at: new Date() });
+  await lead("Closed One", "+971 55 300 0004", "Sally", titans, "closed");
+  await first("Sally", "971553000003", "STU-FIRST", "Hi, it's me (a student)", "Stu");
+  await first("Sally", "971553000004", "CLOSED-FIRST", "Hello again", "Closed");
+  await first("Sally", "971553000005", "NEW-FIRST", "Hello, new here", "Newbie");
+  const fr11 = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  check("first reply: not to the student", (await firsts().findOne({ key: "553000003" }))?.status === "student", j(await firsts().findOne({ key: "553000003" })));
+  check("…not to a closed lead", (await firsts().findOne({ key: "553000004" }))?.status === "ended", j(await firsts().findOne({ key: "553000004" })));
+  check("…the new person still gets it", (await firsts().findOne({ key: "553000005" }))?.status === "sent" && fr11.sent === 1, j(fr11));
 } finally {
   server.close();
   await mongoose.disconnect();

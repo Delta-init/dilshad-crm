@@ -13,6 +13,8 @@ export interface ICallLog {
   agentName:      string | null;
   initiatedBy:    mongoose.Types.ObjectId | null;
   source:         "3cx_journal" | "click_to_call" | "manual";
+  /** A call logged by hand (from a WhatsApp chat, 2026-10-30): what was said, if anything. */
+  note?:          string | null;
   threecxCallId:  string | null;
   qcRating:       number | null;     // 1-5
   qcNotes:        string | null;
@@ -37,6 +39,7 @@ const callLogSchema = new Schema<ICallLog>(
     agentName:      { type: String, default: null },
     initiatedBy:    { type: Schema.Types.ObjectId, ref: "User", default: null },
     source:         { type: String, enum: ["3cx_journal", "click_to_call", "manual"], default: "3cx_journal" },
+    note:           { type: String, default: null, trim: true, maxlength: 500 },
     threecxCallId:  { type: String, default: null },
     qcRating:       { type: Number, min: 1, max: 5, default: null },
     qcNotes:        { type: String, default: null },

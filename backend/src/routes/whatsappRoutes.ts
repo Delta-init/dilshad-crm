@@ -16,6 +16,8 @@ import { WhatsAppLink, WhatsAppMessage } from "../models/WhatsAppMessage.js";
 import { LeadService } from "../services/leadService.js";
 import { phoneKey, phoneKeys } from "../services/whatsapp/leads.js";
 import { canWhatsApp, isSuperAdmin, leadScope, readableOwners, type Viewer } from "../services/whatsapp/access.js";
+import { chatCalls, logCall, setStudent, studentKeys, studentMark } from "../services/whatsapp/chatExtras.js";
+import { CallLog } from "../models/CallLog.js";
 import {
   followupSettings, FollowupError, leadFollowup, listSavedMessages, saveFollowupSettings, sendSavedMessage, setLeadFollowupStopped,
 } from "../services/whatsapp/followups.js";
@@ -242,6 +244,7 @@ router.get("/chats", checkPermission("whatsapp", "view"), async (req: Authentica
     const leads = await leadsBrief(rows.map(leadOf));
     // Their name as saved in the owner's phone, else their own on WhatsApp (whatsapp_contacts).
     const names = await contactNames(owner, rows.map((r) => r.last.key ?? ""));
+    const students = await studentKeys(rows.map((r) => r.last.key ?? ""));
     sendSuccess(res, "Chats", {
       ownerId: owner,
       canSend: owner === req.user!.userId && canWhatsApp(viewer(req), "create") && status(owner).status === "connected",
@@ -254,6 +257,8 @@ router.get("/chats", checkPermission("whatsapp", "view"), async (req: Authentica
           lead,
           last: { body: r.last.body ?? "", at: r.last.at, direction: r.last.direction, media: r.last.media?.type ?? null },
           unread: r.unread, count: r.count,
+          // A student — marked so, or enrolled: no automatic messages (2026-10-30).
+          student: students.get(r.last.key ?? "") ?? null,
         };
       }),
     });
@@ -403,6 +408,67 @@ router.post("/send-saved", checkPermission("whatsapp", "create"), async (req: Au
     const result = await sendSavedMessage(req.user!.userId, chat, id);
     sendSuccess(res, "Sent", { chat, ...result });
   } catch (err) { fail(res, next, err); }
+});
+
+/* ── Beside a chat: student or not, and the calls (2026-10-30) ───────────── */
+
+/** A chat's number's last 9 digits: from its messages, else from the chat itself (a chat with none yet). */
+async function keyOfChat(owner: string, chat: string): Promise<{ key: string; phone: string }> {
+  const last = await WhatsAppMessage.findOne({ owner: new Types.ObjectId(owner), chat }).sort({ at: -1, _id: -1 }).select("key phone").lean<{ key?: string; phone?: string } | null>();
+  const phone = last?.phone || (/^\d{9,15}$/.test(chat) ? chat : "");
+  return { key: last?.key || phoneKey(phone), phone };
+}
+
+/** GET /whatsapp/chat-extras?ownerId=&chat= — whether they are a student, and their calls (3CX, the Call button, logged by hand). */
+router.get("/chat-extras", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const owner = await ownerFor(req, res, req.query.ownerId);
+    if (!owner) return;
+    const chat = str(req.query.chat, 120);
+    if (!chat) { sendError(res, "chat is required", 400); return; }
+    const { key } = await keyOfChat(owner, chat);
+    const mine = owner === req.user!.userId && canWhatsApp(viewer(req), "create");
+    if (!key) { sendSuccess(res, "Chat", { student: { student: false, how: null, byName: "", at: null }, calls: { calls: [], total: 0, logged: 0, answered: 0 }, canEdit: false }); return; }
+    const calls = await chatCalls(key);
+    const superAdmin = isSuperAdmin(req.user!.role ?? null);
+    for (const c of calls.calls) if (c.kind === "logged" && superAdmin) c.canDelete = true;
+    sendSuccess(res, "Chat", { student: await studentMark(key), calls, canEdit: mine });
+  } catch (err) { next(err); }
+});
+
+/** POST /whatsapp/student { chat, student } — mark the person in your chat a student, or not. */
+router.post("/student", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const chat = str(req.body?.chat, 120);
+    if (!chat || typeof req.body?.student !== "boolean") { sendError(res, "chat and student (true/false) are required", 400); return; }
+    const { key } = await keyOfChat(req.user!.userId, chat);
+    if (!key) { sendError(res, "This chat has no number to mark", 400); return; }
+    sendSuccess(res, req.body.student ? "Marked a student" : "Not a student", await setStudent(key, req.body.student, req.user!.userId));
+  } catch (err) { next(err); }
+});
+
+/** POST /whatsapp/calls { chat, answered, note? } — a call to the person in your chat, logged by hand: counts like a call. */
+router.post("/calls", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const chat = str(req.body?.chat, 120);
+    if (!chat || typeof req.body?.answered !== "boolean") { sendError(res, "chat and answered (true/false) are required", 400); return; }
+    const { key, phone } = await keyOfChat(req.user!.userId, chat);
+    if (!key) { sendError(res, "This chat has no number to log a call to", 400); return; }
+    const doc = await logCall(key, phone, req.user!.userId, req.body.answered, str(req.body?.note, 300));
+    sendSuccess(res, "Call logged", { id: String(doc._id) }, 201);
+  } catch (err) { next(err); }
+});
+
+/** DELETE /whatsapp/calls/:id — a call logged by hand by mistake, taken off. Super Admin. */
+router.delete("/calls/:id", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!isSuperAdmin(req.user!.role ?? null)) { sendError(res, "Only a Super Admin can take a logged call off", 403); return; }
+    const id = str(req.params.id, 40);
+    if (!isId(id)) { sendError(res, "Call not found", 404); return; }
+    const r = await CallLog.deleteOne({ _id: new Types.ObjectId(id), source: "manual" });
+    if (!r.deletedCount) { sendError(res, "No call logged by hand with that id", 404); return; }
+    sendSuccess(res, "Taken off", { id });
+  } catch (err) { next(err); }
 });
 
 /* ── A chat that is no lead's ───────────────────────────────────────────── */

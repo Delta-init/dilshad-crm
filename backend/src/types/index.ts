@@ -387,7 +387,8 @@ export type ActivityAction =
   | "inactive_reassigned"
   | "repeat_enquiry"
   | "repeat_verified"
-  | "whatsapp_followup";
+  | "whatsapp_followup"
+  | "call_logged";
 
 export interface ILeadNote {
   _id: Types.ObjectId;

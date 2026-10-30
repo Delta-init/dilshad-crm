@@ -1,3 +1,4 @@
+import { CallLog } from "../models/CallLog.js";
 import { Types, type PipelineStage } from "mongoose";
 import { LeadCall, type ILeadCall } from "../models/LeadCall.js";
 import { Lead } from "../models/Lead.js";
@@ -294,7 +295,9 @@ export class LeadCallService {
     if (!scope.everyone && !(await leadInScope(scope, lead))) filter.user = scope.me;
     const [g] = await LeadCall.aggregate<Record<string, number>>([{ $match: filter }, { $group: { _id: null, ...statGroup } }] as PipelineStage[]);
     const docs = await LeadCall.find(filter).sort({ startedAt: -1, _id: -1 }).limit(500).populate("lead", "name phone").lean<CallDoc[]>();
-    return { calls: docs.map(row), stats: statsOf(g), threecx: await threecxStatus(viewer) };
+    // Calls logged by hand from a WhatsApp chat (2026-10-30) — counted beside 3CX's, not mixed into them.
+    const logged = await CallLog.countDocuments({ leadId: lead, source: "manual" });
+    return { calls: docs.map(row), stats: statsOf(g), logged, threecx: await threecxStatus(viewer) };
   }
 }
 

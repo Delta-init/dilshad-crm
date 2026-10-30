@@ -45,6 +45,7 @@ const activityLogSchema = new Schema<IActivityLog>(
         "repeat_enquiry",
         "repeat_verified",
         "whatsapp_followup",
+        "call_logged",
       ],
     },
     description: {

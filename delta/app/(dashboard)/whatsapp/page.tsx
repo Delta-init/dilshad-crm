@@ -20,6 +20,7 @@ import {
 import { RecentFollowups } from "@/components/whatsapp/RecentFollowups";
 import { FollowupsPanel } from "@/components/whatsapp/FollowupsPanel";
 import { ChatLeadStatus } from "@/components/whatsapp/ChatLeadStatus";
+import { ChatTools, StudentBadge } from "@/components/whatsapp/ChatTools";
 import { ForwardDialog, SavedMessagesButton } from "@/components/whatsapp/ForwardAndSaved";
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -342,7 +343,7 @@ function WhatsAppPage() {
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">{(c.name || "?").replace(/^\+/, "").charAt(0).toUpperCase()}</div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-medium">{c.name}</p>
+                        <p className="flex min-w-0 items-center gap-1 truncate text-sm font-medium"><span className="truncate">{c.name}</span><StudentBadge how={c.student} /></p>
                         <span className={cn("shrink-0 text-[11px]", c.unread ? "font-semibold text-emerald-500" : "text-muted-foreground")}>{shortTime(c.last?.at)}</span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
@@ -375,6 +376,8 @@ function WhatsAppPage() {
                         {fmtPhone(chat.phone)}{chat.whatsappName && chat.whatsappName !== chat.name ? ` · on WhatsApp: ${chat.whatsappName}` : ""}
                       </p>
                     </div>
+                    {/* Student or not, log a call, their calls (2026-10-30) */}
+                    <ChatTools ownerId={viewing} chat={chat.chat} />
                     {/* The lead's status, from here (as on the lead page) */}
                     {chat.lead && (mine || !st.canLink) && <ChatLeadStatus lead={chat.lead} />}
                     {chat.lead && (

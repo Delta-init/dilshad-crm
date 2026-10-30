@@ -18,6 +18,7 @@ function FollowupLine({ leadId, f }: { leadId: string; f?: WAFollowup }) {
   if (!f?.on) return null;
   const text: Record<WAFollowup["state"], string> = {
     off: "", ended: "Off — the lead is closed, lost or repeated",
+    student: "Off — a student (marked so in WhatsApp, or enrolled)",
     no_chat: "Starts once their salesperson messages them on WhatsApp",
     replied: "They answered — none due",
     before: "None for this chat (it went quiet before follow-ups were switched on)",

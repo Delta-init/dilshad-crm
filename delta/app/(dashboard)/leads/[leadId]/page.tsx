@@ -1,5 +1,6 @@
 "use client";
 
+import { useLeadCallLog } from "@/hooks/useCalls";
 import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -476,6 +477,8 @@ export default function LeadDetailPage() {
     }
   }
   const leadId = params.leadId as string;
+  // For the count of calls logged by hand (the Calls panel reads the same, so it is fetched once).
+  const { data: leadCalls } = useLeadCallLog(leadId);
   const { user: authUser, hasPermission } = useAuthStore();
 
   const [editOpen, setEditOpen] = useState(false);
@@ -839,6 +842,10 @@ export default function LeadDetailPage() {
                       </div>
                     ))}
                   </div>
+                  {/* Calls logged by hand from a WhatsApp chat (2026-10-30) */}
+                  {(leadCalls?.logged ?? 0) > 0 && (
+                    <p className="mt-2 text-center text-[11px] text-muted-foreground">+ {leadCalls!.logged} logged by hand</p>
+                  )}
                 </div>
 
                 {/* Quick Actions */}

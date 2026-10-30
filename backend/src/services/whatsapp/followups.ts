@@ -7,6 +7,7 @@ import { User } from "../../models/User.js";
 import { WhatsAppLink, WhatsAppMessage } from "../../models/WhatsAppMessage.js";
 import { WhatsAppFollowupSettings, type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
+import { isStudentKey, studentKeys } from "./chatExtras.js";
 import { phoneKeys } from "./leads.js";
 import { connectedOwnerIds, contactNames, isAudioOnlyMp4, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled, WhatsAppError } from "./service.js";
 
@@ -209,7 +210,7 @@ export const fillText = (text: string, leadName: unknown, ownerName: unknown) =>
 
 export type LeadFollowup = {
   on: boolean;                 // switched on for this lead's team
-  state: "off" | "ended" | "no_chat" | ChainState["state"];
+  state: "off" | "ended" | "student" | "no_chat" | ChainState["state"];
   step?: number; of?: number; nextAt?: string; sent?: number; byName?: string;
   ownerName?: string; linked?: boolean;
 };
@@ -222,6 +223,8 @@ export async function leadFollowup(leadId: string): Promise<LeadFollowup> {
   const on = settings.enabled && !!lead.team && settings.teams.includes(String(lead.team));
   if (!on) return { on, state: "off" };
   if (ENDED.has(String(lead.status))) return { on, state: "ended" };
+  // A student — marked so in a chat, or enrolled — gets none (2026-10-30).
+  if ((await studentKeys(phoneKeys(lead.phone))).size) return { on, state: "student" };
   if (!lead.assignedTo) return { on, state: "no_chat" };
   const owner = await User.findById(lead.assignedTo).select("name").lean<{ name?: string } | null>();
   const linked = (await WhatsAppLink.find({ lead: new Types.ObjectId(leadId) }).select("key").lean()).map((l) => l.key).filter((k) => /^\d{9}$/.test(k));
@@ -274,7 +277,10 @@ export async function runFollowups(now = new Date()): Promise<RunResult> {
       { $group: { _id: { owner: "$owner", key: "$key" }, direction: { $first: "$direction" } } },
       { $match: { direction: "out" } },
     ]);
-    const live = lasts.filter((c) => isConnected(String(c._id.owner)));
+    const connectedLive = lasts.filter((c) => isConnected(String(c._id.owner)));
+    // Never to a student — marked so in a chat, or enrolled (2026-10-30).
+    const students = await studentKeys(connectedLive.map((c) => c._id.key));
+    const live = connectedLive.filter((c) => !students.has(c._id.key));
     if (!live.length) return { ok: true, sent: 0 };
 
     const byKey = await leadsByKey();
@@ -389,6 +395,10 @@ export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Mat
       if (!onTeam) { await close("not_on_team"); return; }
       const answered = await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at } });
       if (answered) { await close("answered"); return; }
+      // Not to a student, nor to a lead already closed, lost or a repeat (2026-10-30).
+      if (await isStudentKey(d.key)) { await close("student"); return; }
+      const leadNow = (await leadsByKey()).get(d.key);
+      if (leadNow && ENDED.has(String((await Lead.findById(leadNow).select("status").lean<{ status?: string } | null>())?.status))) { await close("ended"); return; }
       const owner = String(d.owner);
       if (!isConnected(owner)) return;   // unlinked a moment ago: looked at again next time
       // Taken first: another process (or run) doesn't send it twice.

@@ -27,13 +27,15 @@ export interface WALead { id: string; name: string; status: string; owner: strin
 export interface WAChat {
   chat: string; phone: string; name: string; whatsappName: string; lead: WALead | null;
   last: { body: string; at: string; direction: "in" | "out"; media: string | null }; unread: number; count: number;
+  /** A student — marked so, or enrolled (2026-10-30): no automatic messages. */
+  student?: "marked" | "enrolled" | null;
 }
 export interface WAOwner { id: string; name: string; team: string; status: WAStatus; phone: string; messages: number }
 export interface WAStatusAnswer { enabled: boolean; canLink: boolean; me: { id: string; name: string; status: WAStatus; phone: string; qr: string }; owners: WAOwner[] }
 /** Where a lead's automatic follow-ups stand (api services/whatsapp/followups.ts). */
 export interface WAFollowup {
   on: boolean;
-  state: "off" | "ended" | "no_chat" | "replied" | "before" | "stopped" | "done" | "waiting";
+  state: "off" | "ended" | "student" | "no_chat" | "replied" | "before" | "stopped" | "done" | "waiting";
   step?: number; of?: number; nextAt?: string; sent?: number; byName?: string; ownerName?: string; linked?: boolean;
 }
 /** `url`: to look at or listen to it (Settings only, a short-lived link). */
@@ -190,6 +192,35 @@ export function useWhatsAppSendSaved() {
     mutationFn: async (v: { chat: string; id: string }) => data<{ chat: string; parts: number }>(await api.post("/whatsapp/send-saved", v)),
     onSuccess: refresh,
   });
+}
+
+/* ── Beside a chat: student or not, and the calls (2026-10-30) ── */
+
+export interface WAChatCall {
+  id: string; kind: "3cx" | "logged" | "click"; at: string; direction: "in" | "out"; answered: boolean; status: string;
+  talkSeconds: number; by: string; note: string; recordings: number; canDelete?: boolean;
+}
+export interface WAChatExtras {
+  student: { student: boolean; how: "marked" | "enrolled" | null; byName: string; at: string | null };
+  calls: { calls: WAChatCall[]; total: number; logged: number; answered: number };
+  canEdit: boolean;
+}
+export function useWhatsAppChatExtras(ownerId: string, chat: string) {
+  return useQuery({
+    queryKey: ["whatsapp", "extras", ownerId, chat],
+    queryFn: async () => data<WAChatExtras>(await api.get("/whatsapp/chat-extras", { params: { ownerId, chat } })),
+    enabled: !!ownerId && !!chat,
+    refetchInterval: 30_000,
+  });
+}
+export function useWhatsAppChatTools() {
+  const refresh = useRefresh();
+  const later = () => { void refresh(); };
+  return {
+    student: useMutation({ mutationFn: async (v: { chat: string; student: boolean }) => data(await api.post("/whatsapp/student", v)), onSuccess: later }),
+    logCall: useMutation({ mutationFn: async (v: { chat: string; answered: boolean; note?: string }) => data(await api.post("/whatsapp/calls", v)), onSuccess: later }),
+    deleteCall: useMutation({ mutationFn: async (id: string) => data(await api.delete(`/whatsapp/calls/${id}`)), onSuccess: later }),
+  };
 }
 
 /* ── Automatic follow-ups ── */

@@ -249,7 +249,8 @@ export const useLeadCallLog = (leadId: string) =>
   useQuery({
     queryKey: ["calls", "log", "lead", leadId],
     queryFn: async () => {
-      const res = await api.get<ApiResponse<{ calls: ThreecxCall[]; stats: CallStats; threecx: ThreecxStatus }>>(`/calls/log/lead/${leadId}`);
+      // logged: calls logged by hand from a WhatsApp chat (2026-10-30), beside 3CX's.
+      const res = await api.get<ApiResponse<{ calls: ThreecxCall[]; stats: CallStats; logged?: number; threecx: ThreecxStatus }>>(`/calls/log/lead/${leadId}`);
       return res.data.data!;
     },
     enabled: !!leadId,

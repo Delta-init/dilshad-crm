@@ -159,3 +159,27 @@ whatsAppContactSchema.index({ owner: 1, key: 1 }, { unique: true });
 export const WhatsAppContact = mongoose.model<IWhatsAppContact>("WhatsAppContact", whatsAppContactSchema);
 /** The best name a contact has: as saved in the phone, else their own WhatsApp name, else a business's. */
 export const contactName = (c?: Pick<IWhatsAppContact, "name" | "notify" | "verifiedName"> | null) => String(c?.name || c?.notify || c?.verifiedName || "").trim();
+
+/*
+ * A number marked a student (2026-10-30): by its last 9 digits, the same whoever's WhatsApp they write to. Students
+ * get no automatic first reply or follow-ups; the chat shows "Student".
+ */
+export interface IWhatsAppTag {
+  _id: Types.ObjectId;
+  key: string;
+  student: boolean;
+  byName: string;
+  by: Types.ObjectId | null;
+  at: Date;
+}
+const whatsAppTagSchema = new Schema<IWhatsAppTag>(
+  {
+    key: { type: String, required: true, unique: true },
+    student: { type: Boolean, default: false },
+    byName: { type: String, default: "" },
+    by: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    at: { type: Date, default: () => new Date() },
+  },
+  { versionKey: false, collection: "whatsapp_tags" },
+);
+export const WhatsAppTag = mongoose.model<IWhatsAppTag>("WhatsAppTag", whatsAppTagSchema);

@@ -28,6 +28,8 @@
  *     whole first reply at once, in order.
  *   - Case 16: sending quickly — a chat going on isn't checked with WhatsApp again; a new number once; not on WhatsApp
  *     still refused; a lead added meanwhile still found.
+ *   - Case 17: beside a chat — Student (marked, or enrolled), a call logged by hand (counted, on the lead, in its
+ *     calls and the lead page's count), taken off by a Super Admin only.
  *   - Case 15: "Load older messages for all chats" — the phone asked for each chat, newest first, one at a time in
  *     the background; one run at a time; not linked, or no chats — refused.
  *
@@ -523,6 +525,51 @@ try {
   r = await call("POST", "/whatsapp/send", "Sam", { chat: "971507771234", text: "Hello Late Comer" });
   const lateMsg = await WhatsAppMessage.findOne({ owner: P("Sam"), body: "Hello Late Comer" }).lean();
   check("a lead added meanwhile (list told to read again): the message is under it", String(lateMsg?.lead) === String(ml.insertedId), j(lateMsg?.lead));
+  wa.attachSocketForCheck(String(P("Sam")), null);
+
+  section("Case 17 — student or not, and the calls, beside a chat");
+  wa.attachSocketForCheck(String(P("Sam")), fakeSock([]), "971500000001");
+  let ex = await call("GET", "/whatsapp/chat-extras?chat=971501234567", "Sam");
+  check("a chat's extras: not a student, its calls, Sam may edit", ex.status === 200 && ex.body.data?.student?.student === false && ex.body.data?.canEdit === true && typeof ex.body.data?.calls?.total === "number", j(ex.body));
+  const callsBefore = ex.body.data.calls.total;
+  r = await call("POST", "/whatsapp/student", "Sam", { chat: "971501234567", student: true });
+  check("marked a student", r.status === 200 && r.body.data?.student === true && r.body.data?.how === "marked" && r.body.data?.byName === "Sam", j(r.body));
+  let lst = (await chatsOf("Sam")).body.data?.chats?.find((x: any) => x.chat === "971501234567");
+  check("…the chat list says so", lst?.student === "marked", j(lst?.student));
+  ex = await call("GET", "/whatsapp/chat-extras?chat=971501234567", "Lina");
+  check("…by number: the same person in anyone's WhatsApp is a student (her own chat with them, hers to edit)", ex.status === 200 && ex.body.data?.student?.student === true && ex.body.data?.canEdit === true, j(ex.body));
+  ex = await call("GET", `/whatsapp/chat-extras?chat=971501234567&ownerId=${P("Sam")}`, "Lina");
+  check("…on Sam's chat, read only", ex.status === 200 && ex.body.data?.student?.student === true && ex.body.data?.canEdit === false, j(ex.body));
+  r = await call("POST", "/whatsapp/student", "Sam", { chat: "971501234567", student: false });
+  check("…and unmarked", r.status === 200 && r.body.data?.student === false);
+  r = await call("POST", "/whatsapp/student", "Sam", { chat: "971501234567", student: "yes" });
+  check("bad input: refused", r.status === 400);
+  // Enrolled: a student whatever the mark says.
+  await db.collection("students").insertOne({ leadId: new Types.ObjectId(asha), enrollmentNumber: "STU-0001", name: "Asha" });
+  ex = await call("GET", "/whatsapp/chat-extras?chat=971501234567", "Sam");
+  check("a lead with an enrolment: a student, \"enrolled\"", ex.body.data?.student?.how === "enrolled", j(ex.body.data?.student));
+  await db.collection("students").deleteMany({ enrollmentNumber: "STU-0001" });
+  // A call logged by hand.
+  r = await call("POST", "/whatsapp/calls", "Sam", { chat: "971501234567", answered: true, note: "Talked about the AI course" });
+  const logged = await db.collection("calllogs").findOne({ source: "manual", note: "Talked about the AI course" });
+  check("a call logged by hand: an outgoing call by Sam, on Asha's lead, answered", r.status === 201 && logged?.callDirection === "outbound" && logged?.callType === "Outbound"
+    && String(logged?.initiatedBy) === String(P("Sam")) && String(logged?.leadId) === asha, j(logged));
+  const ashaLead = await db.collection("leads").findOne({ _id: new Types.ObjectId(asha) });
+  check("…the lead's activity says so", (ashaLead?.activityLogs ?? []).some((l: any) => l.action === "call_logged" && /answered: Talked about/.test(l.description)), j(ashaLead?.activityLogs?.at(-1)));
+  r = await call("POST", "/whatsapp/calls", "Sam", { chat: "971501234567", answered: false });
+  ex = await call("GET", "/whatsapp/chat-extras?chat=971501234567", "Sam");
+  check("…both in the chat's calls, newest first, counted", ex.body.data?.calls?.total === callsBefore + 2 && ex.body.data?.calls?.logged === 2 && ex.body.data?.calls?.calls?.[0]?.answered === false && ex.body.data?.calls?.calls?.[0]?.kind === "logged", j(ex.body.data?.calls));
+  const leadLog = await call("GET", `/calls/log/lead/${asha}`, "Root");
+  check("the lead page's call count has them: + 2 logged by hand", leadLog.status === 200 && leadLog.body.data?.logged === 2, j({ s: leadLog.status, logged: leadLog.body.data?.logged }));
+  r = await call("POST", "/whatsapp/calls", "Sam", { chat: "971501234567" });
+  check("bad input (answered missing): refused", r.status === 400);
+  r = await call("POST", "/whatsapp/calls", "Nora", { chat: "971501234567", answered: true });
+  check("no WhatsApp access: refused", r.status === 403);
+  const lid = String(logged?._id);
+  r = await call("DELETE", `/whatsapp/calls/${lid}`, "Sam");
+  check("taking a logged call off: Super Admin only", r.status === 403);
+  r = await call("DELETE", `/whatsapp/calls/${lid}`, "Root");
+  check("…the Super Admin can", r.status === 200 && !(await db.collection("calllogs").findOne({ _id: logged!._id })));
   wa.attachSocketForCheck(String(P("Sam")), null);
 } finally {
   server.close();
