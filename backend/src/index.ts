@@ -28,7 +28,9 @@ const app = express();
 app.use(helmet());
 app.use(
   cors({
-    origin: [env.CLIENT_URL, "http://localhost:3001", "http://localhost:19006"],
+    // The website calls the API straight, not through its own /api/v1 (2026-10-30: Vercel passing calls on dropped
+    // about one in four, a 502 after 30 s) — so it is allowed here whatever CLIENT_URL says.
+    origin: [env.CLIENT_URL, "https://remote.deltainstitutions.com", "http://localhost:3001", "http://localhost:19006"],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
