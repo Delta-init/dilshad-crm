@@ -7,6 +7,7 @@ import { Course } from "../models/Course.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
 import { fetchStatusesByOrg, orgOfHandover } from "./financeOrgs.js";
+import type { BalanceFields, EnrolmentStatus } from "./financeClient.js";
 import { stepsOf, allDone, waitingOn } from "./enrolmentSteps.js";
 import { slabsFor } from "./salarySlabs.js";
 import { env } from "../config/env.js";
@@ -40,6 +41,11 @@ import type {
  * (UAE time), for sales closed from 1 October 2026 on. Until then the sale is
  * "progress", saying it waits for finance (or was sent back). A sale whose
  * invoice finance voids is reversed.
+ *
+ * And paid in full (the user, 2026-10-30: "when partial payment, the commission
+ * will never get to the salesperson until it records full payment"): approved
+ * but part paid, a sale waits, saying what is owed, and once finance has it
+ * paid in full it counts in that month — not the month it was closed.
  */
 
 /**
@@ -91,6 +97,33 @@ export function feeOf(st: { totalMinor?: number; currency?: string } | null | un
   const inAed = (st?.currency || "AED").toUpperCase() === "AED";
   if (st && inAed && typeof st.totalMinor === "number" && st.totalMinor > 0) return st.totalMinor / 100;
   return typeof studentFee === "number" && Number.isFinite(studentFee) && studentFee > 0 ? studentFee : 0;
+}
+
+/** What a sale's invoice still owes, as finance has it; null once it is paid in full. */
+export interface Owed { amount: number; total: number; currency: string }
+
+/**
+ * Paid in full first (the user, 2026-10-30: "when partial payment, the commission will never get to the salesperson
+ * until it records full payment"): what finance says the invoice still owes, or null when nothing is.
+ */
+export function owedOf(st: Pick<EnrolmentStatus, "status" | "currency" | "totalMinor" | "balanceMinor">): Owed | null {
+  if (st.status === "paid" || !(Number(st.balanceMinor) > 0)) return null;
+  return { amount: st.balanceMinor / 100, total: (Number(st.totalMinor) || 0) / 100, currency: (st.currency || "AED").toUpperCase() };
+}
+
+const figure = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+export const owedReason = (o: Owed) => `Waiting for full payment — ${o.currency} ${figure(o.amount)} of ${figure(o.total)} still owed`;
+
+/**
+ * When a sale that owed was paid in full — its month is that one's ("that month only he will get the commission"):
+ * the later of its last payment's day and finance's approval of its last balance payment, never before the close;
+ * now, when finance gives neither.
+ */
+export function paidInFullAt(st: BalanceFields, saleDate: Date): Date {
+  let latest = 0;
+  for (const p of st.payments ?? []) latest = Math.max(latest, Date.parse(p.paidOn) || 0);
+  for (const b of st.balancePayments ?? []) if (b.status === "approved" && b.decidedAt) latest = Math.max(latest, Date.parse(b.decidedAt) || 0);
+  return new Date(latest ? Math.max(latest, saleDate.getTime()) : Date.now());
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -312,7 +345,9 @@ type StudentLite = {
 /**
  * Every sale closed since COUNT_FROM, followed until finance approves it (its
  * first step, enrolmentSteps.ts — since 2026-10-26 the only one commission waits
- * for). Until then it is "progress", saying it waits for finance; once approved,
+ * for). Until then it is "progress", saying it waits for finance; approved but
+ * part paid, it waits for full payment and then counts in the month it was paid
+ * in full (2026-10-30); once approved and paid,
  * who earns what is decided with the plan of that day — counted, held (waiting)
  * or excluded — and never redone by this (`stepsDoneAt`: when that was). A sale
  * counted before `stepsDoneAt` existed is looked at once more and keeps counting.
@@ -402,6 +437,23 @@ export async function trackSales(config: CommissionConfig, names: Names): Promis
         continue;
       }
 
+      // Approved but part paid: it waits for its last balance payment (2026-10-30).
+      const owed = owedOf(st);
+      if (owed) {
+        const reason = owedReason(owed);
+        if (sale?.state === "progress" && sale.reason === reason && sale.fee === base.fee) continue;
+        await CommissionSale.updateOne(
+          { student: student._id },
+          { $set: { ...base, state: "progress", reason, lines: [], plan: planOf(course), owed }, $unset: { countedAt: "", stepsDoneAt: "", team: "", teamName: "" } },
+          { upsert: true },
+        );
+        changed++;
+        continue;
+      }
+      // Paid in full since: counted in the month that happened, not the month it was closed.
+      // The status answer carries the invoice's payments too (BalanceFields).
+      const fullAt = sale?.owed ? paidInFullAt(st as EnrolmentStatus & BalanceFields, saleDate) : null;
+
       // Finance approved: who earns what, at the plan of today.
       const plan = planOf(course);
       const resolved = await resolveSale({ closer: student.assignedTo, saleTeam: student.team, plan }, config, names);
@@ -410,9 +462,11 @@ export async function trackSales(config: CommissionConfig, names: Names): Promis
         {
           $set: {
             ...base, ...resolved, plan, stepsDoneAt: new Date(),
+            ...(fullAt ? { paidInFullAt: fullAt, month: uaeMonthOf(fullAt) } : {}),
             ...(resolved.state === "counted" ? { countedAt: new Date() } : {}),
             ...(base.approvedAt ? {} : { approvedAt: new Date() }),
           },
+          $unset: { owed: "" },
         },
         { upsert: true },
       );
@@ -739,6 +793,7 @@ export class CommissionService {
       teamName: s.teamName,
       saleDate: s.saleDate,
       approvedAt: s.approvedAt,
+      paidInFullAt: s.paidInFullAt,
       state: s.state,
       reason: s.reason,
       lines: visible(s).map((l) => ({ role: l.role, user: String(l.user), userName: l.userName, amount: l.amount, note: l.note ?? "" })),

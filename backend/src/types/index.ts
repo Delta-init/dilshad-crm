@@ -324,6 +324,10 @@ export interface ICommissionSale extends Document {
   reason: string;
   lines: ICommissionLine[];
   countedAt?: Date;
+  /** Approved but part paid: what its invoice still owes while it waits for full payment. */
+  owed?: { amount: number; total: number; currency: string };
+  /** A sale that owed: when it was paid in full — `month` is then that one's. */
+  paidInFullAt?: Date;
   reversedAt?: Date;
   createdAt: Date;
   updatedAt: Date;

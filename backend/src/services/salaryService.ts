@@ -91,7 +91,7 @@ type TeamLite = { _id: Types.ObjectId; name: string; status?: string; leaders?: 
 /** Every sale closed in the month and not voided, as the slabs count it. */
 async function monthFacts(month: string, activeTeams: TeamLite[]): Promise<Fact[]> {
   const sales = await CommissionSale.find({ month, state: { $ne: "reversed" } })
-    .select("student closer team state lines fee")
+    .select("student closer team state lines fee owed")
     .lean();
   if (!sales.length) return [];
   const ids = sales.map((s) => s.student);
@@ -121,7 +121,8 @@ async function monthFacts(month: string, activeTeams: TeamLite[]): Promise<Fact[
       team,
       fee: typeof s.fee === "number" ? s.fee : feeOf(null, student?.totalFee),
       // Counted and held sales were decided after finance approved them.
-      approved: s.state === "counted" || s.state === "waiting" || approvedInFinance.has(String(s.student)),
+      // A part-paid one counts in the month it is paid in full, not before (2026-10-30).
+      approved: !s.owed && (s.state === "counted" || s.state === "waiting" || approvedInFinance.has(String(s.student))),
       state: s.state,
       lines: s.state === "counted" ? s.lines.map((l) => ({ user: idOf(l.user), amount: l.amount })) : [],
     };

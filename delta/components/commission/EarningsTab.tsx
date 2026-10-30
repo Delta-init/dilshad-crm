@@ -179,6 +179,7 @@ function SaleRow({ sale: s, index }: { sale: CommissionSale; index: number }) {
           <p className="mt-0.5 text-xs text-muted-foreground">
             {s.courseName || "No course"} · closed by {s.closerName || "nobody"}
             {s.teamName ? ` · ${s.teamName}` : ""} · {uaeDate(s.saleDate)}
+            {s.paidInFullAt ? ` · paid in full ${uaeDate(s.paidInFullAt)}` : ""}
             {s.invoiceNumber ? ` · ${s.invoiceNumber}` : ""}
           </p>
           {s.state !== "counted" && s.reason && (

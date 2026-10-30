@@ -73,7 +73,7 @@ export function CommissionPreview({ courseId, teamId, closerId }: CommissionPrev
               </p>
             )}
             <p className="mt-0.5 text-[10px] text-muted-foreground">
-              Counted once finance approves the sale.
+              Counted once finance approves the sale and it&apos;s paid in full.
             </p>
           </div>
         </div>

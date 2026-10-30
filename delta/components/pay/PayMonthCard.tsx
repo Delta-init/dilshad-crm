@@ -109,14 +109,14 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
             <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
               <Landmark className="mt-0.5 h-3 w-3 shrink-0" />
               {row.awaitingFinance.count} {plural(row.awaitingFinance.count, "sale", "sales")} ({aed(row.awaitingFinance.value)}) waiting for
-              finance to approve — {plural(row.awaitingFinance.count, "it counts", "they count")} toward the target once approved.
+              finance to approve or for full payment — {plural(row.awaitingFinance.count, "it counts", "they count")} toward the target once approved and paid in full.
             </p>
           )}
           {row.commission.notCountedYet > 0 && (
             <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
               <Hourglass className="mt-0.5 h-3 w-3 shrink-0" />
               {row.commission.notCountedYet} {plural(row.commission.notCountedYet, "sale is", "sales are")} waiting for finance&apos;s
-              approval — the commission is added once {plural(row.commission.notCountedYet, "it's", "they're")} approved.
+              approval or full payment — the commission is added once {plural(row.commission.notCountedYet, "it's", "they're")} approved and paid in full.
             </p>
           )}
         </div>

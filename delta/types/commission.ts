@@ -59,6 +59,8 @@ export interface CommissionPlanView {
     teamName: string;
     saleDate: string;
     approvedAt: string;
+    /** A part-paid sale: when finance had it paid in full — it counts in that month. */
+    paidInFullAt?: string;
     reason: string;
   }[];
   /** Everyone, for the pickers — Super Admins only. */
@@ -160,6 +162,8 @@ export interface CommissionSale {
   teamName: string;
   saleDate: string;
   approvedAt: string;
+  /** A part-paid sale: when finance had it paid in full — it counts in that month. */
+  paidInFullAt?: string;
   state: CommissionSaleState;
   reason: string;
   /** Only the lines the viewer may see. */

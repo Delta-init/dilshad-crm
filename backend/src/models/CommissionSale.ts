@@ -65,6 +65,10 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
     lines: { type: [lineSchema], default: [] },
     countedAt: { type: Date },
     reversedAt: { type: Date },
+    /** Approved but part paid: what its invoice still owes while it waits (2026-10-30). */
+    owed: { type: new Schema({ amount: Number, total: Number, currency: String }, { _id: false }), default: undefined },
+    /** A sale that owed: when it was paid in full — `month` is then that one's. */
+    paidInFullAt: { type: Date },
   },
   { timestamps: true, versionKey: false, collection: "commissionsales" },
 );
