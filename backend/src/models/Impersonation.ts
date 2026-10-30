@@ -18,6 +18,11 @@ const impersonationSchema = new Schema<IImpersonation>(
     ip:          { type: String, default: "" },
     userAgent:   { type: String, default: "", maxlength: 500 },
     device:      { type: String, default: "" },
+    /** What the Super Admin did while acting as them (2026-10-30) — the latest 500. */
+    actions: {
+      type: [{ _id: false, method: String, path: String, status: Number, at: Date }],
+      default: [],
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false }, versionKey: false }
 );

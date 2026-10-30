@@ -906,6 +906,8 @@ export interface IImpersonation {
   ip: string;
   userAgent: string;
   device: string;
+  /** What the Super Admin did while acting as them (2026-10-30). */
+  actions?: { method: string; path: string; status: number; at: Date }[];
   createdAt: Date;
 }
 

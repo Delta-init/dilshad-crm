@@ -362,7 +362,7 @@ export default function UserDetailPage() {
                       variant="outline"
                       size="sm"
                       className="gap-1.5 border-amber-500/40 text-amber-700 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-300"
-                      title={`View as ${user.name} — 30 minutes, view only`}
+                      title={`View as ${user.name} — 30 minutes, acting as them`}
                       disabled={impersonate.isPending}
                       onClick={() => impersonate.mutate(user._id)}
                     >

@@ -14,7 +14,7 @@ function timeLeft(ms: number): string {
 
 /**
  * The bar across the top while a super admin views the CRM as someone else:
- * who, that it is view only, the time left, and the way back. When the time
+ * who, that changes are made as them, the time left, and the way back. When the time
  * is up it takes them back on its own.
  */
 export function ImpersonationBanner() {
@@ -55,7 +55,8 @@ export function ImpersonationBanner() {
           Viewing as <strong className="font-semibold">{info.name}</strong>
           <span className="hidden text-amber-900/70 dark:text-amber-100/70 sm:inline"> ({info.email})</span>
         </span>
-        <span className="rounded-md bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium">View only</span>
+        {/* Not view only since 2026-10-30: what is done here is done as them, and recorded as done by you */}
+        <span className="rounded-md bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium" title="Changes are made as them — and recorded as made by you using View as">Acting as them</span>
         <span className="text-xs tabular-nums text-amber-900/70 dark:text-amber-100/70">
           {timeLeft(new Date(info.endsAt).getTime() - now)} left
         </span>

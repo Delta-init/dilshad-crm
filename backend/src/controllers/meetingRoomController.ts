@@ -13,7 +13,6 @@ import { sendError, sendSuccess } from "../utils/response.js";
  * person in the HRMS's own words and status; the HRMS out of reach is a 503.
  */
 
-const VIEW_ONLY = "View only: you are viewing the CRM as someone else. Go back to your own account to make changes.";
 
 /** The signed-in person as the database has them — their email and name, never the request's. */
 async function signedInPerson(req: AuthenticatedRequest): Promise<{ email: string; name: string } | null> {
@@ -35,8 +34,8 @@ export async function meetingRoomsDay(req: AuthenticatedRequest, res: Response, 
     const me = await signedInPerson(req);
     if (!me) { sendError(res, "Your account has no email to book rooms with", 400); return; }
     const data = await roomsDay(q.data.date ?? dubaiToday(), me.email);
-    const viewOnly = !!req.user!.impersonatedBy;
-    sendSuccess(res, "Meeting rooms", { ...data, you: { superAdmin: !viewOnly && isSuperAdmin(req.user!.role), viewOnly } });
+    // Viewing as someone books and cancels as them (2026-10-30) — no longer view only.
+    sendSuccess(res, "Meeting rooms", { ...data, you: { superAdmin: !req.user!.impersonatedBy && isSuperAdmin(req.user!.role), viewOnly: false } });
   } catch (err) {
     fail(res, next, err);
   }
@@ -45,7 +44,6 @@ export async function meetingRoomsDay(req: AuthenticatedRequest, res: Response, 
 // POST /meeting-rooms/bookings { roomId, start, end, title }
 export async function bookMeetingRoom(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    if (req.user!.impersonatedBy) { sendError(res, VIEW_ONLY, 403); return; }
     const b = meetingRoomBookingBody.safeParse(req.body ?? {});
     if (!b.success) { sendError(res, b.error.issues[0]?.message ?? "Check the booking", 400); return; }
     const me = await signedInPerson(req);
@@ -60,7 +58,6 @@ export async function bookMeetingRoom(req: AuthenticatedRequest, res: Response, 
 // DELETE /meeting-rooms/bookings/:id
 export async function cancelMeetingRoomBooking(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    if (req.user!.impersonatedBy) { sendError(res, VIEW_ONLY, 403); return; }
     const id = meetingRoomBookingId.safeParse(req.params.id);
     if (!id.success) { sendError(res, "Invalid booking id", 400); return; }
     const me = await signedInPerson(req);

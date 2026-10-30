@@ -1,5 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 import { handOverOnAssign } from "./leadHandOver.js";
+import { noteViewAsOnLogs } from "./leadViewAsNote.js";
 import { followUpDateOnStatus } from "./leadFollowUpDate.js";
 import { ENROLMENT_PAYMENT_METHODS, type ILead, type ILeadNote, type IActivityLog, type IReminder, type IPayment, type IFollowUp } from "../types/index.js";
 
@@ -486,6 +487,7 @@ leadSchema.index({ "reminders.isDone": 1, "reminders.remindAt": 1 });
 leadSchema.index({ "payments.finance.externalId": 1 }, { sparse: true });
 
 handOverOnAssign(leadSchema);
+noteViewAsOnLogs(leadSchema);
 // After the hand-over, so a status it sets clears an old follow-up date too.
 followUpDateOnStatus(leadSchema);
 

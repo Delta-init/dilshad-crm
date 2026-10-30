@@ -331,7 +331,7 @@ function UsersPageContent() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-8 w-8 md:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-amber-600 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-400"
-                                  title={`View as ${user.name} — 30 minutes, view only`}
+                                  title={`View as ${user.name} — 30 minutes, acting as them`}
                                   aria-label={`View as ${user.name}`}
                                   disabled={impersonate.isPending}
                                   onClick={() => impersonate.mutate(user._id)}

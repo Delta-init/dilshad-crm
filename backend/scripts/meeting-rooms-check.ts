@@ -246,13 +246,13 @@ section("View as");
 {
   fresh();
   const g = await api<Day>("GET", "/day?date=2026-10-20", "ViewAs");
-  check("reads the day as the person viewed (their email), view only, not a super admin",
-    g.status === 200 && last()?.query.viewerEmail === "sam@test.local" && g.body.data?.you.viewOnly === true && g.body.data.you.superAdmin === false, [g.status, g.body.data?.you]);
+  check("reads the day as the person viewed (their email), not view only (2026-10-30), not a super admin",
+    g.status === 200 && last()?.query.viewerEmail === "sam@test.local" && g.body.data?.you.viewOnly === false && g.body.data.you.superAdmin === false, [g.status, g.body.data?.you]);
   fresh();
   const p = await api("POST", "/bookings", "ViewAs", good);
   const d = await api("DELETE", "/bookings/bk1", "ViewAs");
-  check("booking and cancelling: 403, view only", p.status === 403 && d.status === 403 && /View only/.test(p.body.message), [p.status, d.status, p.body.message]);
-  check("…and the HRMS is never asked", calls.length === 0, calls);
+  check("booking and cancelling go through, as the person viewed (2026-10-30: View as acts)", p.status === 201 && d.status === 200, [p.status, d.status, p.body.message]);
+  check("…booked and cancelled in their name", calls.length === 2 && calls.every((c: any) => (c.body?.bookerEmail ?? c.query?.bookerEmail) === "sam@test.local"), calls);
 }
 
 section("The HRMS failing or out of reach");

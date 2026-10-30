@@ -6,11 +6,17 @@ import { sendError } from "../utils/response.js";
 import { Role } from "../models/Role.js";
 import { User } from "../models/User.js";
 import { Impersonation } from "../models/Impersonation.js";
+import { runViewAs } from "../utils/viewAs.js";
 
 type ImpersonatedBy = NonNullable<NonNullable<AuthenticatedRequest["user"]>["impersonatedBy"]>;
 
-/** A "View as" pass may only read — anything else is refused (bar ending the session). */
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+/**
+ * While a Super Admin views the CRM as someone they may act as that person (the owner, 2026-10-30) — except on that
+ * person's account itself: their password, their own settings, signing them out, and linking or unlinking their
+ * WhatsApp.
+ */
+const NOT_WHILE_VIEWING_AS = /\/api\/v1\/(auth\/(change-password|preferences|logout)|whatsapp\/(connect|disconnect))(\/|\?|$)/;
 
 /**
  * A "View as" pass is good only while its session is open and unexpired, and
@@ -62,8 +68,8 @@ async function verify(req: AuthenticatedRequest, res: Response, next: NextFuncti
         return;
       }
       impersonatedBy = checked;
-      if (!allowViewAsWrites && !READ_METHODS.has(req.method)) {
-        sendError(res, "View only: you are viewing the CRM as someone else. Go back to your own account to make changes.", 403);
+      if (!allowViewAsWrites && !READ_METHODS.has(req.method) && NOT_WHILE_VIEWING_AS.test(req.originalUrl)) {
+        sendError(res, "Not while viewing as someone: this is their own account. Go back to your account first.", 403);
         return;
       }
     }
@@ -95,6 +101,21 @@ async function verify(req: AuthenticatedRequest, res: Response, next: NextFuncti
       ...(impersonatedBy ? { impersonatedBy } : {}),
     };
 
+    if (impersonatedBy && !READ_METHODS.has(req.method)) {
+      // Acting as them: kept on the session — what, when, and how it went — and run so that lines written on a lead
+      // say who really did it.
+      const at = new Date();
+      const path = req.originalUrl.split("?")[0]!.slice(0, 200);
+      console.log(`[view-as] ${impersonatedBy.name} as ${decoded.email}: ${req.method} ${path}`);
+      res.on("finish", () => {
+        void Impersonation.updateOne({ _id: new Types.ObjectId(impersonatedBy!.sessionId) }, {
+          $push: { actions: { $each: [{ method: req.method, path, status: res.statusCode, at }], $slice: -500 } },
+        }).catch(() => undefined);
+      });
+      runViewAs({ adminId: impersonatedBy.id, adminName: impersonatedBy.name, sessionId: impersonatedBy.sessionId }, () => next());
+      return;
+    }
+
     next();
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -111,7 +132,7 @@ async function verify(req: AuthenticatedRequest, res: Response, next: NextFuncti
   }
 }
 
-/** Every protected route. A super admin's "View as" pass may only read through it. */
+/** Every protected route. A super admin's "View as" pass acts as that person, bar their own account (above). */
 export const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> =>
   verify(req, res, next, false);
 
