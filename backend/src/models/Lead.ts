@@ -478,6 +478,11 @@ leadSchema.index({ createdAt: -1 });
 leadSchema.index({ nextFollowUpAt: 1 });
 // Inactive leads: untouched statuses, oldest assignment first
 leadSchema.index({ status: 1, assignedAt: 1 });
+// Reminders (2026-10-30, "the CRM is too slow"): each person's reminders, the badge's count and the scheduler's due /
+// warning passes every 30 s were reading every lead; and the 2-minute finance check on balance payments too.
+leadSchema.index({ "reminders.createdBy": 1 });
+leadSchema.index({ "reminders.isDone": 1, "reminders.remindAt": 1 });
+leadSchema.index({ "payments.finance.externalId": 1 }, { sparse: true });
 
 handOverOnAssign(leadSchema);
 // After the hand-over, so a status it sets clears an old follow-up date too.

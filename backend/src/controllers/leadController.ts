@@ -1453,18 +1453,14 @@ export const getMyReminderCount = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const userId = req.user!.userId;
-    const leads = await Lead.find(
-      { "reminders.createdBy": new mongoose.Types.ObjectId(userId) },
-      { reminders: 1 },
-    ).lean();
-
-    let count = 0;
-    for (const lead of leads) {
-      count += (lead.reminders ?? []).filter(
-        (r) => r.createdBy?.toString() === userId && !r.isDone,
-      ).length;
-    }
+    // Counted in the database: the badge asks every minute, from every screen.
+    const uid = new mongoose.Types.ObjectId(req.user!.userId);
+    const [row] = await Lead.aggregate<{ count: number }>([
+      { $match: { "reminders.createdBy": uid } },
+      { $project: { n: { $size: { $filter: { input: "$reminders", as: "r", cond: { $and: [{ $eq: ["$$r.createdBy", uid] }, { $ne: ["$$r.isDone", true] }] } } } } } },
+      { $group: { _id: null, count: { $sum: "$n" } } },
+    ]);
+    const count = row?.count ?? 0;
     sendSuccess(res, "Count fetched", { count });
   } catch (error) {
     next(error);

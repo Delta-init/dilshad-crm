@@ -99,6 +99,19 @@ export const getTeamSplit = async (
   }
 };
 
+/** Team rankings by period, kept a minute: the dashboard asks for them on every open (2026-10-30). */
+const teamRankingsKept = new Map<string, { at: number; value: Promise<unknown> }>();
+function keptTeamRankings(dateFrom?: string, dateTo?: string) {
+  const key = `${dateFrom ?? ""}|${dateTo ?? ""}`;
+  const hit = teamRankingsKept.get(key);
+  if (hit && Date.now() - hit.at < 60_000) return hit.value;
+  for (const [k, v] of teamRankingsKept) if (Date.now() - v.at >= 60_000) teamRankingsKept.delete(k);
+  const value = svc.getTeamRankings(dateFrom, dateTo);
+  teamRankingsKept.set(key, { at: Date.now(), value });
+  value.catch(() => teamRankingsKept.delete(key)); // a failed count is not kept
+  return value;
+}
+
 /** GET /api/reports/teams?dateFrom=...&dateTo=... */
 export const getTeamRankings = async (
   req: AuthenticatedRequest,
@@ -107,7 +120,7 @@ export const getTeamRankings = async (
 ): Promise<void> => {
   try {
     const { dateFrom, dateTo } = getDateParams(req.query as Record<string, string>);
-    const data = await svc.getTeamRankings(dateFrom, dateTo);
+    const data = await keptTeamRankings(dateFrom, dateTo);
     sendSuccess(res, "Team rankings fetched successfully", data);
   } catch (err) {
     next(err);

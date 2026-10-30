@@ -74,7 +74,8 @@ export function useWhatsAppChats(ownerId: string) {
     queryKey: ["whatsapp", "chats", ownerId],
     queryFn: async () => data<{ ownerId: string; canSend: boolean; chats: WAChat[] }>(await api.get("/whatsapp/chats", { params: { ownerId } })),
     enabled: !!ownerId,
-    refetchInterval: 5000,
+    // A new message refreshes these at once over the socket (whatsapp_message); this is only the fallback.
+    refetchInterval: 30_000,
   });
 }
 
@@ -83,7 +84,7 @@ export function useWhatsAppMessages(ownerId: string, chat: string) {
     queryKey: ["whatsapp", "messages", ownerId, chat],
     queryFn: async () => data<{ canSend: boolean; messages: WAMessage[] }>(await api.get("/whatsapp/messages", { params: { ownerId, chat } })),
     enabled: !!ownerId && !!chat,
-    refetchInterval: 3000,
+    refetchInterval: 15_000,
   });
 }
 
@@ -93,7 +94,7 @@ export function useWhatsAppUnread(enabled: boolean) {
     queryKey: ["whatsapp", "unread"],
     queryFn: async () => data<{ unread: number }>(await api.get("/whatsapp/unread")).unread,
     enabled,
-    refetchInterval: 20000,
+    refetchInterval: 60_000,
   });
 }
 

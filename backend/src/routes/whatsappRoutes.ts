@@ -289,8 +289,9 @@ router.get("/unread", checkPermission("whatsapp", "view"), async (req: Authentic
     // By when the CRM got them (a message can carry an older WhatsApp time).
     const fresh = since ? await WhatsAppMessage.find({ ...base, createdAt: { $gt: since } }).sort({ createdAt: -1 }).limit(5)
       .lean<(MessageDoc & { chat: string; phone?: string; key?: string; lead?: Types.ObjectId | null })[]>() : [];
-    const byKey = await leadsByKey();
-    const leads = await leadsBrief(fresh.map((m) => byKey.get(m.key || m.chat) ?? m.lead));
+    // The leads only when there is something new to name (most calls have nothing).
+    const byKey = fresh.length ? await leadsByKey() : new Map<string, Types.ObjectId>();
+    const leads = fresh.length ? await leadsBrief(fresh.map((m) => byKey.get(m.key || m.chat) ?? m.lead)) : new Map();
     sendSuccess(res, "Unread", {
       unread, now,
       messages: fresh.map((m) => ({
