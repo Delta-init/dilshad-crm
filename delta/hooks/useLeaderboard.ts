@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { io as openSocket } from "socket.io-client";
 import api from "@/lib/axios";
+import { API_URL } from "@/lib/apiUrl";
 
 /**
  * One salesperson's month, as GET /leaderboard ranks it. Today's calls and the leads by status came in 2026-10-15 —
@@ -82,7 +83,7 @@ export const usePublicLeaderboard = (month: string, rankBy: LeaderboardRankBy, l
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const params = new URLSearchParams({ month, ...(rankBy !== "revenue" ? { rankBy } : {}) });
-      const res = await fetch(`/api/v1/public/leaderboard?${params}`, { cache: "no-store" });
+      const res = await fetch(`${API_URL}/public/leaderboard?${params}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`The leaderboard answered ${res.status}`);
       return ((await res.json()) as { data: Leaderboard }).data;
     },

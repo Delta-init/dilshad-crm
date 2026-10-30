@@ -1,7 +1,6 @@
 import axios from "axios";
 import { endViewAs, getViewAs } from "@/lib/impersonation";
-
-const API_URL = "/api/v1";
+import { API_URL } from "@/lib/apiUrl";
 
 export const api = axios.create({
   baseURL: API_URL,

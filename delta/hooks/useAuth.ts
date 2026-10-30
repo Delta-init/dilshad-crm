@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { toast } from "@/lib/toast";
 import api from "@/lib/axios";
+import { API_URL } from "@/lib/apiUrl";
 import { useAuthStore } from "@/lib/store/authStore";
 import { leaveViewAsForSignOut } from "@/lib/impersonation";
 import type { LoginFormValues } from "@/lib/validations/authSchema";
@@ -49,7 +50,7 @@ export const useLogout = () => {
     // finish even as the page moves on; if it fails, signing out still happens.
     const token = ownToken ?? (typeof window !== "undefined" ? localStorage.getItem("accessToken") : null);
     if (token) {
-      void fetch("/api/v1/auth/logout", {
+      void fetch(`${API_URL}/auth/logout`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         keepalive: true,

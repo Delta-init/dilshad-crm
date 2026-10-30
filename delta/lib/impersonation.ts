@@ -1,5 +1,6 @@
 "use client";
 import { useAuthStore } from "@/lib/store/authStore";
+import { API_URL } from "@/lib/apiUrl";
 import type { AuthUser, User } from "@/types";
 
 /*
@@ -12,7 +13,7 @@ import type { AuthUser, User } from "@/types";
 
 const OWN_KEY = "crm-own-auth";
 const VIEW_AS_KEY = "crm-view-as";
-const STOP_URL = "/api/v1/auth/impersonation/stop";
+const STOP_URL = `${API_URL}/auth/impersonation/stop`;
 
 /** What POST /users/:id/impersonate answers. */
 export interface ViewAsStart {

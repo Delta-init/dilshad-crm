@@ -382,7 +382,7 @@ No `min` attribute on `datetime-local` input, and no frontend validation.
 
 Copy the template at the top and place it at the **top** of the correct category section.
 
-**Entry count**: 13
+**Entry count**: 14
 *(Increment every time you add a mistake)*
 
 ---
@@ -477,3 +477,13 @@ route's; show a refused form's first reason (`errText`).
   person and sent later); quick taps could land out of order (one at a time now); redrawing remounted pages mid-edit
   (now only when the account's currency arrives, and not while typing); picks while viewing as someone changed the
   admin's own. All fixed.
+
+## [2026-10-30] Calls through the site's own /api/v1 dropped (a 502 after 30 s)
+
+- **What happened**: every call went to the site's `/api/v1`, which Vercel passes on to the server; about one in four
+  never reached it (not in nginx's log) and came back "An error occurred with this application" after 30 s — as in the
+  Draw CRM. The same calls made to `api-remote-crm` directly were all answered, as the live socket always has been.
+- **Fix**: the browser calls the API straight (`lib/apiUrl.ts`, `NEXT_PUBLIC_API_URL`); the API allows this site's
+  origin since 1e6e7ca.
+
+> A website on Vercel calls its API by the API's own address, not through a Vercel rewrite.

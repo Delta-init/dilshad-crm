@@ -1541,3 +1541,10 @@ Removed: `useUpdateCallNotConnected`, `useUpdateCallCount` (the counts come from
 - `chooseCurrency(code)` — this device at once (`useCurrencyStore`), then `PUT /auth/preferences { currency }` ("now")
   (one at a time, in order, and only while they're still the one signed in); kept pending for them until saved; a
   failure says "your account gets it the next time the app can reach it".
+
+### The API, called straight (2026-10-30)
+- `lib/apiUrl.ts` (new): `API_URL` = `NEXT_PUBLIC_API_URL` (the live socket's address,
+  `https://api-remote-crm.deltainstitutions.com/api/v1`), else `/api/v1` (local, through `next.config`'s rewrite).
+- Used by the API client and its token refresh (`lib/axios.ts`), the sign-out record (`useLogout`), the open
+  leaderboard (`usePublicLeaderboard`) and telling the server View as ended (`lib/impersonation.ts`) — nothing calls
+  the site's own `/api/v1` any more. Its own module, as axios and impersonation import each other.
