@@ -166,6 +166,7 @@ await person("Admin", role.superAdmin);
 await person("Ann", role.staff, { extension: "101" });
 await person("Ben", role.staff, { extension: "102" });
 await person("Cat", role.staff, { extension: "103" });
+await person("Dee", role.staff); // Closed leads with no enrolment, paid in rupees (2026-10-31)
 await person("Xen", role.staff); // excluded from the commission plan
 await person("Gone", role.staff, { status: "inactive" });
 await person("Nob", role.noBoard);
@@ -204,6 +205,13 @@ const leads = [
   lead("Ben", "lost"),
   lead("Ben", "callback", { followUps: [fu("Ben", earlierThisMonth), fu("Ben", earlierThisMonth)] }),
   lead("Cat", "assigned"),
+  // Marked Closed with no enrolment: counts on the day of its "closed" line — this month's does, last month's doesn't;
+  // its rupees count in AED (₹2,275 at 22.75 = AED 100).
+  lead("Dee", "closed", {
+    activityLogs: [{ action: "status_changed", changes: { status: { from: "assigned", to: "closed" } }, createdAt: earlierThisMonth }],
+    payments: [{ ...pay(2275, earlierThisMonth), currency: "INR" }],
+  }),
+  lead("Dee", "closed", { activityLogs: [{ action: "status_changed", changes: { status: { from: "followup", to: "closed" } }, createdAt: lastMonth }] }),
   lead("Xen", "closed", { payments: [pay(99_999, earlierThisMonth)] }),
   lead("Admin", "closed", { payments: [pay(77_777, earlierThisMonth)] }),
   lead(null, "new"),
@@ -212,9 +220,9 @@ const leads = [
 ];
 await db.collection("leads").insertMany(leads);
 await db.collection("students").insertMany([
-  { _id: new Types.ObjectId(), name: "S1", enrollmentNumber: "LBC-1", leadId: new Types.ObjectId(), assignedTo: ids.Ann, enrollmentDate: earlierThisMonth, status: "active" },
+  { _id: new Types.ObjectId(), name: "S1", enrollmentNumber: "LBC-1", leadId: leads[0]._id, assignedTo: ids.Ann, enrollmentDate: earlierThisMonth, status: "active" },
   { _id: new Types.ObjectId(), name: "S2", enrollmentNumber: "LBC-2", leadId: new Types.ObjectId(), assignedTo: ids.Ann, enrollmentDate: earlierThisMonth, status: "dropped" },
-  { _id: new Types.ObjectId(), name: "S3", enrollmentNumber: "LBC-3", leadId: new Types.ObjectId(), assignedTo: ids.Ben, enrollmentDate: earlierThisMonth, status: "active" },
+  { _id: new Types.ObjectId(), name: "S3", enrollmentNumber: "LBC-3", leadId: leads[3]._id, assignedTo: ids.Ben, enrollmentDate: earlierThisMonth, status: "active" },
   { _id: new Types.ObjectId(), name: "S4", enrollmentNumber: "LBC-4", leadId: new Types.ObjectId(), assignedTo: ids.Ben, enrollmentDate: lastMonth, status: "active" },
 ]);
 let k = 0;
@@ -242,7 +250,7 @@ section("Case 1 — the open board: every figure, no sign-in");
   const b = r.body.data;
   const row = (name: string) => b.rows.find((x) => x.name === name);
   check("this month, ranked by revenue, the current month, targets 100 / 1,000 min", b.month === MONTH && b.rankBy === "revenue" && b.currentMonth === true && b.targets.dayMinutes === 100 && b.targets.monthMinutes === 1000, { month: b.month, rankBy: b.rankBy, currentMonth: b.currentMonth, targets: b.targets });
-  check("on the board: Ann, Ben, Cat, Nob — not the Super Admin, not the excluded, not the deactivated", b.rows.map((x) => x.name).sort().join() === "Ann,Ben,Cat,Nob", b.rows.map((x) => x.name));
+  check("on the board: Ann, Ben, Cat, Nob — not the Super Admin, not the excluded, not the deactivated", b.rows.map((x) => x.name).sort().join() === "Ann,Ben,Cat,Dee,Nob", b.rows.map((x) => x.name));
   const ann = row("Ann"), ben = row("Ben"), cat = row("Cat");
   check("Ann: revenue 1,500 (this month's payment only), 1 closing (not the dropped), 1 follow-up", ann?.revenue === 1500 && ann.closings === 1 && ann.followUps === 1, ann);
   check("Ann: 3 calls this month (two today, one earlier), 2 connected, 3,600 s", ann?.calls === 3 && ann.connected === 2 && ann.talkSeconds === 3600, ann);
@@ -257,6 +265,8 @@ section("Case 1 — the open board: every figure, no sign-in");
   const nob = row("Nob");
   check("a lead with no status counts as \"unknown\" — never \"null\" or \"\"", nob?.totalLeads === 2 && nob.leadCounts?.unknown === 2 && !("null" in (nob.leadCounts ?? {})) && !("" in (nob.leadCounts ?? {})), nob?.leadCounts);
   check("Cat: nothing this month, one lead assigned", cat?.revenue === 0 && cat.calls === 0 && cat.callsToday === 0 && cat.totalLeads === 1 && cat.leadCounts?.assigned === 1, cat);
+  const dee = row("Dee");
+  check("Dee: a Closed lead with no enrolment is a closing (this month's, not last month's); its rupees in AED (₹2,275 → 100)", dee?.closings === 1 && dee.revenue === 100, dee);
   check("ranked by revenue: Ann, Ben, then the rest", b.rows[0]?.name === "Ann" && b.rows[1]?.name === "Ben" && b.rows[0]?.rank === 1 && b.rows[1]?.rank === 2, b.rows.map((x) => [x.rank, x.name]));
   check("no email anywhere on the open board", !r.raw.includes("@board.test"), r.raw.slice(0, 200));
   check("when it was counted", typeof b.updatedAt === "string" && !Number.isNaN(Date.parse(b.updatedAt)), b.updatedAt);

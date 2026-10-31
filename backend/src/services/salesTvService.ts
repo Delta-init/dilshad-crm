@@ -2,6 +2,8 @@ import { Types } from "mongoose";
 import { User } from "../models/User.js";
 import { Team } from "../models/Team.js";
 import { Student } from "../models/Student.js";
+import { Lead } from "../models/Lead.js";
+import { addCounts, closingsWithoutEnrolment } from "../utils/closedWithoutEnrolment.js";
 import { LeaderboardService } from "./leaderboardService.js";
 import { saleClosedOf } from "./saleAnnouncement.js";
 import { gstMidnight } from "./breakClock.js";
@@ -107,10 +109,15 @@ export async function salesTv(q: { after?: string; parts?: string }): Promise<Sa
   // since 2026-10-22 — Root now hides him there (with the team leaders and the Sales Manager) and shows him on the
   // Manager TV (2026-10-23), so he is sent again.
   const board = await new LeaderboardService().getLeaderboard(undefined, "revenue", { withSuperAdmins: true });
-  const todayClosings = await Student.aggregate<{ _id: Types.ObjectId | null; n: number }>([
-    { $match: { enrollmentDate: { $gte: midnight, $lt: new Date(midnight.getTime() + DAY_MS) }, status: { $ne: "dropped" } } },
-    { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
-  ]);
+  const todayRange = { $gte: midnight, $lt: new Date(midnight.getTime() + DAY_MS) };
+  // Enrolments, and Closed leads with no enrolment marked Closed today (utils/closedWithoutEnrolment.ts).
+  const todayClosings = addCounts(
+    await Student.aggregate<{ _id: Types.ObjectId | null; n: number }>([
+      { $match: { enrollmentDate: todayRange, status: { $ne: "dropped" } } },
+      { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
+    ]),
+    await Lead.aggregate<{ _id: Types.ObjectId | null; n: number }>(closingsWithoutEnrolment(todayRange)),
+  );
   const today = new Map(todayClosings.filter((r) => r._id).map((r) => [String(r._id), r.n]));
   const rows = board.rows.filter((r) => teamOf.has(r.userId));
   const emails = new Map(

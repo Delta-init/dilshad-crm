@@ -7,6 +7,7 @@ import { dubaiDayStart, dubaiToday } from "../utils/dubaiDay.js";
 import { CommissionSettings } from "../models/CommissionSettings.js";
 import { COUNTED_PAYMENT } from "../utils/countedPayments.js";
 import { bangaloreLeadsUnion } from "../utils/bangaloreRevenue.js";
+import { addCounts, closingsWithoutEnrolment } from "../utils/closedWithoutEnrolment.js";
 
 /*
  * The month's leaderboard (the owner, 2026-10-07): every active salesperson,
@@ -17,7 +18,8 @@ import { bangaloreLeadsUnion } from "../utils/bangaloreRevenue.js";
  *
  *  • Revenue   — payments dated in the month on the leads each person holds; a Bangalore enrolment's
  *                rupees too, in AED (utils/bangaloreRevenue.ts, 2026-10-28).
- *  • Closings  — enrolments in the month credited to them (not dropped ones).
+ *  • Closings  — enrolments in the month credited to them (not dropped ones), and since 2026-10-31 their Closed leads
+ *                with no enrolment, on the day each was marked Closed (utils/closedWithoutEnrolment.ts).
  *  • Follow-ups — follow-ups they logged in the month.
  *  • Calls     — since 2026-10-14, their calls with leads through 3CX in the
  *                month (lead_calls, in and out — the Calls page's count):
@@ -145,10 +147,13 @@ export class LeaderboardService {
         { $match: { "payments.paidAt": inMonth } },
         { $group: { _id: "$assignedTo", n: { $sum: "$payments.amount" } } },
       ]),
-      Student.aggregate<Counted>([
-        { $match: { enrollmentDate: inMonth, status: { $ne: "dropped" } } },
-        { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
-      ]),
+      Promise.all([
+        Student.aggregate<Counted>([
+          { $match: { enrollmentDate: inMonth, status: { $ne: "dropped" } } },
+          { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
+        ]),
+        Lead.aggregate<Counted>(closingsWithoutEnrolment(inMonth)),
+      ]).then(([enrolled, closedOnly]) => addCounts(enrolled, closedOnly)),
       this.followUpsBy(inMonth),
       this.callsIn(inMonth),
       this.callsIn(dubaiTodayRange()),

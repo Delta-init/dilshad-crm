@@ -193,6 +193,18 @@ same("Ann's calls today: 3, 2 connected, 300 s talk (yesterday's not)", [P("Ann"
 same("Cal's calls today: 1, 1, 60 s", [P("Cal")?.callsToday, P("Cal")?.connectedToday, P("Cal")?.talkSecondsToday], [1, 1, 60]);
 check("ordered by closings this month first", d.people?.[0]?.name === "Ann", d.people?.map((p) => p.name));
 
+section("A Closed lead with no enrolment (2026-10-31: the AI Academy's students)");
+await db.collection("leads").insertOne({
+  _id: new Types.ObjectId(), name: "Academy student", phone: "+971500000002", status: "closed", assignedTo: ids.Ben,
+  activityLogs: [{ action: "status_changed", changes: { status: { from: "assigned", to: "closed" } }, createdAt: TODAY }],
+  payments: [{ _id: new Types.ObjectId(), amount: 2275, currency: "INR", paidAt: TODAY }],
+});
+{
+  const again = (await tv()).body.data;
+  const ben = (again.people ?? []).find((p) => p.name === "Ben");
+  same("Ben: a closing this month and today; his ₹2,275 as AED 100", [ben?.closingsMonth, ben?.closingsToday, ben?.revenueMonth], [1, 1, 100]);
+}
+
 section("Who is on a break");
 same("Ann only — Ben's break from yesterday is over", d.onBreak.map((b) => b.name), ["Ann"]);
 check("since when, what for, her team and email", d.onBreak[0]?.since === ago(10).toISOString() && d.onBreak[0]?.kind === "tea" && d.onBreak[0]?.team === "Alpha" && d.onBreak[0]?.email === "ann@test.local", d.onBreak[0]);
