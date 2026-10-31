@@ -15,6 +15,7 @@ import { leadWorkflow, leadWorkflowLeads } from "../services/leadWorkflowService
 import { leadWorkflowLeadsQuery, leadWorkflowQuery } from "../validations/inactiveLeadValidation.js";
 import { CallFilterError, callsForPortal, recordingLinkForPortal } from "../services/portalCalls.js";
 import { salesTv } from "../services/salesTvService.js";
+import { isLeaderboardMonth } from "../services/leaderboardService.js";
 import { PAY_FROM_MONTH, payRows } from "../services/salaryService.js";
 import { slabsFor } from "../services/salarySlabs.js";
 
@@ -66,7 +67,9 @@ router.get(
   wrap(async (req, res) => {
     const after = typeof req.query.after === "string" ? req.query.after.slice(0, 40) : undefined;
     const parts = req.query.parts === "live" ? "live" : undefined;
-    sendSuccess(res, "Sales TV", await salesTv({ after, parts }));
+    // A past month's standings (the Manager TV's month switch): ?month=YYYY-MM.
+    const month = isLeaderboardMonth(req.query.month) ? req.query.month : undefined;
+    sendSuccess(res, "Sales TV", await salesTv({ after, parts, month }));
   }),
 );
 

@@ -260,6 +260,28 @@ section("Wiring");
   check("/sales-tv sits behind the portal secret (after router.use(portalOnly))", guard >= 0 && route > guard, { guard, route });
 }
 
+
+section("A past month (the Manager TV's month switch)");
+{
+  // One of the closes copied to the middle of last month: last month's board counts it, and nothing of today.
+  const nowDubai = new Date(Date.now() + 4 * 3_600_000);
+  const prevStart = new Date(Date.UTC(nowDubai.getUTCFullYear(), nowDubai.getUTCMonth() - 1, 1));
+  const prev = prevStart.toISOString().slice(0, 7);
+  const mid = new Date(Date.UTC(prevStart.getUTCFullYear(), prevStart.getUTCMonth(), 15, 8));
+  const src: any = await db.collection("students").findOne({ status: { $ne: "dropped" }, assignedTo: { $ne: null } });
+  await db.collection("students").insertOne({ ...src, _id: new Types.ObjectId(), name: "Past Student", email: "past@s.local", enrollmentDate: mid, createdAt: mid, updatedAt: mid });
+  const past: any = await tv(`?month=${prev}`);
+  const pd: any = past.body.data ?? {};
+  const closer = (pd.people ?? []).find((p: any) => p.id === String(src.assignedTo));
+  check("?month=<last month>: that month named, its standings", past.status === 200 && pd.month === prev && Array.isArray(pd.people), JSON.stringify(past.body));
+  check("…the close copied there counted for its closer", !closer || closer.closingsMonth >= 1, JSON.stringify(closer));
+  check("…nothing of today: no breaks, no closes, every today figure 0", (pd.onBreak ?? []).length === 0 && (pd.closes ?? []).length === 0
+    && (pd.people ?? []).every((p: any) => !p.closingsToday && !p.callsToday && !p.connectedToday && !p.talkSecondsToday), JSON.stringify({ b: pd.onBreak, c: pd.closes?.length }));
+  const bad: any = await tv(`?month=2026-13`);
+  check("a month that isn't one: this month, as before", bad.status === 200 && bad.body.data?.month === nowDubai.toISOString().slice(0, 7), JSON.stringify(bad.body.data?.month));
+  await db.collection("students").deleteOne({ name: "Past Student" });
+}
+
 /* ── Done ── */
 server.close();
 await mongoose.connection.dropDatabase();
