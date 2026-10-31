@@ -45,7 +45,7 @@ export function EarningsTab() {
         </Select>
         {data && (
           <p className="text-xs text-muted-foreground">
-            {SCOPE_NOTE[data.scope]} · counted once finance approves · earned in the month the money is received, the rest as balance
+            {SCOPE_NOTE[data.scope]} · counted once finance approves · earned whole in the month the client finishes paying — until then it waits
           </p>
         )}
       </div>
@@ -81,7 +81,7 @@ export function EarningsTab() {
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <Stat icon={Coins} label="Commission earned" value={aed(data.totals.amount)} tone="primary" />
-            <Stat icon={Wallet} label="Balance — on payments due" value={aed(data.totals.balance ?? 0)} tone="amber" />
+            <Stat icon={Wallet} label="Waiting — client still paying" value={aed(data.totals.balance ?? 0)} tone="amber" />
             <Stat icon={CheckCircle2} label="Sales counted" value={String(data.totals.counted)} tone="green" />
             <Stat icon={Hourglass} label="Not counted yet" value={String(data.totals.waiting + (data.totals.progress ?? 0))} tone="amber" />
             <Stat
@@ -102,7 +102,7 @@ export function EarningsTab() {
                     {TL_PAID && <th className="px-4 py-2.5 font-medium text-right">Team Leader</th>}
                     <th className="px-4 py-2.5 font-medium text-right">Sales Manager</th>
                     <th className="px-4 py-2.5 font-medium text-right">Earned</th>
-                    <th className="px-4 py-2.5 font-medium text-right">Balance</th>
+                    <th className="px-4 py-2.5 font-medium text-right">Waiting</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -122,7 +122,7 @@ export function EarningsTab() {
                               <span className="text-foreground">{aed(p[role].amount)}</span>
                               <span className="ml-1 text-[11px] text-muted-foreground">· {p[role].count}</span>
                               {(p[role].balance ?? 0) > 0 && (
-                                <span className="block text-[10px] text-amber-600 dark:text-amber-400">+{aed(p[role].balance ?? 0)} balance</span>
+                                <span className="block text-[10px] text-amber-600 dark:text-amber-400">+{aed(p[role].balance ?? 0)} waiting</span>
                               )}
                             </>
                           ) : (
@@ -191,6 +191,8 @@ function SaleRow({ sale: s, index }: { sale: CommissionSale; index: number }) {
             {typeof s.monthShare === "number" && s.monthShare < 1
               ? ` · ${Math.round(s.monthShare * 100)}% of the fee received this month`
               : ""}
+            {/* Paid in full first (2026-10-31): the day the commission was earned */}
+            {s.paidInFullAt ? ` · paid in full ${uaeDate(s.paidInFullAt)}` : ""}
           </p>
           {s.state === "counted" && s.lines.length > 0 && s.lines.every((l) => l.amount === 0) && (
             <p className="mt-1.5 text-[11px] text-muted-foreground">
@@ -225,7 +227,7 @@ function SaleRow({ sale: s, index }: { sale: CommissionSale; index: number }) {
                   <span className="tabular-nums text-muted-foreground">of {aed(l.amount)}</span>
                 )}
                 {(l.balance ?? 0) > 0 && (
-                  <span className="tabular-nums text-amber-600 dark:text-amber-400">+{aed(l.balance ?? 0)} balance</span>
+                  <span className="tabular-nums text-amber-600 dark:text-amber-400">+{aed(l.balance ?? 0)} waiting for full payment</span>
                 )}
               </span>
             ))}

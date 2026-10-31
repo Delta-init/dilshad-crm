@@ -4,7 +4,7 @@ import { FinanceHandover } from "../models/FinanceHandover.js";
 import { Student } from "../models/Student.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
-import { COUNT_FROM, commissionScope, feeOf, idOf, monthRange, owedShareOf, partOf, shareBetween, isSuperAdmin, loadConfig, slabsForScope, uaeMonthOf } from "./commissionService.js";
+import { COUNT_FROM, commissionScope, feeOf, idOf, monthRange, earnedShareBetween, waitingShareOf, partOf, shareBetween, isSuperAdmin, loadConfig, slabsForScope, uaeMonthOf } from "./commissionService.js";
 import { slabsFor, TL_SLAB } from "./salarySlabs.js";
 import type { CommissionSaleState, IRole, ISlabRow, ISlabs, SlabRole } from "../types/index.js";
 import { fetchCommissionPayouts, type CommissionPayout } from "./financeClient.js";
@@ -129,7 +129,6 @@ async function monthFacts(month: string, activeTeams: TeamLite[]): Promise<Fact[
     }
     const fee = typeof s.fee === "number" ? s.fee : feeOf(null, student?.totalFee);
     const share = shareBetween(s, from, to);
-    const owed = owedShareOf(s);
     return {
       closer,
       team,
@@ -140,7 +139,7 @@ async function monthFacts(month: string, activeTeams: TeamLite[]): Promise<Fact[
       approved: s.state === "counted" || s.state === "waiting" || approvedInFinance.has(String(s.student)),
       state: s.state,
       lines: s.state === "counted"
-        ? s.lines.map((l) => ({ user: idOf(l.user), amount: partOf(l.amount, share), balance: partOf(l.amount, owed) }))
+        ? s.lines.map((l) => ({ user: idOf(l.user), amount: partOf(l.amount, earnedShareBetween(s, from, to)), balance: partOf(l.amount, waitingShareOf(s)) }))
         : [],
     };
   });

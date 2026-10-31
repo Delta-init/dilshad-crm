@@ -139,6 +139,33 @@ export const owedShareOf = (sale: ShareSale): number =>
 /** A line's amount at a share. */
 export const partOf = (amount: number, share: number): number => round2(amount * share);
 
+/*
+ * Paid in full first (the user, 2026-10-31: "on the first payment it never gets the commission — only when the last
+ * payment, the full payment, is got"): a sale's commission is earned whole, in the month the client finished paying
+ * — the month of its last payment; while the client still owes, all of it waits. The money itself (`collections`)
+ * still counts toward the salary-slab target as it comes in.
+ */
+
+/** When the client finished paying: the last payment's day (the sale day when none is followed); null while owing. */
+export function paidInFullAt(sale: ShareSale): Date | null {
+  if (owedShareOf(sale) > 0) return null;
+  const list = Array.isArray(sale.collections) ? sale.collections.filter((c) => c.share > 0) : [];
+  if (!list.length) return sale.saleDate ?? null;
+  return new Date(Math.max(...list.map((c) => new Date(c.paidAt).getTime())));
+}
+
+/** The share of a sale's commission earned between two instants: all of it in the month it was paid in full, else none. */
+export function earnedShareBetween(sale: ShareSale, from: Date, to: Date): number {
+  const at = paidInFullAt(sale);
+  return at && at >= from && at <= to ? 1 : 0;
+}
+
+/** Earned so far: all of it once paid in full, none before. */
+export const earnedShareOf = (sale: ShareSale): number => (owedShareOf(sale) > 0 ? 0 : 1);
+
+/** What still waits for the full payment: all of it while the client owes. */
+export const waitingShareOf = (sale: ShareSale): number => (owedShareOf(sale) > 0 ? 1 : 0);
+
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
@@ -814,13 +841,14 @@ export class CommissionService {
               (scope === "team" && myTeams.has(String(sale.team)) && l.role !== "sm"),
           );
 
-    // Earned: each line's share of what came in this month. Balance: its share of what the client still owes.
+    // Earned: all of a line once the client paid in full, in the month of the last payment. Balance: all of it while
+    // the client still owes — it waits for the full payment.
     type Tally = { count: number; amount: number; balance: number };
     const people = new Map<string, { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number; balance: number }>();
     for (const sale of sales) {
       if (sale.state !== "counted") continue;
-      const share = shareBetween(sale, from, to);
-      const owed = owedShareOf(sale);
+      const share = earnedShareBetween(sale, from, to);
+      const owed = waitingShareOf(sale);
       for (const l of visible(sale)) {
         const earned = partOf(l.amount, share);
         const balance = partOf(l.amount, owed);
@@ -861,9 +889,11 @@ export class CommissionService {
       paidShare: shareOf(s),
       /** The share of the fee received in this month — what the lines earn here. */
       monthShare: shareBetween(s, from, to),
+      /** When the client finished paying — the commission is earned then; null while they owe. */
+      paidInFullAt: paidInFullAt(s),
       lines: visible(s).map((l) => ({
         role: l.role, user: String(l.user), userName: l.userName, amount: l.amount,
-        earned: partOf(l.amount, shareBetween(s, from, to)), balance: partOf(l.amount, owedShareOf(s)), note: l.note ?? "",
+        earned: partOf(l.amount, earnedShareBetween(s, from, to)), balance: partOf(l.amount, waitingShareOf(s)), note: l.note ?? "",
       })),
     }));
 

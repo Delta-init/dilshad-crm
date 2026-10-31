@@ -166,7 +166,7 @@ export default function ClosingsPage() {
           icon={BadgeDollarSign}
           label="Commission earned"
           value={fmtFull(totals?.commissionEarned ?? 0)}
-          sub={`${fmtFull(totals?.commissionBalance ?? 0)} balance, on payments still due`}
+          sub={`${fmtFull(totals?.commissionBalance ?? 0)} waiting for clients to pay in full`}
           tone="green"
         />
         <Stat
@@ -362,7 +362,7 @@ function DayRow({
                     {fmtFull(e.commission.earned)} commission
                   </p>
                   <p className="text-[11px] tabular-nums text-muted-foreground">
-                    {e.commission.balance > 0 ? `${fmtFull(e.commission.balance)} on the balance` : "All earned"}
+                    {e.commission.balance > 0 ? `${fmtFull(e.commission.balance)} waiting for full payment` : "All earned"}
                   </p>
                 </div>
               )}

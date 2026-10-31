@@ -78,7 +78,7 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
         <Figure
           label="Commission earned"
           value={aed(row.commission.earned)}
-          sub={(row.commission.balance ?? 0) > 0 ? `+${aed(row.commission.balance ?? 0)} balance` : undefined}
+          sub={(row.commission.balance ?? 0) > 0 ? `+${aed(row.commission.balance ?? 0)} waiting for full payment` : undefined}
         />
         <Figure label={`Paid at ${row.percent}%`} value={aed(row.commission.payable)} />
       </div>

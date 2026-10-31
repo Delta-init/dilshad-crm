@@ -171,6 +171,8 @@ export interface CommissionSale {
   paidShare?: number;
   /** The share of the fee received in this month — what the lines earn in it. */
   monthShare?: number;
+  /** When the client finished paying — the commission is earned then; null while they owe (2026-10-31). */
+  paidInFullAt?: string | null;
   /** Only the lines the viewer may see. */
   lines: CommissionLine[];
 }

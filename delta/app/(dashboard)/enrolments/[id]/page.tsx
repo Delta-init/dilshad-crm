@@ -164,7 +164,7 @@ function CommissionCard({ e }: { e: EnrolmentDetail }) {
                     <span className="font-semibold tabular-nums">{aed(l.earned ?? l.amount)}</span>
                     {(l.balance ?? 0) > 0 && (
                       <span className="block text-[11px] tabular-nums text-amber-600 dark:text-amber-400">
-                        +{aed(l.balance ?? 0)} on the balance
+                        +{aed(l.balance ?? 0)} once paid in full
                       </span>
                     )}
                   </span>

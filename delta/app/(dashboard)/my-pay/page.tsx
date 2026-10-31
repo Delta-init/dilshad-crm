@@ -133,7 +133,7 @@ function HowItsWorkedOut({ slabsFrom }: { slabsFrom: string | null }) {
         <li>Your target counts the money received in the month (UAE time) on every sale finance has approved — a balance paid next month counts next month; money received before October 2026 never counts.</li>
         <li>Sales Staff count their own sales — a team leader too, on their own closes — and the Sales Manager every sale in the CRM.</li>
         <li>The highest level your sales reach sets your salary and the share of your commission paid. Below the first level, the base row pays.</li>
-        <li>A sale earns its commission as its fee is paid: the part received this month earns this month, the rest shows as balance until it&apos;s paid. Counted once finance approves the sale.</li>
+        <li>A sale earns its commission only once the client has paid in full — all of it, in the month of the last payment; until then it shows as waiting. Counted once finance approves the sale.</li>
         <li>Pay = salary + commission earned that month × that share.</li>
         <li>A sale voided in finance comes off. Until the month&apos;s sales are all approved and counted, its figures can still go up.</li>
         <li>

@@ -76,7 +76,7 @@ export function EveryonePayTable({ people, totals, payoutsKnown = false }: Every
                 <span className="text-foreground">{aed(p.commission.payable)}</span>
                 <p className="text-[10px] text-muted-foreground">
                   {p.percent}% of {aed(p.commission.earned)}
-                  {(p.commission.balance ?? 0) > 0 ? ` · +${aed(p.commission.balance ?? 0)} balance` : ""}
+                  {(p.commission.balance ?? 0) > 0 ? ` · +${aed(p.commission.balance ?? 0)} waiting for full payment` : ""}
                   {p.commission.notCountedYet > 0 ? ` · ${p.commission.notCountedYet} not counted yet` : ""}
                 </p>
                 {payoutsKnown && <div className="mt-1"><PayoutBadge payout={p.payout} payable={p.commission.payable} compact /></div>}

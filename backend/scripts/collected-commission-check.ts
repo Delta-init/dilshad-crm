@@ -6,10 +6,11 @@
  *      out; enrolled but not "closed" is refused; a bad id is not found; only a leader of its team decides;
  *   2. an approved balance payment reaches its enrolment once — paid, pending, fee status — never on top of a hand
  *      edit; a pending or rejected one, or one in another currency, is left out;
- *   3. commission is earned on the money received, in the month received: 75 % paid earns 75 %, the rest is balance;
- *      money before 1 October never earns; a balance paid in November earns in November; no fee earns all on the
- *      sale day; My Pay's target is the money received in the month; who sees which lines;
- *   4. Daily Closings: collected in the period only, the rest "paid outside"; commission earned and balance; an
+ *   3. paid in full first (2026-10-31): a part-paid sale earns nothing — all of its commission waits; paid in full,
+ *      all of it is earned in the month of the last payment (a September part included); an October sale finished in
+ *      November earns in November, not October; no fee earns all on the sale day; My Pay's target is still the money
+ *      received in the month; who sees which lines;
+ *   4. Daily Closings: collected in the period only, the rest "paid outside"; commission earned and waiting; an
  *      empty period is zeros; a BDE sees no one else's commission;
  *   5. who sees whose closings: a Super Admin and the Sales Manager everyone's; a team leader their teams'; anyone
  *      else their own — whatever the filters ask; a bad team id narrows nothing and fails nothing.
@@ -161,7 +162,7 @@ await applyApprovedBalances();
 check("invalid: pending, rejected and another currency's payments left out", (await student(b3.studentId))?.paidAmount === 1125 && !(await student(b3.studentId))?.balanceApplied, j(await student(b3.studentId)));
 
 /* ── 3. Commission on the money received, in its month ────────────────── */
-section("3. Commission on the money received, in the month received");
+section("3. Paid in full first — earned whole in the month of the last payment");
 // 75 % paid in October.
 const s75 = await sale("Bea", T1, { date: "2026-10-05T08:00:00Z", fee: 2000, pays: [{ amount: 1500, paidAt: "2026-10-05T00:00:00Z" }] });
 // Half before commission started (30 Sep), half in October.
@@ -179,23 +180,27 @@ const nov = await svc.getEarnings(viewer("Admin"), "2026-11");
 const saleRow = (e: typeof oct, sold: { name: string }) => (e.sales as any[]).find((x) => x.studentName === sold.name);
 const s75Row = saleRow(oct, s75);
 const s75Sales = s75Row?.lines?.find((l: any) => l.role === "sales");
-check("happy: 75 % received → 172.50 of 230 earned, 57.50 balance; the sale says 75 % this month",
-  (await saleOf(s75.studentId))?.paidShare === 0.75 && s75Sales?.earned === 172.5 && s75Sales?.balance === 57.5 && s75Row?.monthShare === 0.75, j({ s75Row }));
-check(`…every line the same share: SM 63.75${PAYS_TL ? ", TL 75" : ""}`, s75Row?.lines?.find((l: any) => l.role === "sm")?.earned === 63.75
-  && (!PAYS_TL || s75Row?.lines?.find((l: any) => l.role === "tl")?.earned === 75), j(s75Row?.lines));
+check("happy: 75 % received, still owing → nothing earned, all 230 waiting; the sale says 75 % received this month",
+  (await saleOf(s75.studentId))?.paidShare === 0.75 && s75Sales?.earned === 0 && s75Sales?.balance === 230 && s75Row?.monthShare === 0.75 && s75Row?.paidInFullAt === null, j({ s75Row }));
+check(`…every line waits whole: SM 85${PAYS_TL ? ", TL 100" : ""}`, s75Row?.lines?.find((l: any) => l.role === "sm")?.earned === 0 && s75Row?.lines?.find((l: any) => l.role === "sm")?.balance === 85
+  && (!PAYS_TL || s75Row?.lines?.find((l: any) => l.role === "tl")?.balance === 100), j(s75Row?.lines));
 const sepRow = saleRow(oct, sSep);
-check("edge: paid half on 30 Sep, half in October — 50 % in October, the September half never",
-  sepRow?.monthShare === 0.5 && sepRow?.lines?.find((l: any) => l.role === "sales")?.earned === 115 && (await saleOf(sSep.studentId))?.paidShare === 0.5, j(sepRow));
+check("edge: paid half on 30 Sep, half in October — paid in full in October, all 230 earned there",
+  sepRow?.lines?.find((l: any) => l.role === "sales")?.earned === 230 && sepRow?.lines?.find((l: any) => l.role === "sales")?.balance === 0
+  && new Date(sepRow?.paidInFullAt).toISOString().startsWith("2026-10-05"), j(sepRow));
 const novOct = saleRow(oct, sNov), novNov = saleRow(nov, sNov);
-check("edge: an October sale's balance paid in November earns in November",
-  novOct?.monthShare === 0.5 && novNov?.monthShare === 0.5 && novNov?.lines?.find((l: any) => l.role === "sales")?.earned === 115, j({ oct: novOct?.monthShare, nov: novNov?.monthShare }));
-check("edge: no fee — all of it on the sale day", saleRow(oct, sFree)?.monthShare === 1, j(saleRow(oct, sFree)));
+check("edge: an October sale finished in November — nothing in October, all 230 in November",
+  novOct?.lines?.find((l: any) => l.role === "sales")?.earned === 0 && novNov?.lines?.find((l: any) => l.role === "sales")?.earned === 230
+  && new Date(novNov?.paidInFullAt).toISOString().startsWith("2026-11-03"), j({ oct: novOct?.lines, nov: novNov?.lines }));
+check("edge: no fee — all of it on the sale day", saleRow(oct, sFree)?.lines?.find((l: any) => l.role === "sales")?.earned === 230, j(saleRow(oct, sFree)));
 const bea = oct.people.find((p: any) => p.name === "Bea") as any;
-check("the people: Bea's earned and balance", bea?.total === 172.5 && bea?.balance === 57.5, j(bea));
+check("the people: Bea has nothing earned, 230 waiting", bea?.total === 0 && bea?.balance === 230, j(bea));
 check("totals: earned and balance", typeof oct.totals.balance === "number" && oct.totals.balance > 0, j(oct.totals));
 // Who sees what.
 const asBea = await svc.getEarnings(viewer("Bea"), "2026-10");
 check("permission: a BDE sees only her own lines", asBea.sales.length > 0 && (asBea.sales as any[]).every((x) => x.lines.every((l: any) => l.userName === "Bea")), j(asBea.sales.map((x: any) => x.lines)));
+const calOct = oct.people.find((p: any) => p.name === "Cal") as any;
+check("the people: Cal, paid in full in October, 230 earned", calOct?.total === 230 && calOct?.balance === 0, j(calOct));
 const asTina = await svc.getEarnings(viewer("Tina"), "2026-10");
 check("permission: a team leader sees her team's lines, not the Sales Manager's", (asTina.sales as any[]).some((x) => x.lines.some((l: any) => l.userName === "Bea"))
   && (asTina.sales as any[]).every((x) => x.lines.every((l: any) => l.role !== "sm")) && !(asTina.sales as any[]).some((x) => x.lines.some((l: any) => l.userName === "Oli")), j(asTina.sales.map((x: any) => x.lines)));
@@ -205,25 +210,27 @@ check("permission: the Sales Manager sees everyone's", (asManager.sales as any[]
 const slabs = { sales: [{ name: "Base", target: 0, salary: 1000, percent: 100 }], tl: [{ name: "Base", target: 0, salary: 1000, percent: 100 }], sm: [{ name: "Base", target: 0, salary: 1000, percent: 100 }] } as never;
 const rowsOct = await payRows("2026-10", slabs);
 const beaPay = rowsOct.find((r) => r.name === "Bea");
-check("My Pay: Bea's October target is the 1,500 received, of a 2,000 fee; 172.50 earned + 57.50 balance",
-  beaPay?.sales.value === 1500 && beaPay?.sales.fee === 2000 && beaPay?.commission.earned === 172.5 && beaPay?.commission.balance === 57.5, j(beaPay));
+check("My Pay: Bea's October target is still the 1,500 received, of a 2,000 fee; nothing earned, 230 waiting",
+  beaPay?.sales.value === 1500 && beaPay?.sales.fee === 2000 && beaPay?.commission.earned === 0 && beaPay?.commission.balance === 230, j(beaPay));
 const oliNov = (await payRows("2026-11", slabs)).find((r) => r.name === "Oli");
-check("My Pay: Oli's November counts the 1,000 paid in November on his October sale", oliNov?.sales.value === 1000 && oliNov?.commission.earned === 115, j(oliNov));
+check("My Pay: Oli's November counts the 1,000 paid in November, and all 230 of the sale it finished", oliNov?.sales.value === 1000 && oliNov?.commission.earned === 230, j(oliNov));
 
 /* ── 4. Daily Closings: collected in the period ───────────────────────── */
-section("4. Daily Closings — collected in the period, commission and balance");
+section("4. Daily Closings — collected in the period, commission earned and waiting");
 const closings = new StudentService();
 const octBook = await closings.listDailyClosings({ dateFrom: "2026-10-01", dateTo: "2026-10-31" }, viewer("Manager") as never);
 const row = (book: any, studentId: string) => book.days.flatMap((d: any) => d.enrolments).find((e: any) => String(e.id) === studentId);
 check("happy: October — the 75 % sale shows 1,500 collected", row(octBook, s75.studentId)?.paidAmount === 1500, j(row(octBook, s75.studentId)));
 check("edge: the half paid in September shows as paid outside the period, not collected", row(octBook, sSep.studentId)?.paidAmount === 1000 && row(octBook, sSep.studentId)?.paidOutside === 1000, j(row(octBook, sSep.studentId)));
 check("…and the November balance is outside October too", row(octBook, sNov.studentId)?.paidAmount === 1000 && row(octBook, sNov.studentId)?.paidOutside === 1000, j(row(octBook, sNov.studentId)));
-check("…commission on each closing: earned and balance; totals", row(octBook, s75.studentId)?.commission?.earned === 172.5 + 63.75 + (PAYS_TL ? 75 : 0) && octBook.totals.commissionEarned > 0, j({ c: row(octBook, s75.studentId)?.commission, t: octBook.totals }));
+check("…commission on each closing: the part-paid one all waiting, the one paid in full all earned; totals",
+  row(octBook, s75.studentId)?.commission?.earned === 0 && row(octBook, s75.studentId)?.commission?.balance === 230 + 85 + (PAYS_TL ? 100 : 0)
+  && row(octBook, sSep.studentId)?.commission?.earned === 230 + 85 + (PAYS_TL ? 100 : 0) && octBook.totals.commissionEarned > 0, j({ c: row(octBook, s75.studentId)?.commission, t: octBook.totals }));
 const empty = await closings.listDailyClosings({ dateFrom: "2026-12-01", dateTo: "2026-12-31" }, viewer("Manager") as never);
 check("invalid: a period with no closings — zeros", empty.days.length === 0 && empty.totals.paidAmount === 0 && empty.totals.commissionEarned === 0, j(empty.totals));
 const beaBook = await closings.listDailyClosings({ dateFrom: "2026-10-01", dateTo: "2026-10-31" }, viewer("Bea") as never);
 check("permission: a BDE's book has only her closings, and only her own commission", beaBook.view === "own"
-  && beaBook.days.flatMap((d: any) => d.enrolments).every((e: any) => e.closedByName === "Bea") && row(beaBook, s75.studentId)?.commission?.earned === 172.5, j(row(beaBook, s75.studentId)));
+  && beaBook.days.flatMap((d: any) => d.enrolments).every((e: any) => e.closedByName === "Bea") && row(beaBook, s75.studentId)?.commission?.balance === 230, j(row(beaBook, s75.studentId)));
 
 /* ── 5. Who sees whose closings ───────────────────────────────────────── */
 section("5. Daily Closings — each person their scope");
