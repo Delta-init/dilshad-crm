@@ -54,7 +54,7 @@ export function SlabsCard({ plan }: { plan: CommissionPlanView }) {
         ))}
       </div>
       <p className="border-t border-border/40 px-4 py-2.5 text-[11px] text-muted-foreground">
-        Pay = the level&apos;s salary + the month&apos;s commission × its share. The target counts the course fee of sales finance approved, in the month they were closed — a part-paid one in the month it&apos;s paid in full.
+        Pay = the level&apos;s salary + the month&apos;s commission × its share. The target counts the course fee of sales finance approved, in the month they were closed.
       </p>
     </motion.div>
   );

@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { Lead } from "../models/Lead.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
+import { Student } from "../models/Student.js";
 import type { IRole } from "../types/index.js";
 import { notify, superAdminIds } from "./notificationService.js";
 import { idOf, isSuperAdmin, loadConfig } from "./commissionService.js";
@@ -90,7 +91,7 @@ export async function holdRepeatLead(leadId: string, row: RepeatRow, reporterId:
   const leaders = await activeLeaders(team);
   const tell = leaders.length ? leaders : await superAdminIds();
   const alreadyWaiting = doc.repeat?.waiting === true;
-  const alreadyClient = lead.status === "closed";
+  const alreadyClient = lead.status === "closed" || !!(await Student.exists({ leadId: lead._id }));
   const previousOwner = alreadyWaiting ? idOf(doc.repeat.previousOwner) : ownerId;
   const previousOwnerName = Types.ObjectId.isValid(previousOwner)
     ? String((await User.findById(previousOwner).select("name").lean<{ name?: string }>())?.name ?? "")
@@ -235,7 +236,8 @@ export async function listRepeatLeads(viewer: Viewer, state: "waiting" | "done" 
         teamId: idOf(r.repeat?.team) || null,
         previousOwner: r.repeat?.previousOwner ? { id: idOf(r.repeat.previousOwner), name: nameOf(r.repeat.previousOwner) } : null,
         previousStatus: r.repeat?.previousStatus ?? null,
-        alreadyClient: r.repeat?.alreadyClient === true,
+        // closed since the repeat came in counts too — it stays with its owner
+        alreadyClient: r.repeat?.alreadyClient === true || r.status === "closed",
         source: r.repeat?.source ?? null,
         campaign: r.repeat?.campaign ?? null,
         decidedBy: r.repeat?.decidedBy ? { id: idOf(r.repeat.decidedBy), name: nameOf(r.repeat.decidedBy) } : null,
@@ -278,7 +280,17 @@ export async function giveRepeatLead(viewer: Viewer, leadId: string, toUserId: s
     if (!inTeam) throw Object.assign(new Error("Give it to someone in the same team"), { statusCode: 400 });
   }
   const ownerNow = idOf(lead.assignedTo);
-  if (doc.repeat.alreadyClient && toUserId !== ownerNow) {
+  // A client now, not only when the repeat came in: closed, or enrolled, while it waited (the user, 2026-10-29 —
+  // a lead closed and approved by finance was given away and reset to Assigned by a repeat that came before the close).
+  const clientNow =
+    doc.repeat.alreadyClient === true ||
+    lead.status === "closed" ||
+    !!(await Student.exists({ leadId: lead._id }));
+  if (clientNow && !doc.repeat.alreadyClient) {
+    doc.repeat.alreadyClient = true;
+    lead.markModified("repeat");
+  }
+  if (clientNow && toUserId !== ownerNow) {
     throw Object.assign(new Error("Already a client — it stays with its owner"), { statusCode: 400 });
   }
 

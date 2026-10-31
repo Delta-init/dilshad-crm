@@ -13,9 +13,6 @@
  *   - a team with no leader or two, a closer in no team, or no Sales Manager
  *     holds the sale until fixed; shared logins earn nothing;
  *   - a voided invoice reverses the sale; the month is the sale's, in UAE time;
- *   - paid in full first (2026-10-30): approved but part paid, a sale waits,
- *     saying what is owed; paid in full, it counts in that month, not the
- *     month it was closed;
  *   - who sees what, the preview the closing dialog shows, and the API's
  *     refusals;
  *   - a Bangalore close (2026-10-10): its status asked of Bangalore's finance
@@ -40,12 +37,7 @@ function check(label: string, ok: boolean, detail = "") {
 const section = (s: string) => console.log(`\n${s}`);
 
 // ── A stand-in for finance's enrolment status call ──────────────────────────
-type Answer = {
-  approval: string; status: string; invoiceNumber: string; lms?: unknown; commission?: unknown;
-  /** The invoice's money, as finance has it — nothing owed unless said. */
-  totalMinor?: number; balanceMinor?: number; payments?: { amountMinor: number; paidOn: string; method: string }[];
-  balancePayments?: { externalId: string; amountMinor: number; currency: string; method: string; paidOn: string; status: string; decidedAt?: string }[];
-};
+type Answer = { approval: string; status: string; invoiceNumber: string; lms?: unknown; commission?: unknown };
 const finance = new Map<string, Answer>();
 // Like finance, each enrolment lives in one organization, and a status call
 // (x-delta-org) is answered only for that organization's own.
@@ -53,8 +45,6 @@ const DUBAI_ORG = "000000000000000000000001", BLR_ORG = "00000000000000000000000
 const orgOfSale = new Map<string, string>();
 const statusCalls: { org: string; ids: string[] }[] = [];
 let financeDown = false;
-/** Whose month's CRM commission finance has approved, per month. */
-const payoutsTo = new Map<string, string[]>();
 const fake = Bun.serve({
   port: 0,
   async fetch(req) {
@@ -69,14 +59,11 @@ const fake = Bun.serve({
         return {
           externalId: id, invoiceId: `inv-${id}`, invoiceNumber: a.invoiceNumber, status: a.status,
           approval: a.approval, returnedReason: "", issueDate: "2026-10-01", currency: "AED",
-          totalMinor: a.totalMinor ?? 0, amountPaidMinor: (a.totalMinor ?? 0) - (a.balanceMinor ?? 0), balanceMinor: a.balanceMinor ?? 0,
-          lms: a.lms ?? null, commission: a.commission ?? null, payments: a.payments ?? [], balancePayments: a.balancePayments ?? [],
+          totalMinor: 0, amountPaidMinor: 0, balanceMinor: 0,
+          lms: a.lms ?? null, commission: a.commission ?? null,
         };
       });
       return Response.json({ data });
-    }
-    if (req.method === "GET" && url.pathname === "/api/v1/integrations/crm-commission/payouts") {
-      return Response.json({ data: (payoutsTo.get(url.searchParams.get("month") ?? "") ?? []).map((userId) => ({ userId, state: "approved", amount: 1, currency: "AED", approvedByName: "Mona", approvedAt: "2026-10-31T08:00:00.000Z" })) });
     }
     return new Response("not here", { status: 404 });
   },
@@ -366,7 +353,8 @@ let e = await service.getEarnings(view("Theertha"), month);
 check("a BDE sees only her own lines", e.scope === "own" && e.sales.every((x) => x.lines.every((l) => l.userName === "Theertha")) && e.sales.length > 0);
 const theertha = e.people.find((p) => p.name === "Theertha");
 // Counted October sales of hers: shared (reassigned) 230, oldCourse 0, noCourse 0, lateNight 230 = 460; staff reversed.
-check("her total is her counted Sales Staff amounts, without the reversed sale", theertha?.total === 460 && theertha.sales.count === 4, JSON.stringify(theertha));
+// Since 2026-10-31 a sale is counted for her only when it earns something: the two at 0 don't.
+check("her total is her counted Sales Staff amounts, without the reversed sale", theertha?.total === 460 && theertha.sales.count === 2, JSON.stringify(theertha));
 const riaView = { userId: String(people.Ria), role: { roleName: "BDE", isSystemRole: false } as never };
 e = await service.getEarnings(riaView, month);
 check("a team leader sees her team's sales, without the SM's line", e.scope === "team" && e.sales.some((x) => x.closerName === "Theertha") && e.sales.every((x) => x.lines.every((l) => l.role !== "sm")));
@@ -396,103 +384,6 @@ check(PAYS_TL ? "on a team with no leader the closer's 500 shows, on hold" : "wi
   p.closerTotal === 500 && (PAYS_TL ? p.state === "waiting" && /no leader/.test(p.reason) : p.state === "counted"));
 p = await service.preview({ course: String(old._id), team: String(teams["TEAM TITAN"]), closer: String(people.Theertha) }, asAdmin);
 check("a course with no plan previews 0", p.closerTotal === 0 && p.plan.sales === 0);
-
-section("Paid in full first: a part-paid sale waits, and counts in the month it is paid in full (2026-10-30)");
-const pay = (amountMinor: number, paidOn: string) => ({ amountMinor, paidOn, method: "Cash" });
-const partPaid = await sale("Theertha", c1._id, "TEAM TITAN");
-complete(partPaid);
-at(partPaid, { status: "partially_paid", totalMinor: 225000, balanceMinor: 112500, payments: [pay(112500, "2026-10-10")] });
-await sweep();
-let pp = await saleOf(partPaid);
-check("approved but part paid: not counted — waiting for full payment, what is owed said, nothing paid",
-  pp?.state === "progress" && pp.reason === "Waiting for full payment — AED 1,125 of 2,250 still owed" && pp.lines.length === 0
-  && pp.owed?.amount === 1125 && pp.month === "2026-10", `${pp?.state} ${pp?.reason}`);
-let earned = await service.getEarnings({ userId: String(people.Abrar), role: { roleName: "Super Admin" } as never }, "2026-10");
-const ppRow = (earned.sales as { _id: string; state: string }[]).find((x) => x._id === String(pp?._id));
-check("…October's earnings list it as not counted yet", ppRow?.state === "progress", JSON.stringify(ppRow));
-at(partPaid, { balanceMinor: 50000, payments: [pay(112500, "2026-10-10"), pay(62500, "2026-10-28")] });
-await sweep();
-pp = await saleOf(partPaid);
-check("a balance payment that still leaves something owed: still waiting, the new figure said",
-  pp?.state === "progress" && /AED 500 of 2,250 still owed/.test(pp.reason), pp?.reason);
-at(partPaid, {
-  status: "paid", balanceMinor: 0, payments: [pay(112500, "2026-10-10"), pay(62500, "2026-10-28"), pay(50000, "2026-11-03")],
-  balancePayments: [{ externalId: "bp-1", amountMinor: 50000, currency: "AED", method: "Cash", paidOn: "2026-11-03", status: "approved", decidedAt: "2026-11-04T06:00:00.000Z" }],
-});
-await sweep();
-pp = await saleOf(partPaid);
-check("paid in full: counted, by the plan, in November — the month it was paid in full, not the month closed",
-  pp?.state === "counted" && who(pp, "sales") === "Theertha:230" && pp.month === "2026-11" && pp.paidInFullAt?.toISOString() === "2026-11-04T06:00:00.000Z" && !pp.owed,
-  `${pp?.state} ${pp?.month} ${pp?.paidInFullAt?.toISOString()} ${who(pp, "sales")}`);
-earned = await service.getEarnings({ userId: String(people.Abrar), role: { roleName: "Super Admin" } as never }, "2026-10");
-check("…gone from October's list", !(earned.sales as { _id: string }[]).some((x) => x._id === String(pp?._id)));
-earned = await service.getEarnings({ userId: String(people.Abrar), role: { roleName: "Super Admin" } as never }, "2026-11");
-const novRow = (earned.sales as { _id: string; state: string; paidInFullAt?: Date }[]).find((x) => x._id === String(pp?._id));
-check("…and in November's, counted, with the day it was paid in full", novRow?.state === "counted" && Boolean(novRow.paidInFullAt), JSON.stringify(novRow));
-await sweep();
-check("sweeping again leaves it as it is", (await saleOf(partPaid))?.month === "2026-11");
-
-const paidAtClose = await sale("Theertha", c1._id, "TEAM TITAN");
-complete(paidAtClose);
-at(paidAtClose, { status: "paid", totalMinor: 225000, balanceMinor: 0, payments: [pay(225000, "2026-11-02")] });
-await sweep();
-pp = await saleOf(paidAtClose);
-check("paid in full at the close: counted in the month closed, as before", pp?.state === "counted" && pp.month === "2026-10" && !pp.paidInFullAt, `${pp?.month}`);
-
-const noDates = await sale("Theertha", c1._id, "TEAM TITAN");
-complete(noDates);
-at(noDates, { status: "partially_paid", totalMinor: 225000, balanceMinor: 100000 });
-await sweep();
-at(noDates, { status: "paid", balanceMinor: 0 });
-await sweep();
-pp = await saleOf(noDates);
-check("paid in full, finance giving no payment dates: the month it was seen paid", pp?.state === "counted" && pp.month === uaeMonthOf(new Date()), `${pp?.month}`);
-
-const partVoid = await sale("Theertha", c1._id, "TEAM TITAN");
-complete(partVoid);
-at(partVoid, { status: "partially_paid", totalMinor: 225000, balanceMinor: 112500 });
-await sweep();
-at(partVoid, { status: "void" });
-await sweep();
-check("a part-paid sale whose invoice is voided: reversed", (await saleOf(partVoid))?.state === "reversed");
-
-const partBlr = await sale("Theertha", c1._id, "TEAM TITAN", { academy: "bangalore" });
-orgOfSale.set(partBlr, BLR_ORG);
-complete(partBlr);
-finance.set(partBlr, { ...finance.get(partBlr)!, status: "partially_paid", totalMinor: 4500000, balanceMinor: 2000000 });
-await sweep();
-pp = await saleOf(partBlr);
-check("a part-paid Bangalore close waits too, owed in its own currency", pp?.state === "progress" && /^Waiting for full payment — AED 20,000 of 45,000/.test(pp.reason), pp?.reason);
-
-section("Sales counted while part paid, before this: put back by scripts/commission-full-payment.ts");
-const fix = await import("./commission-full-payment.js");
-const countedEarly = await sale("Neethu", c1._id, "TEAM MAVERICK");
-const paidOutEarly = await sale("Shahana", c1._id, "Team Legacy", { date: "2026-12-05T08:00:00Z" });
-for (const id of [countedEarly, paidOutEarly]) complete(id);
-await sweep();
-check("two sales counted, as before the rule", (await saleOf(countedEarly))?.state === "counted" && (await saleOf(paidOutEarly))?.state === "counted");
-// Finance has them owing (as part-paid sales counted before this did); December's commission already approved for Shahana.
-for (const id of [countedEarly, paidOutEarly]) at(id, { status: "partially_paid", totalMinor: 225000, balanceMinor: 112500, payments: [pay(112500, "2026-10-10")] });
-payoutsTo.set("2026-12", [String(people.Shahana)]);
-await sweep();
-check("the sweep leaves a counted sale as it was", (await saleOf(countedEarly))?.state === "counted");
-const foundEarly = await fix.partPaidCounted();
-const fe = foundEarly?.find((f) => f.student === countedEarly), fp = foundEarly?.find((f) => f.student === paidOutEarly);
-check("the script finds the counted part-paid sales — and only those", foundEarly?.length === 2 && fe?.owed.amount === 1125 && fe.paying > 0 && fe.paidOut.length === 0, JSON.stringify(foundEarly));
-check("…one whose month is already approved in finance for somebody on it is named, to be left alone", fp?.paidOut.join() === "Shahana", JSON.stringify(fp));
-check("…putting back only the other", (await fix.putBack(foundEarly!)) === 1 && (await saleOf(paidOutEarly))?.state === "counted");
-pp = await saleOf(countedEarly);
-check("…which waits for full payment now, nothing paid", pp?.state === "progress" && /^Waiting for full payment/.test(pp.reason) && pp.lines.length === 0 && !pp.stepsDoneAt, pp?.reason);
-await sweep();
-check("…and the sweep keeps it waiting", (await saleOf(countedEarly))?.state === "progress");
-at(countedEarly, { status: "paid", balanceMinor: 0, payments: [pay(112500, "2026-10-10"), pay(112500, "2026-11-12")] });
-await sweep();
-pp = await saleOf(countedEarly);
-check("…then paid in full: counted again, in November", pp?.state === "counted" && pp.month === "2026-11" && who(pp, "sales") === "Neethu:230", `${pp?.state} ${pp?.month}`);
-financeDown = true;
-check("finance not answering: the script finds nothing on a guess", (await fix.partPaidCounted()) === null);
-financeDown = false;
-payoutsTo.clear();
 
 section("Case 3/4 — the API: bad input and who may change the plan");
 const express = (await import("express")).default;

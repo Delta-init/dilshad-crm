@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  CalendarCheck, ChevronDown, Loader2, RefreshCw, Trophy, Users, Wallet,
+  BadgeDollarSign, CalendarCheck, ChevronDown, Loader2, RefreshCw, Trophy, Users, Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,8 +61,15 @@ export default function ClosingsPage() {
   const { data, isLoading, isFetching, refetch } = useDailyClosings({
     dateFrom, dateTo, team: team || undefined, user: person || undefined, mine,
   });
-  const { data: teamsData } = useTeams({ limit: 100 });
-  const teams = teamsData?.data ?? [];
+  // Everyone's for a Super Admin / the Sales Manager, a leader's own teams, nothing to pick for anyone else.
+  const view = data?.view ?? "own";
+  const { data: teamsData } = useTeams({ limit: 100 }, { enabled: !!data && view !== "own" });
+  const teams = useMemo(() => {
+    const all = teamsData?.data ?? [];
+    if (view === "all") return all;
+    const mine = new Set((data?.teams ?? []).map((t) => t.id));
+    return all.filter((t) => mine.has(t._id));
+  }, [teamsData, view, data?.teams]);
 
   // The people to pick from: the chosen team's, or every team's — leaders and
   // members both (leaders aren't in `members`), once each, by name.
@@ -108,14 +115,18 @@ export default function ClosingsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setMine(!mine)}
-            className="gap-2"
-          >
-            {mine ? "Show everyone's" : "Show only mine"}
-          </Button>
+          {view !== "own" && (
+            <motion.div whileTap={{ scale: 0.97 }}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMine(!mine)}
+                className="gap-2"
+              >
+                {mine ? (view === "team" ? "Show my team's" : "Show everyone's") : "Show only mine"}
+              </Button>
+            </motion.div>
+          )}
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} className="gap-2">
             <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
             Refresh
@@ -127,7 +138,7 @@ export default function ClosingsPage() {
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+        className="grid grid-cols-2 gap-3 lg:grid-cols-5"
       >
         <Stat
           icon={CalendarCheck}
@@ -143,12 +154,20 @@ export default function ClosingsPage() {
           sub={`${totals?.days ?? 0} day${totals?.days === 1 ? "" : "s"} with a closing`}
           tone="violet"
         />
+        {/* Collected first, the balance beside it (the user, 2026-10-31). */}
         <Stat
           icon={Wallet}
-          label="Value closed"
-          value={fmtFull(totals?.totalFee ?? 0)}
-          sub={`${fmtFull(totals?.paidAmount ?? 0)} collected`}
+          label="Collected in this period"
+          value={fmtFull(totals?.paidAmount ?? 0)}
+          sub={`of ${fmtFull(totals?.totalFee ?? 0)} · ${fmtFull(totals?.pendingAmount ?? 0)} balance`}
           tone="amber"
+        />
+        <Stat
+          icon={BadgeDollarSign}
+          label="Commission earned"
+          value={fmtFull(totals?.commissionEarned ?? 0)}
+          sub={`${fmtFull(totals?.commissionBalance ?? 0)} balance, on payments still due`}
+          tone="green"
         />
         <Stat
           icon={Trophy}
@@ -173,6 +192,8 @@ export default function ClosingsPage() {
           <label className="text-[11px] font-medium text-muted-foreground">To</label>
           <Input type="date" value={dateTo} min={dateFrom} onChange={(e) => setDateTo(e.target.value)} className="h-9 w-[150px]" />
         </div>
+        {view !== "own" && (
+          <>
         <div className="space-y-1">
           <label className="text-[11px] font-medium text-muted-foreground">Team</label>
           <select
@@ -180,7 +201,7 @@ export default function ClosingsPage() {
             onChange={(e) => pickTeam(e.target.value)}
             className="h-9 w-[170px] rounded-md border border-border bg-background px-2 text-sm"
           >
-            <option value="">All teams</option>
+            <option value="">{view === "team" ? "All my teams" : "All teams"}</option>
             {teams.map((t) => (
               <option key={t._id} value={t._id}>{t.name}</option>
             ))}
@@ -202,6 +223,8 @@ export default function ClosingsPage() {
             ))}
           </select>
         </div>
+          </>
+        )}
         <div className="ml-auto flex gap-2">
           <Button variant="ghost" size="sm" onClick={() => { setDateFrom(dayKey(new Date())); setDateTo(dayKey(new Date())); }}>
             Today
@@ -308,8 +331,10 @@ function DayRow({
             <p className="text-[11px] text-muted-foreground">closing{day.count === 1 ? "" : "s"}</p>
           </div>
           <div className="w-28">
-            <p className="text-sm font-semibold tabular-nums leading-none">{fmtFull(day.totalFee)}</p>
-            <p className="text-[11px] text-muted-foreground">{fmtFull(day.paidAmount)} in</p>
+            <p className="text-sm font-semibold tabular-nums leading-none">{fmtFull(day.paidAmount)}</p>
+            <p className="text-[11px] text-muted-foreground">
+              {day.pendingAmount > 0 ? `${fmtFull(day.pendingAmount)} balance` : `of ${fmtFull(day.totalFee)}`}
+            </p>
           </div>
         </div>
       </button>
@@ -331,11 +356,29 @@ function DayRow({
                 <p className="text-xs">{e.closedByName}</p>
                 <p className="text-[11px] text-muted-foreground">{e.teamName}</p>
               </div>
+              {e.commission?.state === "counted" && (e.commission.earned > 0 || e.commission.balance > 0) && (
+                <div className="text-right">
+                  <p className="text-xs font-medium tabular-nums text-green-600 dark:text-green-400">
+                    {fmtFull(e.commission.earned)} commission
+                  </p>
+                  <p className="text-[11px] tabular-nums text-muted-foreground">
+                    {e.commission.balance > 0 ? `${fmtFull(e.commission.balance)} on the balance` : "All earned"}
+                  </p>
+                </div>
+              )}
               <div className="ml-auto text-right">
-                <p className="text-sm font-semibold tabular-nums">{fmtFull(e.totalFee)}</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {e.pendingAmount > 0 ? `${fmtFull(e.pendingAmount)} due` : "Paid in full"}
+                <p className="text-sm font-semibold tabular-nums">
+                  {fmtFull(e.paidAmount)}
+                  <span className="font-normal text-muted-foreground"> / {fmtFull(e.totalFee)}</span>
                 </p>
+                <p className={cn("text-[11px]", e.pendingAmount > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+                  {e.pendingAmount > 0 ? `${fmtFull(e.pendingAmount)} balance` : "Paid in full"}
+                </p>
+                {(e.paidOutside ?? 0) > 0 && (
+                  <p className="text-[11px] text-muted-foreground" title="Received outside this period — not counted in it, nor in its commission">
+                    {fmtFull(e.paidOutside ?? 0)} paid outside this period
+                  </p>
+                )}
               </div>
             </div>
           ))}

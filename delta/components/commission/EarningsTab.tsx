@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Ban, CheckCircle2, Coins, Hourglass, Undo2, UserX, Users, AlertTriangle,
+  Ban, CheckCircle2, Coins, Hourglass, Undo2, UserX, Users, AlertTriangle, Wallet,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -45,7 +45,7 @@ export function EarningsTab() {
         </Select>
         {data && (
           <p className="text-xs text-muted-foreground">
-            {SCOPE_NOTE[data.scope]} · sales count in the month they were closed, once every step after the close is done
+            {SCOPE_NOTE[data.scope]} · counted once finance approves · earned in the month the money is received, the rest as balance
           </p>
         )}
       </div>
@@ -79,8 +79,9 @@ export function EarningsTab() {
         </motion.div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Stat icon={Coins} label="Commission" value={aed(data.totals.amount)} tone="primary" />
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <Stat icon={Coins} label="Commission earned" value={aed(data.totals.amount)} tone="primary" />
+            <Stat icon={Wallet} label="Balance — on payments due" value={aed(data.totals.balance ?? 0)} tone="amber" />
             <Stat icon={CheckCircle2} label="Sales counted" value={String(data.totals.counted)} tone="green" />
             <Stat icon={Hourglass} label="Not counted yet" value={String(data.totals.waiting + (data.totals.progress ?? 0))} tone="amber" />
             <Stat
@@ -100,7 +101,8 @@ export function EarningsTab() {
                     <th className="px-4 py-2.5 font-medium text-right">Sales Staff</th>
                     {TL_PAID && <th className="px-4 py-2.5 font-medium text-right">Team Leader</th>}
                     <th className="px-4 py-2.5 font-medium text-right">Sales Manager</th>
-                    <th className="px-4 py-2.5 font-medium text-right">Total</th>
+                    <th className="px-4 py-2.5 font-medium text-right">Earned</th>
+                    <th className="px-4 py-2.5 font-medium text-right">Balance</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -119,6 +121,9 @@ export function EarningsTab() {
                             <>
                               <span className="text-foreground">{aed(p[role].amount)}</span>
                               <span className="ml-1 text-[11px] text-muted-foreground">· {p[role].count}</span>
+                              {(p[role].balance ?? 0) > 0 && (
+                                <span className="block text-[10px] text-amber-600 dark:text-amber-400">+{aed(p[role].balance ?? 0)} balance</span>
+                              )}
                             </>
                           ) : (
                             <span className="text-muted-foreground/60">—</span>
@@ -126,6 +131,9 @@ export function EarningsTab() {
                         </td>
                       ))}
                       <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-primary">{aed(p.total)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-amber-600 dark:text-amber-400">
+                        {(p.balance ?? 0) > 0 ? aed(p.balance ?? 0) : <span className="text-muted-foreground/60">—</span>}
+                      </td>
                     </motion.tr>
                   ))}
                 </tbody>
@@ -179,9 +187,16 @@ function SaleRow({ sale: s, index }: { sale: CommissionSale; index: number }) {
           <p className="mt-0.5 text-xs text-muted-foreground">
             {s.courseName || "No course"} · closed by {s.closerName || "nobody"}
             {s.teamName ? ` · ${s.teamName}` : ""} · {uaeDate(s.saleDate)}
-            {s.paidInFullAt ? ` · paid in full ${uaeDate(s.paidInFullAt)}` : ""}
             {s.invoiceNumber ? ` · ${s.invoiceNumber}` : ""}
+            {typeof s.monthShare === "number" && s.monthShare < 1
+              ? ` · ${Math.round(s.monthShare * 100)}% of the fee received this month`
+              : ""}
           </p>
+          {s.state === "counted" && s.lines.length > 0 && s.lines.every((l) => l.amount === 0) && (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              No commission is set for {s.courseName ? `“${s.courseName}”` : "this course"} on the plan — it earns nothing.
+            </p>
+          )}
           {s.state !== "counted" && s.reason && (
             <p className={cn(
               "mt-1.5 text-[11px]",
@@ -205,7 +220,13 @@ function SaleRow({ sale: s, index }: { sale: CommissionSale; index: number }) {
                 )}
               >
                 <span className="font-semibold text-primary">{ROLE_SHORT[l.role]}</span>
-                {l.userName} · <span className="tabular-nums">{aed(l.amount)}</span>
+                {l.userName} · <span className="tabular-nums">{aed(l.earned ?? l.amount)}</span>
+                {l.earned !== undefined && l.amount > 0 && l.earned !== l.amount && (
+                  <span className="tabular-nums text-muted-foreground">of {aed(l.amount)}</span>
+                )}
+                {(l.balance ?? 0) > 0 && (
+                  <span className="tabular-nums text-amber-600 dark:text-amber-400">+{aed(l.balance ?? 0)} balance</span>
+                )}
               </span>
             ))}
           </div>

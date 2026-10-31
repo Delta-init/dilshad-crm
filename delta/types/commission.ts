@@ -59,8 +59,6 @@ export interface CommissionPlanView {
     teamName: string;
     saleDate: string;
     approvedAt: string;
-    /** A part-paid sale: when finance had it paid in full — it counts in that month. */
-    paidInFullAt?: string;
     reason: string;
   }[];
   /** Everyone, for the pickers — Super Admins only. */
@@ -99,8 +97,8 @@ export interface PayRow {
   role: CommissionRole;
   /** The teams a team leader's target counts. */
   teams: string[];
-  /** Finance-approved sales the target counts, and their fees. */
-  sales: { count: number; value: number };
+  /** Finance-approved sales the target counts: what is collected on them (`value`), and their full fees. */
+  sales: { count: number; value: number; fee?: number };
   /** Closed this month, not approved by finance yet. */
   awaitingFinance: { count: number; value: number };
   level: SlabLevel;
@@ -108,7 +106,8 @@ export interface PayRow {
   next: (SlabLevel & { more: number }) | null;
   salary: number;
   percent: number;
-  commission: { earned: number; payable: number; notCountedYet: number };
+  /** Earned on what is collected; `balance` is earned as balance payments are approved (2026-10-31). */
+  commission: { earned: number; balance?: number; payable: number; notCountedYet: number };
   total: number;
   /** Where finance stands on the month's commission (2026-10-21); null when neither approved nor paid. */
   payout?: CommissionPayout | null;
@@ -148,7 +147,10 @@ export interface CommissionLine {
   role: CommissionRole;
   user: string;
   userName: string;
+  /** The full plan amount; `earned` is the collected share of it, `balance` the rest. */
   amount: number;
+  earned?: number;
+  balance?: number;
   note: string;
 }
 
@@ -162,17 +164,22 @@ export interface CommissionSale {
   teamName: string;
   saleDate: string;
   approvedAt: string;
-  /** A part-paid sale: when finance had it paid in full — it counts in that month. */
-  paidInFullAt?: string;
   state: CommissionSaleState;
   reason: string;
+  fee?: number | null;
+  /** How much of the fee is collected, 0–1. */
+  paidShare?: number;
+  /** The share of the fee received in this month — what the lines earn in it. */
+  monthShare?: number;
   /** Only the lines the viewer may see. */
   lines: CommissionLine[];
 }
 
 interface Tally {
   count: number;
+  /** Earned, on what is collected. */
   amount: number;
+  balance?: number;
 }
 
 export interface CommissionEarnings {
@@ -180,9 +187,9 @@ export interface CommissionEarnings {
   /** What the viewer sees: everything, their teams', or their own. */
   scope: "all" | "team" | "own";
   tlRule?: "zero_if_sm" | "always" | "never";
-  people: { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number }[];
+  people: { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number; balance?: number }[];
   sales: CommissionSale[];
-  totals: { amount: number; counted: number; waiting: number; excluded: number; reversed: number; progress?: number };
+  totals: { amount: number; balance?: number; counted: number; waiting: number; excluded: number; reversed: number; progress?: number };
 }
 
 export interface CommissionPreview {

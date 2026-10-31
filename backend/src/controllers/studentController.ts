@@ -107,7 +107,7 @@ export const getDailyClosings = async (req: AuthenticatedRequest, res: Response,
       dateTo: q.dateTo?.trim() || undefined,
       team: q.team?.trim() || undefined,
       user: q.mine === "true" ? userId : q.user?.trim() || undefined,
-    });
+    }, { userId, role: req.user?.role });
     sendSuccess(res, "Daily closings fetched successfully", data);
   } catch (err) { next(err); }
 };

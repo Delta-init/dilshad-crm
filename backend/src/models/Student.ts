@@ -53,6 +53,11 @@ const studentSchema = new Schema<IStudent>(
     totalFee:     { type: Number, default: 0, min: 0 },
     paidAmount:   { type: Number, default: 0, min: 0 },
     pendingAmount:{ type: Number, default: 0, min: 0 },
+    /**
+     * The lead's balance payments already in paidAmount, by finance's id (the user, 2026-10-31: an approved balance
+     * payment stayed on the lead, and the enrolment still showed it owing). leadPaymentDecisions adds each once.
+     */
+    balanceApplied: { type: [String], default: undefined },
 
     /**
      * Which academy it was closed for (2026-10-10): Dubai, or Bangalore —

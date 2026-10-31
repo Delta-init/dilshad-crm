@@ -92,7 +92,7 @@ router.get(
       month,
       people: rows.map((r) => ({
         user: r.user, name: r.name, role: r.role, level: r.level.name, percent: r.percent,
-        earned: r.commission.earned, payable: r.commission.payable, notCountedYet: r.commission.notCountedYet,
+        earned: r.commission.earned, balance: r.commission.balance, payable: r.commission.payable, notCountedYet: r.commission.notCountedYet,
       })),
     });
   }),

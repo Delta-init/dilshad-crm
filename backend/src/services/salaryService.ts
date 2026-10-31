@@ -4,7 +4,7 @@ import { FinanceHandover } from "../models/FinanceHandover.js";
 import { Student } from "../models/Student.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
-import { COUNT_FROM, commissionScope, feeOf, idOf, isSuperAdmin, loadConfig, slabsForScope, uaeMonthOf } from "./commissionService.js";
+import { COUNT_FROM, commissionScope, feeOf, idOf, monthRange, owedShareOf, partOf, shareBetween, isSuperAdmin, loadConfig, slabsForScope, uaeMonthOf } from "./commissionService.js";
 import { slabsFor, TL_SLAB } from "./salarySlabs.js";
 import type { CommissionSaleState, IRole, ISlabRow, ISlabs, SlabRole } from "../types/index.js";
 import { fetchCommissionPayouts, type CommissionPayout } from "./financeClient.js";
@@ -13,9 +13,10 @@ import { fetchCommissionPayouts, type CommissionPayout } from "./financeClient.j
  * A month's salary and commission on the salary slabs (the user, 2026-10-05,
  * this Sales CRM only).
  *
- *   - what a target counts: the course fee of each sale finance has approved
- *     and not voided, in the month the sale was closed (UAE) — the month its
- *     commission is counted in;
+ *   - what a target counts: the money received in the month on each sale
+ *     finance has approved and not voided — a sale's balance paid next month
+ *     counts next month, money received before October never (the user,
+ *     2026-10-31: "that month collected payment only count");
  *   - Sales Staff count the sales they closed; a Team Leader their team's sales,
  *     their own closes in it included; the Sales Manager every sale in the CRM,
  *     shared logins' included. A shared login's sale counts for nobody else;
@@ -45,8 +46,8 @@ export interface PayRow {
   role: SlabRole;
   /** The teams a team leader's target counts. */
   teams: string[];
-  /** Finance-approved sales the target counts: how many, and their fees. */
-  sales: { count: number; value: number };
+  /** Finance-approved sales the target counts: how many, what is collected on them, and their full fees. */
+  sales: { count: number; value: number; fee: number };
   /** Closed this month, not approved by finance yet: they count once it does. */
   awaitingFinance: { count: number; value: number };
   level: Level;
@@ -57,8 +58,10 @@ export interface PayRow {
   /** Where finance stands on the month's commission: approved by a manager, then paid (2026-10-21); null when neither. */
   payout?: CommissionPayout | null;
   commission: {
-    /** Earned on sales counted this month, in every role. */
+    /** Earned on sales counted this month, in every role — on what is collected. */
     earned: number;
+    /** The rest of those lines: earned as their balance payments are approved. */
+    balance: number;
     payable: number;
     /** Sales still finishing their steps: their commission is added once they're counted. */
     notCountedYet: number;
@@ -81,17 +84,25 @@ type Fact = {
   closer: string;
   team: string;
   fee: number;
+  /** The fee received in this month: what a target counts. */
+  collected: number;
+  /** Closed in this month (not only paid in it). */
+  inMonth: boolean;
   approved: boolean;
   state: CommissionSaleState;
-  lines: { user: string; amount: number }[];
+  lines: { user: string; amount: number; balance: number }[];
 };
 
 type TeamLite = { _id: Types.ObjectId; name: string; status?: string; leaders?: unknown[]; members?: unknown[] };
 
-/** Every sale closed in the month and not voided, as the slabs count it. */
+/** Every sale closed in the month, or paid on in it, and not voided, as the slabs count it. */
 async function monthFacts(month: string, activeTeams: TeamLite[]): Promise<Fact[]> {
-  const sales = await CommissionSale.find({ month, state: { $ne: "reversed" } })
-    .select("student closer team state lines fee owed")
+  const { from, to } = monthRange(month);
+  const sales = await CommissionSale.find({
+    state: { $ne: "reversed" },
+    $or: [{ month }, { collections: { $elemMatch: { paidAt: { $gte: from, $lte: to } } } }],
+  })
+    .select("student closer team state lines fee saleDate month paidShare owedShare collections")
     .lean();
   if (!sales.length) return [];
   const ids = sales.map((s) => s.student);
@@ -116,15 +127,21 @@ async function monthFacts(month: string, activeTeams: TeamLite[]): Promise<Fact[
       const theirs = activeTeams.filter((t) => inTeam(t, closer));
       if (theirs.length === 1) team = String(theirs[0]!._id);
     }
+    const fee = typeof s.fee === "number" ? s.fee : feeOf(null, student?.totalFee);
+    const share = shareBetween(s, from, to);
+    const owed = owedShareOf(s);
     return {
       closer,
       team,
-      fee: typeof s.fee === "number" ? s.fee : feeOf(null, student?.totalFee),
+      fee,
+      collected: round2(fee * share),
+      inMonth: s.month === month,
       // Counted and held sales were decided after finance approved them.
-      // A part-paid one counts in the month it is paid in full, not before (2026-10-30).
-      approved: !s.owed && (s.state === "counted" || s.state === "waiting" || approvedInFinance.has(String(s.student))),
+      approved: s.state === "counted" || s.state === "waiting" || approvedInFinance.has(String(s.student)),
       state: s.state,
-      lines: s.state === "counted" ? s.lines.map((l) => ({ user: idOf(l.user), amount: l.amount })) : [],
+      lines: s.state === "counted"
+        ? s.lines.map((l) => ({ user: idOf(l.user), amount: partOf(l.amount, share), balance: partOf(l.amount, owed) }))
+        : [],
     };
   });
 }
@@ -169,13 +186,14 @@ export async function payRows(month: string, slabs: ISlabs): Promise<PayRow[]> {
       role === "sm" ? true : role === "tl" ? ledIds.has(f.team) && !excluded.has(f.closer) : f.closer === user;
 
     const mine = facts.filter(counts);
-    const approved = mine.filter((f) => f.approved);
-    const awaiting = mine.filter((f) => !f.approved);
+    const approved = mine.filter((f) => f.approved && (f.inMonth || f.collected > 0));
+    const awaiting = mine.filter((f) => !f.approved && f.inMonth);
     const earned = round2(facts.reduce((sum, f) => sum + f.lines.filter((l) => l.user === user).reduce((s, l) => s + l.amount, 0), 0));
+    const balance = round2(facts.reduce((sum, f) => sum + f.lines.filter((l) => l.user === user).reduce((s, l) => s + l.balance, 0), 0));
     // Nothing this month, and no longer here: not on the list.
     if (u.status !== "active" && !mine.length && !earned) continue;
 
-    const value = round2(approved.reduce((s, f) => s + f.fee, 0));
+    const value = round2(approved.reduce((s, f) => s + f.collected, 0));
     const { level, next } = levelOf(slabs[role], value);
     const payable = round2((earned * level.percent) / 100);
     rows.push({
@@ -183,7 +201,7 @@ export async function payRows(month: string, slabs: ISlabs): Promise<PayRow[]> {
       name: u.name ?? "",
       role,
       teams: role === "tl" ? led.filter((t) => t.status === "active").map((t) => t.name) : [],
-      sales: { count: approved.length, value },
+      sales: { count: approved.length, value, fee: round2(approved.reduce((s, f) => s + f.fee, 0)) },
       awaitingFinance: { count: awaiting.length, value: round2(awaiting.reduce((s, f) => s + f.fee, 0)) },
       level,
       next,
@@ -191,8 +209,9 @@ export async function payRows(month: string, slabs: ISlabs): Promise<PayRow[]> {
       percent: level.percent,
       commission: {
         earned,
+        balance,
         payable,
-        notCountedYet: mine.filter((f) => f.state === "progress" || f.state === "waiting").length,
+        notCountedYet: mine.filter((f) => f.inMonth && (f.state === "progress" || f.state === "waiting")).length,
       },
       total: round2(level.salary + payable),
     });

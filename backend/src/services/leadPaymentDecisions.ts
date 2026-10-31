@@ -56,6 +56,64 @@ export async function syncLeadPaymentDecisions(): Promise<number> {
   return changed;
 }
 
+type ApprovedLead = { _id: unknown; payments?: { amount: number; currency?: string; finance?: { externalId?: string; state?: string } | null }[] };
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Each approved balance payment, added to its enrolment (the user, 2026-10-31: "fix the balance payment sync" —
+ * Mohammed Razy's enrolment still owed the AED 562.50 finance had approved). Once per payment, by finance's id
+ * (`balanceApplied`), so a pass run again — or two at once — adds nothing twice; then what is pending and the fee
+ * status follow, as an edit of the enrolment works them out. In the enrolment's own currency only: rupees on a
+ * Bangalore close, dirhams on a Dubai one. The enrolment's `payments` (those taken at the close) are left alone.
+ *
+ * Never counted twice when somebody already typed it in by hand (2026-10-31: Mohammed Razy's enrolment was edited to
+ * include the first balance payment, then both were added on top): where the enrolment lists what was taken at the
+ * close, its paid amount becomes at least that plus every approved balance payment — never that plus what is there.
+ */
+export async function applyApprovedBalances(): Promise<number> {
+  const leads = await Lead.find({ payments: { $elemMatch: { "finance.externalId": { $exists: true }, "finance.state": "approved" } } })
+    .select("payments.amount payments.currency payments.finance").lean<ApprovedLead[]>();
+  if (!leads.length) return 0;
+  const students = await Student.find({ leadId: { $in: leads.map((l) => l._id) } })
+    .select("leadId academy balanceApplied payments.amount payments.collectedBefore")
+    .lean<{ _id: unknown; leadId: unknown; academy?: string; balanceApplied?: string[]; payments?: { amount: number }[] }[]>();
+  const studentOf = new Map(students.map((st) => [String(st.leadId), st]));
+  let applied = 0;
+  for (const lead of leads) {
+    const st = studentOf.get(String(lead._id));
+    if (!st) continue;
+    const currency = st.academy === "bangalore" ? "INR" : "AED";
+    const approved = (lead.payments ?? []).filter((p) => p.finance?.externalId && p.finance.state === "approved" && (p.currency ?? "AED") === currency && p.amount > 0);
+    // What the enrolment should show at least: taken at the close, and every approved balance payment.
+    const atClose = st.payments?.length ? st.payments.reduce((sum, p) => sum + (p.amount || 0), 0) : null;
+    const floor = atClose === null ? null : round2(atClose + approved.reduce((sum, p) => sum + p.amount, 0));
+    for (const p of lead.payments ?? []) {
+      const id = p.finance?.externalId;
+      if (!id || p.finance?.state !== "approved" || (st.balanceApplied ?? []).includes(id)) continue;
+      if ((p.currency ?? "AED") !== currency || !(p.amount > 0)) continue;
+      // With the close's payments known: up to what they and the approved balances make, never past it. Without
+      // (an older close): added on.
+      const after = await Student.findOneAndUpdate(
+        { _id: st._id, balanceApplied: { $ne: id } },
+        floor === null
+          ? { $inc: { paidAmount: p.amount }, $addToSet: { balanceApplied: id } }
+          : { $max: { paidAmount: floor }, $addToSet: { balanceApplied: id } },
+        { new: true, projection: { totalFee: 1, paidAmount: 1 } },
+      ).lean<{ totalFee?: number; paidAmount?: number }>();
+      if (!after) continue;                               // another pass added it first
+      st.balanceApplied = [...(st.balanceApplied ?? []), id];
+      const total = after.totalFee ?? 0;
+      const paid = round2(after.paidAmount ?? 0);
+      await Student.updateOne(
+        { _id: st._id },
+        { $set: { paidAmount: paid, pendingAmount: Math.max(0, round2(total - paid)), feeStatus: total <= 0 || paid <= 0 ? "pending" : paid >= total ? "paid" : "partial" } },
+      );
+      applied++;
+    }
+  }
+  return applied;
+}
+
 let running = false;
 async function tick() {
   if (running) return;                                   // a slow pass is never overlapped by the next one
@@ -63,6 +121,8 @@ async function tick() {
   try {
     const n = await syncLeadPaymentDecisions();
     if (n) console.log(`[leadPayments] ${n} balance payment decision(s) from finance kept on their leads`);
+    const a = await applyApprovedBalances();
+    if (a) console.log(`[leadPayments] ${a} approved balance payment(s) added to their enrolments`);
   } catch (err) {
     console.error("[leadPayments] tick error:", err);
   } finally {

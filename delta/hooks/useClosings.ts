@@ -19,6 +19,10 @@ export interface Closing {
   pendingAmount: number;
   feeStatus: string;
   status: string;
+  /** Paid on it, but outside the period shown — never counted in it (2026-10-31). `paidAmount` is inside only. */
+  paidOutside?: number;
+  /** What the viewer may see of its commission: earned on what is collected, and the balance still to earn. */
+  commission?: { earned: number; balance: number; state: string } | null;
 }
 
 export interface ClosingDay {
@@ -31,6 +35,10 @@ export interface ClosingDay {
 }
 
 export interface ClosingsResponse {
+  /** What the viewer may see (2026-10-31): everyone's, their teams', or their own. */
+  view?: "all" | "team" | "own";
+  /** A team leader's teams, for the team filter. */
+  teams?: { id: string; name: string }[];
   days: ClosingDay[];
   totals: {
     days: number;
@@ -38,6 +46,8 @@ export interface ClosingsResponse {
     totalFee: number;
     paidAmount: number;
     pendingAmount: number;
+    commissionEarned?: number;
+    commissionBalance?: number;
   };
   /** Always present, so a quiet morning reads "0" rather than showing nothing. */
   today: { date: string; count: number; totalFee: number };

@@ -7,10 +7,10 @@ import { Course } from "../models/Course.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
 import { fetchStatusesByOrg, orgOfHandover } from "./financeOrgs.js";
-import type { BalanceFields, EnrolmentStatus } from "./financeClient.js";
 import { stepsOf, allDone, waitingOn } from "./enrolmentSteps.js";
 import { slabsFor } from "./salarySlabs.js";
 import { env } from "../config/env.js";
+import { collectionsOf } from "../utils/enrolmentCollections.js";
 import type {
   CommissionRole,
   CommissionSaleState,
@@ -41,11 +41,6 @@ import type {
  * (UAE time), for sales closed from 1 October 2026 on. Until then the sale is
  * "progress", saying it waits for finance (or was sent back). A sale whose
  * invoice finance voids is reversed.
- *
- * And paid in full (the user, 2026-10-30: "when partial payment, the commission
- * will never get to the salesperson until it records full payment"): approved
- * but part paid, a sale waits, saying what is owed, and once finance has it
- * paid in full it counts in that month — not the month it was closed.
  */
 
 /**
@@ -99,32 +94,51 @@ export function feeOf(st: { totalMinor?: number; currency?: string } | null | un
   return typeof studentFee === "number" && Number.isFinite(studentFee) && studentFee > 0 ? studentFee : 0;
 }
 
-/** What a sale's invoice still owes, as finance has it; null once it is paid in full. */
-export interface Owed { amount: number; total: number; currency: string }
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/**
- * Paid in full first (the user, 2026-10-30: "when partial payment, the commission will never get to the salesperson
- * until it records full payment"): what finance says the invoice still owes, or null when nothing is.
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
+
+/*
+ * Commission on what is collected, in the month it is collected (the user, 2026-10-31: "that month collected payment
+ * only count for the commission — if it was another month it will never count"). Each payment received on a sale
+ * from COUNT_FROM on earns its share of the fee (`collections`) in the month it came in: an October sale whose
+ * balance is paid in November earns that part in November. Money received before COUNT_FROM never earns. What the
+ * client still owes is the balance (`owedShare`). A line's `amount` stays the full plan amount.
  */
-export function owedOf(st: Pick<EnrolmentStatus, "status" | "currency" | "totalMinor" | "balanceMinor">): Owed | null {
-  if (st.status === "paid" || !(Number(st.balanceMinor) > 0)) return null;
-  return { amount: st.balanceMinor / 100, total: (Number(st.totalMinor) || 0) / 100, currency: (st.currency || "AED").toUpperCase() };
+type ShareSale = {
+  saleDate?: Date;
+  paidShare?: number | null;
+  owedShare?: number | null;
+  collections?: { paidAt: Date; share: number }[] | null;
+};
+
+/** A UAE month as two instants, inclusive. */
+export function monthRange(month: string): { from: Date; to: Date } {
+  const from = new Date(`${month}-01T00:00:00+04:00`);
+  const [y, m] = month.split("-").map(Number);
+  const next = new Date(`${m === 12 ? y! + 1 : y}-${String(m === 12 ? 1 : m! + 1).padStart(2, "0")}-01T00:00:00+04:00`);
+  return { from, to: new Date(next.getTime() - 1) };
 }
 
-const figure = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-export const owedReason = (o: Owed) => `Waiting for full payment — ${o.currency} ${figure(o.amount)} of ${figure(o.total)} still owed`;
-
-/**
- * When a sale that owed was paid in full — its month is that one's ("that month only he will get the commission"):
- * the later of its last payment's day and finance's approval of its last balance payment, never before the close;
- * now, when finance gives neither.
- */
-export function paidInFullAt(st: BalanceFields, saleDate: Date): Date {
-  let latest = 0;
-  for (const p of st.payments ?? []) latest = Math.max(latest, Date.parse(p.paidOn) || 0);
-  for (const b of st.balancePayments ?? []) if (b.status === "approved" && b.decidedAt) latest = Math.max(latest, Date.parse(b.decidedAt) || 0);
-  return new Date(latest ? Math.max(latest, saleDate.getTime()) : Date.now());
+/** The share of the fee received between two instants. A sale not followed yet earns all of it on its sale day. */
+export function shareBetween(sale: ShareSale, from: Date, to: Date): number {
+  if (!Array.isArray(sale.collections)) {
+    return sale.saleDate && sale.saleDate >= from && sale.saleDate <= to ? 1 : 0;
+  }
+  return round4(sale.collections.filter((c) => c.paidAt >= from && c.paidAt <= to).reduce((s, c) => s + c.share, 0));
 }
+
+/** The share collected from COUNT_FROM until now; a sale not followed yet counts in full. */
+export const shareOf = (sale: ShareSale): number =>
+  typeof sale.paidShare === "number" && sale.paidShare >= 0 ? Math.min(1, sale.paidShare) : 1;
+
+/** The share the client still owes — what the balance payments can still earn. */
+export const owedShareOf = (sale: ShareSale): number =>
+  typeof sale.owedShare === "number" && sale.owedShare > 0 ? Math.min(1, sale.owedShare) : 0;
+
+/** A line's amount at a share. */
+export const partOf = (amount: number, share: number): number => round2(amount * share);
+
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
@@ -345,9 +359,7 @@ type StudentLite = {
 /**
  * Every sale closed since COUNT_FROM, followed until finance approves it (its
  * first step, enrolmentSteps.ts — since 2026-10-26 the only one commission waits
- * for). Until then it is "progress", saying it waits for finance; approved but
- * part paid, it waits for full payment and then counts in the month it was paid
- * in full (2026-10-30); once approved and paid,
+ * for). Until then it is "progress", saying it waits for finance; once approved,
  * who earns what is decided with the plan of that day — counted, held (waiting)
  * or excluded — and never redone by this (`stepsDoneAt`: when that was). A sale
  * counted before `stepsDoneAt` existed is looked at once more and keeps counting.
@@ -437,23 +449,6 @@ export async function trackSales(config: CommissionConfig, names: Names): Promis
         continue;
       }
 
-      // Approved but part paid: it waits for its last balance payment (2026-10-30).
-      const owed = owedOf(st);
-      if (owed) {
-        const reason = owedReason(owed);
-        if (sale?.state === "progress" && sale.reason === reason && sale.fee === base.fee) continue;
-        await CommissionSale.updateOne(
-          { student: student._id },
-          { $set: { ...base, state: "progress", reason, lines: [], plan: planOf(course), owed }, $unset: { countedAt: "", stepsDoneAt: "", team: "", teamName: "" } },
-          { upsert: true },
-        );
-        changed++;
-        continue;
-      }
-      // Paid in full since: counted in the month that happened, not the month it was closed.
-      // The status answer carries the invoice's payments too (BalanceFields).
-      const fullAt = sale?.owed ? paidInFullAt(st as EnrolmentStatus & BalanceFields, saleDate) : null;
-
       // Finance approved: who earns what, at the plan of today.
       const plan = planOf(course);
       const resolved = await resolveSale({ closer: student.assignedTo, saleTeam: student.team, plan }, config, names);
@@ -462,11 +457,9 @@ export async function trackSales(config: CommissionConfig, names: Names): Promis
         {
           $set: {
             ...base, ...resolved, plan, stepsDoneAt: new Date(),
-            ...(fullAt ? { paidInFullAt: fullAt, month: uaeMonthOf(fullAt) } : {}),
             ...(resolved.state === "counted" ? { countedAt: new Date() } : {}),
             ...(base.approvedAt ? {} : { approvedAt: new Date() }),
           },
-          $unset: { owed: "" },
         },
         { upsert: true },
       );
@@ -576,6 +569,62 @@ export async function reverseVoidedSales(): Promise<number> {
   return reversed;
 }
 
+/**
+ * Every sale's payments received, as shares of its fee by the day they came in, and what is still owed — a balance
+ * payment approved, or the fee corrected, moves them. Only payments from COUNT_FROM on (earlier money never earns),
+ * and never past the whole fee. A sale with no fee earns all of it on its sale day. Local only (no finance call), so
+ * every pass; sales from COUNT_FROM on, voided ones left as they are.
+ */
+export async function refreshPaidShares(): Promise<number> {
+  // Paid in full first (2026-10-30) is gone: a sale it moved to the month it was paid in full goes back to its own
+  // month, its markers off — it earns as its money comes in, like every sale. Once; nothing matches after.
+  await CommissionSale.collection.updateMany(
+    { $or: [{ paidInFullAt: { $exists: true } }, { owed: { $exists: true } }] },
+    [
+      { $set: { month: { $dateToString: { format: "%Y-%m", date: "$saleDate", timezone: "Asia/Dubai" } } } },
+      { $unset: ["paidInFullAt", "owed"] },
+    ],
+  );
+  const sales = await CommissionSale.find({ saleDate: { $gte: COUNT_FROM }, state: { $ne: "reversed" } })
+    .select("student saleDate paidShare owedShare collections").lean();
+  if (!sales.length) return 0;
+  const students = await Student.find({ _id: { $in: sales.map((s) => s.student) } })
+    .select("leadId academy enrollmentDate payments totalFee pendingAmount")
+    .lean<{ _id: unknown; leadId?: unknown; academy?: string; enrollmentDate?: Date; payments?: { amount?: number; paidAt?: Date; collectedBefore?: boolean }[]; totalFee?: number; pendingAmount?: number }[]>();
+  const studentOf = new Map(students.map((s) => [String(s._id), s]));
+  const received = await collectionsOf(students);
+  let changed = 0;
+  for (const sale of sales) {
+    const st = studentOf.get(String(sale.student));
+    if (!st) continue;                                    // a deleted enrolment keeps what it had
+    const fee = st.totalFee ?? 0;
+    let collections: { paidAt: Date; share: number }[] = [];
+    let owedShare = 0;
+    if (!(fee > 0)) {
+      collections = [{ paidAt: new Date(st.enrollmentDate ?? sale.saleDate), share: 1 }];
+    } else {
+      let left = 1;
+      for (const c of received.get(String(st._id)) ?? []) {
+        if (c.paidAt < COUNT_FROM || left <= 0) continue;
+        const share = round4(Math.min(left, c.amount / fee));
+        if (share > 0) collections.push({ paidAt: c.paidAt, share });
+        left = round4(left - share);
+      }
+      owedShare = round4(Math.min(1, Math.max(0, (st.pendingAmount ?? 0) / fee)));
+    }
+    const paidShare = round4(Math.min(1, collections.reduce((s, c) => s + c.share, 0)));
+    const same =
+      sale.paidShare === paidShare &&
+      sale.owedShare === owedShare &&
+      JSON.stringify((sale.collections ?? []).map((c) => [new Date(c.paidAt).getTime(), c.share])) ===
+        JSON.stringify(collections.map((c) => [c.paidAt.getTime(), c.share]));
+    if (same && Array.isArray(sale.collections)) continue;
+    await CommissionSale.updateOne({ _id: sale._id }, { $set: { paidShare, owedShare, collections } });
+    changed++;
+  }
+  return changed;
+}
+
 let sweeping = false;
 let lastTrack = 0;
 let lastVoidCheck = 0;
@@ -597,6 +646,7 @@ export async function sweepCommission(): Promise<void> {
       await trackSales(config, names);
     }
     await settlePendingSales(config, names);
+    await refreshPaidShares();
     if (Date.now() - lastVoidCheck >= VOID_CHECK_MS) {
       lastVoidCheck = Date.now();
       await reverseVoidedSales();
@@ -744,12 +794,15 @@ export class CommissionService {
     const myTeams = new Set(who.ledTeamIds);
     const scope: "all" | "team" | "own" = who.all ? "all" : myTeams.size ? "team" : "own";
 
-    const filter: Record<string, unknown> = { month };
+    // The month's sales, and older ones with money received in it (2026-10-31: commission in the month collected).
+    const { from, to } = monthRange(month);
+    const and: Record<string, unknown>[] = [{ $or: [{ month }, { collections: { $elemMatch: { paidAt: { $gte: from, $lte: to } } } }] }];
     if (scope === "team") {
-      filter.$or = [{ team: { $in: ledTeams.map((t) => t._id) } }, { "lines.user": meId }, { closer: meId }];
+      and.push({ $or: [{ team: { $in: ledTeams.map((t) => t._id) } }, { "lines.user": meId }, { closer: meId }] });
     } else if (scope === "own") {
-      filter.$or = [{ "lines.user": meId }, { closer: meId }];
+      and.push({ $or: [{ "lines.user": meId }, { closer: meId }] });
     }
+    const filter: Record<string, unknown> = { $and: and };
     const sales = await CommissionSale.find(filter).sort({ saleDate: -1, approvedAt: -1 }).lean();
 
     const visible = (sale: (typeof sales)[number]) =>
@@ -761,23 +814,32 @@ export class CommissionService {
               (scope === "team" && myTeams.has(String(sale.team)) && l.role !== "sm"),
           );
 
-    type Tally = { count: number; amount: number };
-    const people = new Map<string, { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number }>();
+    // Earned: each line's share of what came in this month. Balance: its share of what the client still owes.
+    type Tally = { count: number; amount: number; balance: number };
+    const people = new Map<string, { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number; balance: number }>();
     for (const sale of sales) {
       if (sale.state !== "counted") continue;
+      const share = shareBetween(sale, from, to);
+      const owed = owedShareOf(sale);
       for (const l of visible(sale)) {
+        const earned = partOf(l.amount, share);
+        const balance = partOf(l.amount, owed);
+        if (earned <= 0 && balance <= 0) continue;
         const key = String(l.user);
         const p = people.get(key) ?? {
           _id: key,
           name: l.userName,
-          sales: { count: 0, amount: 0 },
-          tl: { count: 0, amount: 0 },
-          sm: { count: 0, amount: 0 },
+          sales: { count: 0, amount: 0, balance: 0 },
+          tl: { count: 0, amount: 0, balance: 0 },
+          sm: { count: 0, amount: 0, balance: 0 },
           total: 0,
+          balance: 0,
         };
-        p[l.role].count++;
-        p[l.role].amount += l.amount;
-        p.total += l.amount;
+        if (earned > 0) p[l.role].count++;
+        p[l.role].amount = round2(p[l.role].amount + earned);
+        p[l.role].balance = round2(p[l.role].balance + balance);
+        p.total = round2(p.total + earned);
+        p.balance = round2(p.balance + balance);
         people.set(key, p);
       }
     }
@@ -793,10 +855,16 @@ export class CommissionService {
       teamName: s.teamName,
       saleDate: s.saleDate,
       approvedAt: s.approvedAt,
-      paidInFullAt: s.paidInFullAt,
       state: s.state,
       reason: s.reason,
-      lines: visible(s).map((l) => ({ role: l.role, user: String(l.user), userName: l.userName, amount: l.amount, note: l.note ?? "" })),
+      fee: s.fee ?? null,
+      paidShare: shareOf(s),
+      /** The share of the fee received in this month — what the lines earn here. */
+      monthShare: shareBetween(s, from, to),
+      lines: visible(s).map((l) => ({
+        role: l.role, user: String(l.user), userName: l.userName, amount: l.amount,
+        earned: partOf(l.amount, shareBetween(s, from, to)), balance: partOf(l.amount, owedShareOf(s)), note: l.note ?? "",
+      })),
     }));
 
     return {
@@ -806,7 +874,8 @@ export class CommissionService {
       people: [...people.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name)),
       sales: list,
       totals: {
-        amount: [...people.values()].reduce((s, p) => s + p.total, 0),
+        amount: round2([...people.values()].reduce((s, p) => s + p.total, 0)),
+        balance: round2([...people.values()].reduce((s, p) => s + p.balance, 0)),
         counted: count("counted"),
         waiting: count("waiting"),
         excluded: count("excluded"),

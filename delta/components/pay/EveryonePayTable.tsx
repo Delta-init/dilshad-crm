@@ -56,6 +56,9 @@ export function EveryonePayTable({ people, totals, payoutsKnown = false }: Every
               <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
                 <span className="text-foreground">{aed(p.sales.value)}</span>
                 <span className="ml-1 text-[11px] text-muted-foreground">· {p.sales.count}</span>
+                {p.sales.fee !== undefined && p.sales.fee > p.sales.value && (
+                  <p className="text-[10px] text-muted-foreground">collected, of {aed(p.sales.fee)}</p>
+                )}
                 {p.awaitingFinance.count > 0 && (
                   <p className="text-[10px] text-amber-700 dark:text-amber-400">
                     +{aed(p.awaitingFinance.value)} in finance
@@ -73,6 +76,7 @@ export function EveryonePayTable({ people, totals, payoutsKnown = false }: Every
                 <span className="text-foreground">{aed(p.commission.payable)}</span>
                 <p className="text-[10px] text-muted-foreground">
                   {p.percent}% of {aed(p.commission.earned)}
+                  {(p.commission.balance ?? 0) > 0 ? ` · +${aed(p.commission.balance ?? 0)} balance` : ""}
                   {p.commission.notCountedYet > 0 ? ` · ${p.commission.notCountedYet} not counted yet` : ""}
                 </p>
                 {payoutsKnown && <div className="mt-1"><PayoutBadge payout={p.payout} payable={p.commission.payable} compact /></div>}

@@ -160,7 +160,14 @@ function CommissionCard({ e }: { e: EnrolmentDetail }) {
               {c.lines.map((l) => (
                 <li key={`${l.role}-${l.userName}`} className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">{ROLE_LABEL[l.role]} · {l.userName}{l.note ? ` — ${l.note}` : ""}</span>
-                  <span className="font-semibold tabular-nums">{aed(l.amount)}</span>
+                  <span className="text-right">
+                    <span className="font-semibold tabular-nums">{aed(l.earned ?? l.amount)}</span>
+                    {(l.balance ?? 0) > 0 && (
+                      <span className="block text-[11px] tabular-nums text-amber-600 dark:text-amber-400">
+                        +{aed(l.balance ?? 0)} on the balance
+                      </span>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>

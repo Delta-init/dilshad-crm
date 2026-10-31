@@ -906,7 +906,7 @@ export class StudentService {
     dateTo?: string;
     team?: string;
     user?: string;
-  }) {
+  }, viewer?: { userId: string; role?: unknown }) {
     const TZ = "Asia/Dubai";
     const match: Record<string, unknown> = {};
 
@@ -918,8 +918,40 @@ export class StudentService {
       if (filters.dateTo) range.$lte = new Date(`${filters.dateTo}T23:59:59.999+04:00`);
       match.enrollmentDate = range;
     }
-    if (filters.team) match.team = new Types.ObjectId(filters.team);
-    if (filters.user) match.assignedTo = new Types.ObjectId(filters.user);
+    // Who sees whose closings (the user, 2026-10-31): a Super Admin, the Sales Manager and the commission's full
+    // viewers everyone's; a team leader their own teams' (their own closes anywhere too); anyone else only their own.
+    // Decided here, whatever the request asks for — a filter outside the viewer's reach narrows to what they may see.
+    const oid = (v: string) => (Types.ObjectId.isValid(v) ? new Types.ObjectId(v) : null);
+    let view: "all" | "team" | "own" = "all";
+    let teams: { id: string; name: string }[] = [];
+    if (viewer) {
+      const { commissionScope } = await import("./commissionService.js");
+      const scope = await commissionScope(viewer as Parameters<typeof commissionScope>[0]);
+      view = scope.all ? "all" : scope.ledTeamIds.length ? "team" : "own";
+      if (view === "team") {
+        const { Team } = await import("../models/Team.js");
+        teams = (await Team.find({ _id: { $in: scope.ledTeamIds.map((id) => new Types.ObjectId(id)) } }).select("name").sort({ name: 1 }).lean())
+          .map((t) => ({ id: String(t._id), name: String(t.name ?? "") }));
+      }
+      const me = new Types.ObjectId(viewer.userId);
+      if (view === "own") {
+        match.assignedTo = me;
+      } else if (view === "team") {
+        const led = scope.ledTeamIds;
+        const team = filters.team && led.includes(filters.team) ? filters.team : "";
+        const user = filters.user && scope.teamPeople.has(filters.user) ? filters.user : "";
+        if (team) match.team = new Types.ObjectId(team);
+        if (user) match.assignedTo = new Types.ObjectId(user);
+        if (!team && !user) match.$or = [{ team: { $in: led.map((id) => new Types.ObjectId(id)) } }, { assignedTo: me }];
+        else if (!team) match.team = { $in: led.map((id) => new Types.ObjectId(id)) };
+      } else {
+        if (filters.team && oid(filters.team)) match.team = oid(filters.team);
+        if (filters.user && oid(filters.user)) match.assignedTo = oid(filters.user);
+      }
+    } else {
+      if (filters.team && oid(filters.team)) match.team = oid(filters.team);
+      if (filters.user && oid(filters.user)) match.assignedTo = oid(filters.user);
+    }
 
     const days = await Student.aggregate([
       { $match: match },
@@ -953,6 +985,7 @@ export class StudentService {
               enrollmentDate: "$enrollmentDate",
               courseName: { $ifNull: ["$courseInfo.name", ""] },
               closedByName: { $ifNull: ["$userInfo.name", "Unassigned"] },
+              closerId: "$assignedTo",
               teamName: { $ifNull: ["$teamInfo.name", "Unassigned"] },
               totalFee: { $ifNull: ["$totalFee", 0] },
               paidAmount: { $ifNull: ["$paidAmount", 0] },
@@ -977,6 +1010,61 @@ export class StudentService {
     };
     const rows = days as Day[];
 
+    // Collected = money received inside the period only (the user, 2026-10-31: "that month collected payment only
+    // count") — a close paid partly the month before shows that part as paid outside the period, never in it. The
+    // balance is what the client still owes.
+    type Row = {
+      id: unknown; closerId?: unknown; paidAmount: number; pendingAmount: number; paidOutside?: number;
+      commission?: { earned: number; balance: number; state: string } | null;
+    };
+    const periodFrom = filters.dateFrom ? new Date(`${filters.dateFrom}T00:00:00+04:00`) : new Date(0);
+    const periodTo = filters.dateTo ? new Date(`${filters.dateTo}T23:59:59.999+04:00`) : new Date();
+    const { collectionsOf, collectedBetween } = await import("../utils/enrolmentCollections.js");
+    const all = rows.flatMap((d) => d.enrolments as Row[]);
+    const received = await collectionsOf(
+      await Student.find({ _id: { $in: all.map((e) => e.id) } }).select("leadId academy enrollmentDate payments")
+        .lean<{ _id: unknown; leadId?: unknown; academy?: string; enrollmentDate?: Date; payments?: { amount?: number; paidAt?: Date; collectedBefore?: boolean }[] }[]>(),
+    );
+    for (const d of rows) {
+      let paid = 0;
+      for (const e of d.enrolments as Row[]) {
+        const inPeriod = collectedBetween(received.get(String(e.id)), periodFrom, periodTo);
+        e.paidOutside = Math.max(0, Math.round((e.paidAmount - inPeriod) * 100) / 100);
+        e.paidAmount = inPeriod;
+        paid += inPeriod;
+      }
+      d.paidAmount = Math.round(paid * 100) / 100;
+    }
+
+    // Commission on each closing, as far as the viewer may see it (the Commission page's rule): earned on what came
+    // in during the period, and the balance — its share of what the client still owes. Counted sales only.
+    const commission = { earned: 0, balance: 0 };
+    if (viewer) {
+      const { CommissionSale } = await import("../models/CommissionSale.js");
+      const { commissionScope, canSeeLine, shareBetween, owedShareOf, partOf } = await import("./commissionService.js");
+      const sales = await CommissionSale.find({ student: { $in: all.map((e) => e.id) } }).select("student saleDate state lines paidShare owedShare collections").lean();
+      const saleOf = new Map(sales.map((s) => [String(s.student), s]));
+      const scope = await commissionScope(viewer as Parameters<typeof commissionScope>[0]);
+      for (const e of all) {
+        const sale = saleOf.get(String(e.id));
+        const closer = e.closerId ? String(e.closerId) : "";
+        delete e.closerId;
+        if (!sale) { e.commission = null; continue; }
+        const lines = sale.state === "counted" ? sale.lines.filter((l) => canSeeLine(scope, viewer.userId, l, closer)) : [];
+        const share = shareBetween(sale, periodFrom, periodTo);
+        const owed = owedShareOf(sale);
+        const sum = lines.reduce(
+          (acc, l) => ({ earned: acc.earned + partOf(l.amount, share), balance: acc.balance + partOf(l.amount, owed) }),
+          { earned: 0, balance: 0 },
+        );
+        e.commission = { earned: Math.round(sum.earned * 100) / 100, balance: Math.round(sum.balance * 100) / 100, state: sale.state };
+        commission.earned += sum.earned;
+        commission.balance += sum.balance;
+      }
+    } else {
+      for (const e of all) delete e.closerId;
+    }
+
     // Who closed what over the whole period, which is the second question the
     // page gets asked and is cheaper to answer here than to recompute on screen.
     const byCloser = new Map<string, { name: string; count: number; totalFee: number }>();
@@ -993,6 +1081,9 @@ export class StudentService {
     const today = rows.find((d) => d.date === todayKey);
 
     return {
+      view,
+      /** A team leader's teams, for the team filter. */
+      teams,
       days: rows,
       totals: {
         days: rows.length,
@@ -1000,6 +1091,8 @@ export class StudentService {
         totalFee: rows.reduce((s, d) => s + d.totalFee, 0),
         paidAmount: rows.reduce((s, d) => s + d.paidAmount, 0),
         pendingAmount: rows.reduce((s, d) => s + d.pendingAmount, 0),
+        commissionEarned: Math.round(commission.earned * 100) / 100,
+        commissionBalance: Math.round(commission.balance * 100) / 100,
       },
       // Always present, so the header can say "nothing yet today" rather than
       // disappearing on a quiet morning.
@@ -1175,7 +1268,7 @@ export class StudentService {
     const { fetchEnrolmentStatuses } = await import("./financeClient.js");
     const { orgOfHandover } = await import("./financeOrgs.js");
     const { stepsOf } = await import("./enrolmentSteps.js");
-    const { isSuperAdmin, commissionScope, canSeeLine } = await import("./commissionService.js");
+    const { isSuperAdmin, commissionScope, canSeeLine, shareOf, owedShareOf, partOf } = await import("./commissionService.js");
 
     if (!Types.ObjectId.isValid(id)) throw createError("Enrolment not found", 404);
     const student = await Student.findById(id)
@@ -1220,9 +1313,14 @@ export class StudentService {
             reason: sale.reason,
             month: sale.month,
             countedAt: sale.countedAt ?? null,
+            paidShare: shareOf(sale),
+            // Earned on what has come in since commission began; the balance on what the client still owes.
             lines: (sale.lines ?? [])
               .filter((l) => !!scope && canSeeLine(scope, viewer.userId, l, closer))
-              .map((l) => ({ role: l.role, userName: l.userName, amount: l.amount, note: l.note ?? "" })),
+              .map((l) => ({
+                role: l.role, userName: l.userName, amount: l.amount,
+                earned: partOf(l.amount, shareOf(sale)), balance: partOf(l.amount, owedShareOf(sale)), note: l.note ?? "",
+              })),
           }
         : null,
     };

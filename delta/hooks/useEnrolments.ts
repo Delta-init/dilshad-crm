@@ -105,7 +105,8 @@ export interface EnrolmentDetail extends Enrolment {
     reason: string;
     month: string;
     countedAt: string | null;
-    lines: { role: "sales" | "tl" | "sm"; userName: string; amount: number; note: string }[];
+    paidShare?: number;
+    lines: { role: "sales" | "tl" | "sm"; userName: string; amount: number; earned?: number; balance?: number; note: string }[];
   } | null;
 }
 

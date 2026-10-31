@@ -137,10 +137,13 @@ let n = 0;
 async function sale(closer: string, course: Types.ObjectId, teamName: string | null, fee: number, date = "2026-10-03T08:00:00Z") {
   const _id = new Types.ObjectId();
   n++;
+  // Paid in full at the close, on the lead (2026-10-31: commission and targets count the money received, in its month).
+  const leadId = new Types.ObjectId();
+  await db.collection("leads").insertOne({ _id: leadId, name: `Lead ${n}`, phone: `9715000${n}`, payments: [{ amount: fee, paidAt: new Date(date) }] });
   await db.collection("students").insertOne({
-    _id, name: `Student ${n}`, enrollmentNumber: `EN-${n}`, leadId: new Types.ObjectId(),
+    _id, name: `Student ${n}`, enrollmentNumber: `EN-${n}`, leadId,
     course, team: teamName ? teams[teamName] : null, assignedTo: people[closer],
-    enrollmentDate: new Date(date), createdAt: new Date(), status: "active", totalFee: fee, paidAmount: 0,
+    enrollmentDate: new Date(date), createdAt: new Date(), status: "active", totalFee: fee, paidAmount: fee, pendingAmount: 0,
   });
   await db.collection("financehandovers").insertOne({
     studentId: _id, status: "sent", payload: {}, approvalState: "pending",

@@ -75,7 +75,11 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
       <div className={cn("mt-4 grid gap-3", compact ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2 lg:grid-cols-4")}>
         <Figure label="Total this month" value={aed(row.total)} strong />
         <Figure label="Salary" value={aed(row.salary)} />
-        <Figure label="Commission earned" value={aed(row.commission.earned)} />
+        <Figure
+          label="Commission earned"
+          value={aed(row.commission.earned)}
+          sub={(row.commission.balance ?? 0) > 0 ? `+${aed(row.commission.balance ?? 0)} balance` : undefined}
+        />
         <Figure label={`Paid at ${row.percent}%`} value={aed(row.commission.payable)} />
       </div>
       {payoutsKnown && (
@@ -88,8 +92,11 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
       <div className="mt-4 space-y-2">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <p className="text-xs text-muted-foreground">
-            Approved sales:{" "}
+            Collected on approved sales:{" "}
             <span className="font-semibold tabular-nums text-foreground">{aed(row.sales.value)}</span>
+            {row.sales.fee !== undefined && row.sales.fee > row.sales.value && (
+              <span className="text-amber-700 dark:text-amber-400"> of {aed(row.sales.fee)}</span>
+            )}
             {" · "}
             {row.sales.count} {plural(row.sales.count, "sale", "sales")}
           </p>
@@ -109,14 +116,14 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
             <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
               <Landmark className="mt-0.5 h-3 w-3 shrink-0" />
               {row.awaitingFinance.count} {plural(row.awaitingFinance.count, "sale", "sales")} ({aed(row.awaitingFinance.value)}) waiting for
-              finance to approve or for full payment — {plural(row.awaitingFinance.count, "it counts", "they count")} toward the target once approved and paid in full.
+              finance to approve — {plural(row.awaitingFinance.count, "it counts", "they count")} toward the target once approved.
             </p>
           )}
           {row.commission.notCountedYet > 0 && (
             <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
               <Hourglass className="mt-0.5 h-3 w-3 shrink-0" />
               {row.commission.notCountedYet} {plural(row.commission.notCountedYet, "sale is", "sales are")} waiting for finance&apos;s
-              approval or full payment — the commission is added once {plural(row.commission.notCountedYet, "it's", "they're")} approved and paid in full.
+              approval — the commission is added once {plural(row.commission.notCountedYet, "it's", "they're")} approved.
             </p>
           )}
         </div>
@@ -133,11 +140,12 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
   );
 }
 
-function Figure({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+function Figure({ label, value, sub, strong = false }: { label: string; value: string; sub?: string; strong?: boolean }) {
   return (
     <div className={cn("rounded-lg border px-3 py-2", strong ? "border-primary/30 bg-primary/10" : "border-border/50 bg-muted/20")}>
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className={cn("truncate font-bold tabular-nums", strong ? "text-lg text-primary" : "text-base text-foreground")}>{value}</p>
+      {sub && <p className="truncate text-[10px] tabular-nums text-amber-700 dark:text-amber-400">{sub}</p>}
     </div>
   );
 }

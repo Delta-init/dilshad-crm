@@ -318,6 +318,12 @@ export interface ICommissionSale extends Document {
    * salary-slab target (salaryService).
    */
   fee?: number;
+  /** How much of the fee is collected, 0–1: each line earns this share now, the rest is its balance. Absent: all. */
+  paidShare?: number;
+  /** What the client still owes, as a share of the fee. */
+  owedShare?: number;
+  /** Payments received from COUNT_FROM on, as shares of the fee by day: each earns in its own month. */
+  collections?: { paidAt: Date; share: number }[];
   /** The plan row as it was when decided — what the lines are paid from. */
   plan: { sales: number; tl: number; sm: number; creditUsd: number };
   state: CommissionSaleState;
@@ -325,10 +331,6 @@ export interface ICommissionSale extends Document {
   reason: string;
   lines: ICommissionLine[];
   countedAt?: Date;
-  /** Approved but part paid: what its invoice still owes while it waits for full payment. */
-  owed?: { amount: number; total: number; currency: string };
-  /** A sale that owed: when it was paid in full — `month` is then that one's. */
-  paidInFullAt?: Date;
   reversedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -735,6 +737,8 @@ export interface IStudent extends Document {
   totalFee: number;
   paidAmount: number;
   pendingAmount: number;
+  /** Balance payments (finance ids) already added to paidAmount — leadPaymentDecisions.applyApprovedBalances. */
+  balanceApplied?: string[];
   /** Which academy it was closed for; unset on enrolments from before, which are Dubai (academyOf). */
   academy?: Academy;
   status: "active" | "inactive" | "graduated" | "dropped";

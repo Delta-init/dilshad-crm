@@ -130,10 +130,11 @@ function HowItsWorkedOut({ slabsFrom }: { slabsFrom: string | null }) {
         <Info className="h-4 w-4 text-primary" /> How it&apos;s worked out
       </p>
       <ul className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
-        <li>Your target counts the course fee of every sale finance has approved, in the month the sale was closed (UAE time).</li>
+        <li>Your target counts the money received in the month (UAE time) on every sale finance has approved — a balance paid next month counts next month; money received before October 2026 never counts.</li>
         <li>Sales Staff count their own sales — a team leader too, on their own closes — and the Sales Manager every sale in the CRM.</li>
         <li>The highest level your sales reach sets your salary and the share of your commission paid. Below the first level, the base row pays.</li>
-        <li>Pay = salary + commission earned that month × that share. A sale&apos;s commission counts once every step after the close is done.</li>
+        <li>A sale earns its commission as its fee is paid: the part received this month earns this month, the rest shows as balance until it&apos;s paid. Counted once finance approves the sale.</li>
+        <li>Pay = salary + commission earned that month × that share.</li>
         <li>A sale voided in finance comes off. Until the month&apos;s sales are all approved and counted, its figures can still go up.</li>
         <li>
           {slabsFrom

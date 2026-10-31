@@ -39,9 +39,13 @@ await mongoose.connection.db!.collection("users").insertOne({ _id: user, name: "
 
 /** A closing at an exact instant. */
 async function close(name: string, iso: string, fee: number, paid = 0) {
+  // What was paid, on the lead and on the day of the close: "collected" is the money received in the period
+  // (2026-10-31), read from the lead's payments.
+  const leadId = new Types.ObjectId();
+  await mongoose.connection.db!.collection("leads").insertOne({ _id: leadId, name, payments: paid > 0 ? [{ amount: paid, paidAt: new Date(iso) }] : [] });
   await Student.create({
     name,
-    leadId: new Types.ObjectId(),
+    leadId,
     enrollmentNumber: `EN-${name}`,
     enrollmentDate: new Date(iso),
     team, assignedTo: user,

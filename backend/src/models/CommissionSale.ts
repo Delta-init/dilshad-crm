@@ -50,6 +50,22 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
      * sweep hasn't reached falls back to the student's fee (salaryService).
      */
     fee: { type: Number, min: 0 },
+    /**
+     * How much of the fee is collected, 0–1 — the enrolment's paid amount over its fee, kept up to date by the sweep
+     * as balance payments are approved (the user, 2026-10-31: "only collected amount commission"). Each line earns
+     * this share of its amount; the rest is its balance. Absent: all of it (sales before it was kept).
+     */
+    paidShare: { type: Number, min: 0, max: 1 },
+    /** What the client still owes, as a share of the fee: the balance its payments can still earn. */
+    owedShare: { type: Number, min: 0, max: 1 },
+    /**
+     * Each payment received from COUNT_FROM on, as its share of the fee and the day it came in: it earns in that
+     * month (the user, 2026-10-31: "that month collected payment only count"). Absent: not followed yet.
+     */
+    collections: {
+      type: [new Schema({ paidAt: { type: Date, required: true }, share: { type: Number, required: true } }, { _id: false })],
+      default: undefined,
+    },
     plan: {
       sales: { type: Number, default: 0 },
       tl: { type: Number, default: 0 },
@@ -65,10 +81,6 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
     lines: { type: [lineSchema], default: [] },
     countedAt: { type: Date },
     reversedAt: { type: Date },
-    /** Approved but part paid: what its invoice still owes while it waits (2026-10-30). */
-    owed: { type: new Schema({ amount: Number, total: Number, currency: String }, { _id: false }), default: undefined },
-    /** A sale that owed: when it was paid in full — `month` is then that one's. */
-    paidInFullAt: { type: Date },
   },
   { timestamps: true, versionKey: false, collection: "commissionsales" },
 );
