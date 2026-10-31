@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import type { AuthenticatedRequest, CrmModule, PermissionAction } from "../types/index.js";
 import { Team } from "../models/Team.js";
 import { sendError } from "../utils/response.js";
+import { phoneMates } from "../services/whatsapp/sharing.js";
 
 /**
  * Middleware factory that checks if the authenticated user's role
@@ -141,6 +142,8 @@ export const selfOrOverseer = (param = "userId") => {
       ) {
         return next();
       }
+      // Someone sharing a WhatsApp with them (services/whatsapp/sharing.ts): each sees the other's.
+      if ((await phoneMates(me)).includes(String(target))) return next();
       sendError(res, "Access denied: you can only see your own leads", 403);
     } catch (err) {
       next(err);

@@ -30,8 +30,22 @@ export interface WAChat {
   /** A student — marked so, or enrolled (2026-10-30): no automatic messages. */
   student?: "marked" | "enrolled" | null;
 }
-export interface WAOwner { id: string; name: string; team: string; status: WAStatus; phone: string; messages: number }
-export interface WAStatusAnswer { enabled: boolean; canLink: boolean; me: { id: string; name: string; status: WAStatus; phone: string; qr: string }; owners: WAOwner[] }
+/** `usesWhatsAppOf`: whose WhatsApp they use instead of their own (shared by a Super Admin, 2026-10-31). */
+export interface WAOwner { id: string; name: string; team: string; status: WAStatus; phone: string; messages: number; usesWhatsAppOf?: string | null }
+export interface WAStatusAnswer {
+  enabled: boolean; canLink: boolean;
+  /**
+   * Your WhatsApp: your own, or the one shared with you (`sharedFrom`, whose; `phoneOwnerId` is whose chats are yours).
+   * `alsoUsedBy`: the others using it.
+   */
+  me: {
+    id: string; name: string; status: WAStatus; phone: string; qr: string;
+    phoneOwnerId?: string; sharedFrom?: { id: string; name: string } | null; alsoUsedBy?: { id: string; name: string }[];
+  };
+  /** A Super Admin: may share someone's WhatsApp with others. */
+  canShare?: boolean;
+  owners: WAOwner[];
+}
 /** Where a lead's automatic follow-ups stand (api services/whatsapp/followups.ts). */
 export interface WAFollowup {
   on: boolean;
@@ -130,6 +144,16 @@ export function useWhatsAppLink() {
     connect: useMutation({ mutationFn: async () => data(await api.post("/whatsapp/connect")), onSuccess: refresh }),
     disconnect: useMutation({ mutationFn: async () => data(await api.post("/whatsapp/disconnect")), onSuccess: refresh }),
   };
+}
+
+/** A Super Admin sets who else uses someone's WhatsApp (exactly these people; [] = nobody). */
+export function useWhatsAppSharing() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (v: { ownerId: string; userIds: string[] }) =>
+      data<{ ownerId: string; users: { id: string; name: string }[] }>(await api.put("/whatsapp/sharing", v)),
+    onSuccess: refresh,
+  });
 }
 
 /**

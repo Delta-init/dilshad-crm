@@ -16,6 +16,7 @@ import { WhatsAppLink, WhatsAppMessage } from "../models/WhatsAppMessage.js";
 import { LeadService } from "../services/leadService.js";
 import { phoneKey, phoneKeys } from "../services/whatsapp/leads.js";
 import { canWhatsApp, isSuperAdmin, leadScope, readableOwners, type Viewer } from "../services/whatsapp/access.js";
+import { phoneOwnerOf, setSharers, sharedFrom, sharersOf, SharingError } from "../services/whatsapp/sharing.js";
 import { chatCalls, logCall, setStudent, studentKeys, studentMark } from "../services/whatsapp/chatExtras.js";
 import { CallLog } from "../models/CallLog.js";
 import {
@@ -31,7 +32,9 @@ import { sendError, sendSuccess } from "../utils/response.js";
    The WhatsApp page and the lead page's WhatsApp card (2026-10-27, as in CS
    Portal; services/whatsapp/service.ts does the WhatsApp side).
 
-   Each person links their own WhatsApp and is the only one who sends from it.
+   Each person links their own WhatsApp and is the only one who sends from it —
+   with whoever a Super Admin shared it with (services/whatsapp/sharing.ts,
+   2026-10-31), who use it as their own: "your WhatsApp" below is that one.
    Who reads it (services/whatsapp/access.ts): its owner; their team leader; the
    Sales Manager and a Super Admin — everyone's.
 ──────────────────────────────────────────────────────────────────────────── */
@@ -45,8 +48,17 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 
 /** A WhatsApp failure as the answer; anything else on to the error handler. */
 function fail(res: Response, next: NextFunction, err: unknown) {
-  if (err instanceof WhatsAppError) { sendError(res, err.message, err.statusCode); return; }
+  if (err instanceof WhatsAppError || err instanceof SharingError) { sendError(res, err.message, err.statusCode); return; }
   next(err);
+}
+
+/** The WhatsApp this person uses — their own, or the one shared with them. */
+const phoneOf = (req: AuthenticatedRequest) => phoneOwnerOf(req.user!.userId);
+/** Who sends, when it isn't the phone's owner (someone it is shared with): named on the message. */
+async function senderOn(req: AuthenticatedRequest, phone: string) {
+  if (phone === req.user!.userId) return undefined;
+  const u = await User.findById(req.user!.userId).select("name email").lean<{ name?: string; email?: string } | null>();
+  return { id: req.user!.userId, name: String(u?.name || u?.email || "") };
 }
 
 /* ── Photos and files, on short-lived signed links (an <img> carries no token) ── */
@@ -164,7 +176,7 @@ async function leadsBrief(ids: unknown[]) {
 
 /** The owner asked about (yours by default) — one the viewer may read, or the refusal. */
 async function ownerFor(req: AuthenticatedRequest, res: Response, raw: unknown): Promise<string | null> {
-  const owner = str(raw, 40) || req.user!.userId;
+  const owner = str(raw, 40) || await phoneOf(req);
   if (!isId(owner)) { sendError(res, "Bad ownerId", 400); return null; }
   const owners = await readableOwners(viewer(req));
   if (owners && !owners.has(owner)) { sendError(res, "Only its owner, their team leader, the Sales Manager and a Super Admin read these chats", 403); return null; }
@@ -188,7 +200,7 @@ router.get("/status", checkPermission("whatsapp", "view"), async (req: Authentic
       const filter: Record<string, unknown> = { status: { $ne: "inactive" } };
       if (owners) filter._id = { $in: [...owners].map((i) => new Types.ObjectId(i)) };
       const [users, teams, counts] = await Promise.all([
-        User.find(filter).select("name email").lean<{ _id: Types.ObjectId; name?: string; email?: string }[]>(),
+        User.find(filter).select("name email whatsappOf").lean<{ _id: Types.ObjectId; name?: string; email?: string; whatsappOf?: Types.ObjectId | null }[]>(),
         Team.find({ status: "active" }).select("name members leaders").lean<{ name?: string; members?: unknown[]; leaders?: unknown[] }[]>(),
         // Each person's total from the index, not by reading every message there is (2026-10-29: the page sat on Loading).
         User.find(filter).select("_id").lean<{ _id: Types.ObjectId }[]>()
@@ -198,23 +210,37 @@ router.get("/status", checkPermission("whatsapp", "view"), async (req: Authentic
       for (const t of teams) for (const u of [...(t.leaders ?? []), ...(t.members ?? [])]) if (!teamOf.has(String(u))) teamOf.set(String(u), t.name ?? "");
       const n = new Map(counts.map((c) => [String(c._id), c.n]));
       list = users
-        .map((u) => { const st = status(String(u._id)); return { id: String(u._id), name: String(u.name || u.email || ""), team: teamOf.get(String(u._id)) ?? "", status: st.status, phone: st.phone, messages: n.get(String(u._id)) ?? 0 }; })
+        .map((u) => { const st = status(String(u._id)); return { id: String(u._id), name: String(u.name || u.email || ""), team: teamOf.get(String(u._id)) ?? "", status: st.status, phone: st.phone, messages: n.get(String(u._id)) ?? 0, usesWhatsAppOf: u.whatsappOf ? String(u.whatsappOf) : null }; })
         // Those with chats or a link first; then by name.
         .sort((a, b) => Number(b.status === "connected") - Number(a.status === "connected") || Number(b.messages > 0) - Number(a.messages > 0) || a.name.localeCompare(b.name));
     }
     const me = await User.findById(v.userId).select("name email").lean<{ name?: string; email?: string } | null>();
-    sendSuccess(res, "WhatsApp", { enabled: whatsappEnabled(), canLink: canWhatsApp(v, "create"), me: { id: v.userId, name: String(me?.name || me?.email || ""), ...status(v.userId) }, owners: list });
+    // Someone using another's WhatsApp sees that one as theirs: its link, and whose it is.
+    const from = await sharedFrom(v.userId);
+    const phone = from?.id ?? v.userId;
+    sendSuccess(res, "WhatsApp", {
+      enabled: whatsappEnabled(), canLink: canWhatsApp(v, "create"),
+      me: { id: v.userId, name: String(me?.name || me?.email || ""), ...status(phone), phoneOwnerId: phone, sharedFrom: from, alsoUsedBy: await sharersOf(phone) },
+      canShare: isSuperAdmin(v.role),
+      owners: list,
+    });
   } catch (err) { next(err); }
 });
 
 /** POST /whatsapp/connect — you start linking your WhatsApp; the QR follows in /status. */
 router.post("/connect", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
-  try { await connect(req.user!.userId); sendSuccess(res, "Linking", status(req.user!.userId)); } catch (err) { fail(res, next, err); }
+  try {
+    const from = await sharedFrom(req.user!.userId);
+    if (from) { sendError(res, `You use ${from.name}'s WhatsApp — a Super Admin can give you your own`, 409); return; }
+    await connect(req.user!.userId); sendSuccess(res, "Linking", status(req.user!.userId)); } catch (err) { fail(res, next, err); }
 });
 
 /** POST /whatsapp/disconnect — unlinks your WhatsApp from the CRM. Your chats so far stay. */
 router.post("/disconnect", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
-  try { await disconnect(req.user!.userId); sendSuccess(res, "Unlinked", status(req.user!.userId)); } catch (err) { fail(res, next, err); }
+  try {
+    const from = await sharedFrom(req.user!.userId);
+    if (from) { sendError(res, `This is ${from.name}'s WhatsApp — only they (or a Super Admin) unlink it`, 409); return; }
+    await disconnect(req.user!.userId); sendSuccess(res, "Unlinked", status(req.user!.userId)); } catch (err) { fail(res, next, err); }
 });
 
 /* ── Chats ──────────────────────────────────────────────────────────────── */
@@ -247,7 +273,7 @@ router.get("/chats", checkPermission("whatsapp", "view"), async (req: Authentica
     const students = await studentKeys(rows.map((r) => r.last.key ?? ""));
     sendSuccess(res, "Chats", {
       ownerId: owner,
-      canSend: owner === req.user!.userId && canWhatsApp(viewer(req), "create") && status(owner).status === "connected",
+      canSend: owner === await phoneOf(req) && canWhatsApp(viewer(req), "create") && status(owner).status === "connected",
       chats: rows.map((r) => {
         const lead = leads.get(String(leadOf(r) ?? "")) ?? null;
         return {
@@ -275,7 +301,7 @@ router.get("/messages", checkPermission("whatsapp", "view"), async (req: Authent
     const docs = (await WhatsAppMessage.find({ owner: new Types.ObjectId(owner), chat }).sort({ at: -1, _id: -1 }).limit(300).lean<MessageDoc[]>()).reverse();
     sendSuccess(res, "Messages", {
       ownerId: owner, chat,
-      canSend: owner === req.user!.userId && canWhatsApp(viewer(req), "create") && status(owner).status === "connected",
+      canSend: owner === await phoneOf(req) && canWhatsApp(viewer(req), "create") && status(owner).status === "connected",
       messages: docs.map((m) => shape(m, req.user!.userId)),
     });
   } catch (err) { next(err); }
@@ -289,7 +315,7 @@ router.get("/unread", checkPermission("whatsapp", "view"), async (req: Authentic
   try {
     const now = new Date();
     const since = typeof req.query.since === "string" && /^\d{4}-\d{2}-\d{2}T/.test(req.query.since) ? new Date(req.query.since) : null;
-    const base = { owner: new Types.ObjectId(req.user!.userId), direction: "in", read: false };
+    const base = { owner: new Types.ObjectId(await phoneOf(req)), direction: "in", read: false };
     const unread = await WhatsAppMessage.countDocuments(base);
     // By when the CRM got them (a message can carry an older WhatsApp time).
     const fresh = since ? await WhatsAppMessage.find({ ...base, createdAt: { $gt: since } }).sort({ createdAt: -1 }).limit(5)
@@ -312,7 +338,7 @@ router.post("/read", checkPermission("whatsapp", "view"), async (req: Authentica
   try {
     const chat = str(req.body?.chat, 120);
     if (!chat) { sendError(res, "chat is required", 400); return; }
-    const r = await WhatsAppMessage.updateMany({ owner: new Types.ObjectId(req.user!.userId), chat, direction: "in", read: false }, { $set: { read: true } });
+    const r = await WhatsAppMessage.updateMany({ owner: new Types.ObjectId(await phoneOf(req)), chat, direction: "in", read: false }, { $set: { read: true } });
     sendSuccess(res, "Read", { marked: r.modifiedCount });
   } catch (err) { next(err); }
 });
@@ -325,7 +351,7 @@ router.post("/history", checkPermission("whatsapp", "view"), async (req: Authent
   try {
     const chat = str(req.body?.chat, 120);
     if (!chat) { sendError(res, "chat is required", 400); return; }
-    const r = await fetchOlder(req.user!.userId, chat);
+    const r = await fetchOlder(await phoneOf(req), chat);
     sendSuccess(res, "Asked your phone for older messages", { before: r.before });
   } catch (err) { fail(res, next, err); }
 });
@@ -336,7 +362,7 @@ router.post("/history", checkPermission("whatsapp", "view"), async (req: Authent
  */
 router.post("/history-all", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
   try {
-    const r = await fetchOlderForAll(req.user!.userId);
+    const r = await fetchOlderForAll(await phoneOf(req));
     sendSuccess(res, `Asking your phone for older messages of ${r.chats} chat${r.chats === 1 ? "" : "s"}`, r);
   } catch (err) { fail(res, next, err); }
 });
@@ -346,7 +372,8 @@ router.post("/send", checkPermission("whatsapp", "create"), async (req: Authenti
   try {
     const chat = str(req.body?.chat, 120), text = String(req.body?.text ?? "").trim().slice(0, 4000);
     if (!chat || !text) { sendError(res, "chat and text are required", 400); return; }
-    const saved = await sendText(req.user!.userId, chat, text);
+    const phone = await phoneOf(req);
+    const saved = await sendText(phone, chat, text, { by: await senderOn(req, phone) });
     sendSuccess(res, "Sent", { chat: saved?.chat ?? chat });
   } catch (err) { fail(res, next, err); }
 });
@@ -358,7 +385,9 @@ router.post("/send-file", checkPermission("whatsapp", "create"), upload.single("
     const chat = str(req.body?.chat, 120), caption = String(req.body?.caption ?? "").trim().slice(0, 1000);
     const voice = String(req.body?.voice ?? "") === "1";
     if (!chat || !file) { sendError(res, "chat and file are required", 400); return; }
-    const saved = await sendFile(req.user!.userId, chat, file.buffer, file.mimetype || "application/octet-stream", file.originalname || "file", voice ? "" : caption, voice);
+    const phone = await phoneOf(req);
+    const saved = await sendFile(phone, chat, file.buffer, file.mimetype || "application/octet-stream", file.originalname || "file", voice ? "" : caption, voice,
+      { by: await senderOn(req, phone) });
     sendSuccess(res, "Sent", { chat: saved?.chat ?? chat });
   } catch (err) { fail(res, next, err); }
 });
@@ -378,9 +407,11 @@ router.post("/forward", checkPermission("whatsapp", "create"), async (req: Authe
     const owners = await readableOwners(viewer(req));
     if (owners && !owners.has(String(source.owner))) { sendError(res, "Message not found", 404); return; }
     const results: Array<{ chat: string; ok: boolean; error?: string; sentTo?: string }> = [];
+    const phone = await phoneOf(req);
+    const by = await senderOn(req, phone);
     for (const chat of chats) {
       try {
-        const kept = await forwardMessage(req.user!.userId, source, chat);
+        const kept = await forwardMessage(phone, source, chat, by);
         results.push({ chat, ok: true, sentTo: kept?.chat ?? chat });
       } catch (err) {
         if (!(err instanceof WhatsAppError)) throw err;
@@ -405,7 +436,8 @@ router.post("/send-saved", checkPermission("whatsapp", "create"), async (req: Au
   try {
     const chat = str(req.body?.chat, 120), id = str(req.body?.id, 40);
     if (!chat || !/^(first_reply:(\d{1,2}|all)|followup:\d{1,2})$/.test(id)) { sendError(res, "chat and a saved message are required", 400); return; }
-    const result = await sendSavedMessage(req.user!.userId, chat, id);
+    const phone = await phoneOf(req);
+    const result = await sendSavedMessage(phone, chat, id, undefined, await senderOn(req, phone));
     sendSuccess(res, "Sent", { chat, ...result });
   } catch (err) { fail(res, next, err); }
 });
@@ -427,7 +459,7 @@ router.get("/chat-extras", checkPermission("whatsapp", "view"), async (req: Auth
     const chat = str(req.query.chat, 120);
     if (!chat) { sendError(res, "chat is required", 400); return; }
     const { key } = await keyOfChat(owner, chat);
-    const mine = owner === req.user!.userId && canWhatsApp(viewer(req), "create");
+    const mine = owner === await phoneOf(req) && canWhatsApp(viewer(req), "create");
     if (!key) { sendSuccess(res, "Chat", { student: { student: false, how: null, byName: "", at: null }, calls: { calls: [], total: 0, logged: 0, answered: 0 }, canEdit: false }); return; }
     const calls = await chatCalls(key);
     const superAdmin = isSuperAdmin(req.user!.role ?? null);
@@ -441,7 +473,7 @@ router.post("/student", checkPermission("whatsapp", "create"), async (req: Authe
   try {
     const chat = str(req.body?.chat, 120);
     if (!chat || typeof req.body?.student !== "boolean") { sendError(res, "chat and student (true/false) are required", 400); return; }
-    const { key } = await keyOfChat(req.user!.userId, chat);
+    const { key } = await keyOfChat(await phoneOf(req), chat);
     if (!key) { sendError(res, "This chat has no number to mark", 400); return; }
     sendSuccess(res, req.body.student ? "Marked a student" : "Not a student", await setStudent(key, req.body.student, req.user!.userId));
   } catch (err) { next(err); }
@@ -452,7 +484,7 @@ router.post("/calls", checkPermission("whatsapp", "create"), async (req: Authent
   try {
     const chat = str(req.body?.chat, 120);
     if (!chat || typeof req.body?.answered !== "boolean") { sendError(res, "chat and answered (true/false) are required", 400); return; }
-    const { key, phone } = await keyOfChat(req.user!.userId, chat);
+    const { key, phone } = await keyOfChat(await phoneOf(req), chat);
     if (!key) { sendError(res, "This chat has no number to log a call to", 400); return; }
     const doc = await logCall(key, phone, req.user!.userId, req.body.answered, str(req.body?.note, 300));
     sendSuccess(res, "Call logged", { id: String(doc._id) }, 201);
@@ -548,7 +580,9 @@ router.post("/create-lead", checkPermission("whatsapp", "create"), checkPermissi
     const saved = (await contactNames(owner, [last.key ?? ""])).get(last.key ?? "") ?? "";
     const name = str(req.body?.name, 100) || (saved && !/^\+?\d+$/.test(saved) ? saved : "")
       || (inName?.senderName && !/^\d+$/.test(inName.senderName) ? inName.senderName : "") || `WhatsApp +${last.phone}`;
-    const lead = await leadService.createLead({ name, phone: `+${last.phone}`, source: "WhatsApp", assignedTo: owner }, req.user!.userId) as unknown as { _id: Types.ObjectId };
+    // Held by whose WhatsApp it is — or by the one making it there, when it is shared with them.
+    const holder = owner === await phoneOf(req) ? req.user!.userId : owner;
+    const lead = await leadService.createLead({ name, phone: `+${last.phone}`, source: "WhatsApp", assignedTo: holder }, req.user!.userId) as unknown as { _id: Types.ObjectId };
     await linkKey(last.key || chat, lead._id, req);
     sendSuccess(res, "Lead created", { lead: { id: String(lead._id), name }, existed: false }, 201);
   } catch (err) { next(err); }
@@ -578,7 +612,8 @@ router.get("/lead/:leadId", checkPermission("whatsapp", "view"), checkPermission
       if (!threads.has(k)) threads.set(k, { ownerId: String(m.owner), ownerName: m.ownerName ?? "", chat: m.chat, phone: m.phone ?? "", messages: [] });
       threads.get(k)!.messages.push(shape(m, v.userId));
     }
-    const mine = status(v.userId);
+    const phone = await phoneOwnerOf(v.userId);
+    const mine = status(phone);
     const canLink = canWhatsApp(v, "create");
     sendSuccess(res, "WhatsApp", {
       // Where the automatic follow-ups stand for this lead (services/whatsapp/followups.ts).
@@ -587,10 +622,38 @@ router.get("/lead/:leadId", checkPermission("whatsapp", "view"), checkPermission
       canSend: canLink && mine.status === "connected",
       canLink,
       linked: mine.status === "connected",
-      me: v.userId,
-      threads: [...threads.values()].sort((a, b) => Number(b.ownerId === v.userId) - Number(a.ownerId === v.userId)),
+      me: phone,
+      threads: [...threads.values()].sort((a, b) => Number(b.ownerId === phone) - Number(a.ownerId === phone)),
     });
   } catch (err) { next(err); }
+});
+
+/* ── One WhatsApp, more than one person (services/whatsapp/sharing.ts) ──── */
+
+/** GET /whatsapp/sharing?ownerId= — who else uses this person's WhatsApp. Super Admin. */
+router.get("/sharing", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!isSuperAdmin(req.user!.role ?? null)) { sendError(res, "Only a Super Admin shares a WhatsApp", 403); return; }
+    const owner = str(req.query.ownerId, 40);
+    if (!isId(owner)) { sendError(res, "Bad ownerId", 400); return; }
+    sendSuccess(res, "Shared with", { ownerId: owner, users: await sharersOf(owner) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PUT /whatsapp/sharing { ownerId, userIds } — exactly these people use this person's WhatsApp: they read and send from
+ * it as their own and see its owner's leads. [] = nobody. Super Admin.
+ */
+router.put("/sharing", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!isSuperAdmin(req.user!.role ?? null)) { sendError(res, "Only a Super Admin shares a WhatsApp", 403); return; }
+    const owner = str(req.body?.ownerId, 40);
+    const ids = Array.isArray(req.body?.userIds) ? (req.body.userIds as unknown[]).map((x) => str(x, 40)) : null;
+    if (!isId(owner) || !ids || ids.length > 10) { sendError(res, "ownerId and userIds (up to 10) are required", 400); return; }
+    const users = await setSharers(owner, ids);
+    console.log(`[whatsapp] ${owner}'s WhatsApp now also used by: ${users.map((u) => u.name).join(", ") || "nobody"}`);
+    sendSuccess(res, "Saved", { ownerId: owner, users });
+  } catch (err) { fail(res, next, err); }
 });
 
 /* ── Automatic follow-ups (services/whatsapp/followups.ts) ──────────────── */

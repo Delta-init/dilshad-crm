@@ -63,6 +63,11 @@ const userSchema = new Schema<IUser>(
     breakSince: { type: Date, default: null },
     // What the break going on now is for (meeting, lunch, tea, washroom); null when not on one or not said
     breakKind: { type: String, enum: [...BREAK_KINDS, null], default: null },
+    /**
+     * Whose WhatsApp they use (2026-10-31: one salesperson on another's) — set by a Super Admin. They read and send from that
+     * person's linked phone as if it were their own, and see that person's leads; null: their own.
+     */
+    whatsappOf: { type: Schema.Types.ObjectId, ref: "User", default: null },
     status: {
       type: String,
       enum: ["active", "inactive"],

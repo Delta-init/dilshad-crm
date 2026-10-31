@@ -125,6 +125,7 @@ export interface IUser extends Document {
   status: "active" | "inactive";
   breakSince?: Date | null;     // on a break since ("Take break", 2026-10-20)
   breakKind?: BreakKind | null; // what the break is for
+  whatsappOf?: Types.ObjectId | null; // whose WhatsApp they use (a Super Admin shares it); null: their own
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;

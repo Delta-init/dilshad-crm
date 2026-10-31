@@ -16,6 +16,7 @@ import type {
   IRole,
 } from "../types/index.js";
 import { collectAssignments } from "./leadAlertService.js";
+import { phoneMates } from "./whatsapp/sharing.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -503,8 +504,10 @@ export class LeadService {
         // Team leader: scoped to their team only
         query.team = leaderTeam._id;
       } else {
-        // Regular member / BDE / any non-admin role: only their assigned leads
-        query.assignedTo = userId;
+        // Regular member / BDE / any non-admin role: only their assigned leads —
+        // and those of whoever shares a WhatsApp with them (2026-10-31).
+        const mates = await phoneMates(userId);
+        query.assignedTo = mates.length > 1 ? { $in: mates.map((m) => new Types.ObjectId(m)) } : userId;
       }
     }
 
@@ -514,7 +517,10 @@ export class LeadService {
     let outsideView = false;
     const narrow = (key: "assignedTo" | "team", value: string) => {
       const scoped = query[key];
-      if (scoped !== undefined && String(scoped) !== value) outsideView = true;
+      const within = scoped && typeof scoped === "object" && "$in" in scoped
+        ? (scoped as { $in: unknown[] }).$in.some((x) => String(x) === value)
+        : scoped === undefined || String(scoped) === value;
+      if (!within) outsideView = true;
       else query[key] = value;
     };
     if (filters.assignedTo) narrow("assignedTo", filters.assignedTo);

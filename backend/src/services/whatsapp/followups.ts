@@ -9,7 +9,7 @@ import { WhatsAppFollowupSettings, type IFirstReplyItem, type IFollowupStep, typ
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
 import { isStudentKey, studentKeys } from "./chatExtras.js";
 import { phoneKeys } from "./leads.js";
-import { connectedOwnerIds, contactNames, isAudioOnlyMp4, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled, WhatsAppError } from "./service.js";
+import { connectedOwnerIds, contactNames, isAudioOnlyMp4, isConnected, leadsByKey, mediaPath, sendFile, sendText, whatsappEnabled, WhatsAppError, type Owner } from "./service.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Automatic WhatsApp follow-ups (the user, 2026-10-27: "this type of follow-up
@@ -517,10 +517,12 @@ export async function listSavedMessages(): Promise<SavedMessage[]> {
  * apart, as the automatic one goes). Their own message (marked with which saved one it was), not an automatic one:
  * the automatic steps carry on as if they had typed it.
  */
-export async function sendSavedMessage(userId: string, chat: string, id: string, gapMs = () => 3000 + Math.floor(Math.random() * 2000)): Promise<{ parts: number }> {
+export async function sendSavedMessage(userId: string, chat: string, id: string, gapMs = () => 3000 + Math.floor(Math.random() * 2000),
+  by?: Owner): Promise<{ parts: number }> {
   const [kind, stepRaw] = id.split(":");
   const s = await followupSettings();
-  const owner = await User.findById(userId).select("name").lean<{ name?: string } | null>();
+  // {salesperson}: whoever sends it — someone the WhatsApp is shared with, else its owner.
+  const owner = by ?? await User.findById(userId).select("name").lean<{ name?: string } | null>();
   // {name}: the lead's, else theirs as saved in the phone or on WhatsApp.
   const key = phoneKeys(chat)[0] ?? "";
   const leadId = key ? (await leadsByKey()).get(key) : undefined;
@@ -534,13 +536,13 @@ export async function sendSavedMessage(userId: string, chat: string, id: string,
     if (item.file && existsSync(mediaPath(item.file.file))) {
       const buffer = await readFile(mediaPath(item.file.file));
       await sendFile(userId, chat, buffer, item.file.mime || "application/octet-stream", item.file.name || "file", voice ? "" : text, voice,
-        { saved, ...(voice ? {} : { storedFile: item.file.file }) });
+        { saved, by, ...(voice ? {} : { storedFile: item.file.file }) });
       // A voice note carries no words: they follow on their own.
-      if (voice && text.trim()) { await sendText(userId, chat, text, { saved }); return 2; }
+      if (voice && text.trim()) { await sendText(userId, chat, text, { saved, by }); return 2; }
       return 1;
     }
     if (!text.trim()) return 0;
-    await sendText(userId, chat, text, { saved });
+    await sendText(userId, chat, text, { saved, by });
     return 1;
   };
 

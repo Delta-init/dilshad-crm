@@ -17,6 +17,7 @@ import { leadsByPhone, phoneKey } from "./leads.js";
 import { sendPushToUser } from "../pushService.js";
 import { emitToUser } from "../../socket.js";
 import { asVoiceNote, VOICE_MIME } from "./voice.js";
+import { tellees } from "./sharing.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    WhatsApp, as in CS Portal (the user, 2026-10-27: "working of the
@@ -294,7 +295,7 @@ export async function contactNames(owner: string, keys: string[]): Promise<Map<s
   return new Map(docs.map((d) => [d.key, contactName(d)]).filter(([, n]) => !!n) as [string, string][]);
 }
 
-type Owner = { id: string; name: string };
+export type Owner = { id: string; name: string };
 
 const captionOf = (m: proto.IMessage) => String(m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption || "").trim();
 
@@ -374,14 +375,17 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
     const leadDoc = lead ? await Lead.findById(lead).select("name").lean<{ name?: string } | null>() : null;
     const who = String(leadDoc?.name ?? "").trim() || msg.pushName || (phone ? `+${phone}` : "WhatsApp");
     const text = body || LABEL[media!.type] || "File";
-    emitToUser(owner.id, "whatsapp_message", { chat: kept.chat, name: who, body: text });
-    void sendPushToUser(owner.id, {
-      title: `WhatsApp · ${who}`,
-      body: text.length > 140 ? `${text.slice(0, 137)}…` : text,
-      tag: `wa-${kept.chat}`,
-      url: `/whatsapp?chat=${encodeURIComponent(kept.chat)}`,
-      data: { type: "whatsapp_message", chat: kept.chat },
-    }).catch(() => undefined);
+    // Its owner, and whoever uses this WhatsApp with them (sharing.ts).
+    for (const to of await tellees(owner.id).catch(() => [owner.id])) {
+      emitToUser(to, "whatsapp_message", { chat: kept.chat, name: who, body: text });
+      void sendPushToUser(to, {
+        title: `WhatsApp · ${who}`,
+        body: text.length > 140 ? `${text.slice(0, 137)}…` : text,
+        tag: `wa-${kept.chat}`,
+        url: `/whatsapp?chat=${encodeURIComponent(kept.chat)}`,
+        data: { type: "whatsapp_message", chat: kept.chat },
+      }).catch(() => undefined);
+    }
   }
 }
 
@@ -597,6 +601,8 @@ export type SendOpts = {
   /** By a person: Forward from another chat, or one of the saved messages picked — a person's message, not automatic. */
   forwarded?: boolean;
   saved?: { kind: "followup" | "first_reply"; step: number };
+  /** Who sent it, when not the WhatsApp's owner: someone it is shared with (sharing.ts) — named on the message. */
+  by?: Owner;
 };
 
 async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: string, sentId: string, body: string,
@@ -607,8 +613,8 @@ async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: 
     owner: new Types.ObjectId(owner.id), ownerName: owner.name,
     chat: phone || chat, phone, key, jid: to.jid,
     direction: "out", body, messageId: sentId,
-    senderName: owner.name, sentBy: new Types.ObjectId(owner.id),
-    sentByName: opts.auto ? (opts.auto.kind === "first_reply" ? "Auto first reply" : "Auto follow-up") : owner.name,
+    senderName: (opts.by ?? owner).name, sentBy: new Types.ObjectId((opts.by ?? owner).id),
+    sentByName: opts.auto ? (opts.auto.kind === "first_reply" ? "Auto first reply" : "Auto follow-up") : (opts.by ?? owner).name,
     lead: (await leadsByKey()).get(key || chat) ?? null,
     read: true, media, at: new Date(), auto: opts.auto ?? null,
     ...(opts.forwarded ? { forwarded: true } : {}),
@@ -686,12 +692,12 @@ export async function sendFile(userId: string, chat: string, buffer: Buffer, mim
  * A message kept here, sent again from this person's own WhatsApp to another chat (the owner, 2026-10-28: "forward
  * message option"): its words, or its file with the caption it had — a voice note as a voice note. Marked forwarded.
  */
-export async function forwardMessage(userId: string, source: Pick<IWhatsAppMessage, "body" | "media">, chat: string) {
+export async function forwardMessage(userId: string, source: Pick<IWhatsAppMessage, "body" | "media">, chat: string, by?: Owner) {
   const media = source.media;
   if (!media) {
     const text = String(source.body ?? "").trim();
     if (!text) throw new WhatsAppError("There is nothing in that message to forward");
-    return sendText(userId, chat, text, { forwarded: true });
+    return sendText(userId, chat, text, { forwarded: true, by });
   }
   if (!media.file || !existsSync(mediaPath(media.file))) throw new WhatsAppError("That file is no longer kept here, so it can't be forwarded");
   const buffer = await readFile(mediaPath(media.file));
@@ -700,5 +706,5 @@ export async function forwardMessage(userId: string, source: Pick<IWhatsAppMessa
   // The words that went with it — not the label the CRM gave a file with none ("📷 Photo", "📄 name").
   const caption = voice || body === LABEL[media.type] || body.startsWith("📄 ") ? "" : body;
   return sendFile(userId, chat, buffer, media.mime || "application/octet-stream", media.fileName || "file", caption, voice,
-    { forwarded: true, ...(voice ? {} : { storedFile: media.file }) });
+    { forwarded: true, by, ...(voice ? {} : { storedFile: media.file }) });
 }
