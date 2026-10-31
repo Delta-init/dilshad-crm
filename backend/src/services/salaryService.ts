@@ -8,6 +8,7 @@ import { COUNT_FROM, commissionScope, feeOf, idOf, monthRange, earnedShareBetwee
 import { slabsFor, TL_SLAB } from "./salarySlabs.js";
 import type { CommissionSaleState, IRole, ISlabRow, ISlabs, SlabRole } from "../types/index.js";
 import { fetchCommissionPayouts, type CommissionPayout } from "./financeClient.js";
+import { fromRoot, rootPayRows } from "./rootCommission.js";
 
 /*
  * A month's salary and commission on the salary slabs (the user, 2026-10-05,
@@ -147,6 +148,8 @@ async function monthFacts(month: string, activeTeams: TeamLite[]): Promise<Fact[
 
 /** Everyone on the slabs in a month, with what the month pays them. */
 export async function payRows(month: string, slabs: ISlabs): Promise<PayRow[]> {
+  // Worked out by Root, from its plan and this CRM's sales, while commission comes from Root (2026-11-01).
+  if (fromRoot()) return rootPayRows<PayRow>(month);
   const config = await loadConfig();
   const sm = idOf(config.salesManager);
   const excluded = config.excluded;

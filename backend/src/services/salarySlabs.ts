@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { CommissionSettings } from "../models/CommissionSettings.js";
 import type { ISalarySlabsVersion, ISlabRow, ISlabs, SlabRole } from "../types/index.js";
+import { fromRoot, rootSlabs } from "./rootCommission.js";
 
 /*
  * The salary slabs (the user, 2026-10-07: "Commission & Salary Slab — Sales
@@ -66,6 +67,8 @@ export function slabsIn(
 }
 
 export async function slabsFor(month: string) {
+  // Root's slabs for the month while commission comes from Root (2026-11-01).
+  if (fromRoot()) return rootSlabs(month);
   const s = await CommissionSettings.findOne({ key: "default" }).select("salarySlabs").lean();
   return slabsIn(s?.salarySlabs as ISalarySlabsVersion[] | undefined, month);
 }

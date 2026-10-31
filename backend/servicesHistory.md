@@ -890,3 +890,13 @@ on the lead is marked done. `getUserLeadStats` also returns `meeting_done`.
   (the `/public-leaderboard` namespace and its watcher), `liveLeaderboardState()` (`screens`, `joining`, `watching`,
   `everyMs` — for the checks); `PUBLIC_LEADERBOARD_NAMESPACE`, `LEADERBOARD_CHANGED`, `LIVE_EVERY_MS`,
   `LIVE_SLOWEST_MS`, `MAX_SCREENS`, `LINGER_MS`.
+
+## Commission from Root (added 2026-11-01)
+
+- `rootCommission` — `fromRoot()` (COMMISSION_FROM_ROOT on/true/1/yes), `rootPlan(month)` (30 s cache),
+  `rootSlabs(month)` (no TL slab where the plan has none; `from` null for the built-in ones), `rootResolve({ closer,
+  team, course? | courses? | amounts? })`, `rootPayRows(month)`, `mirrorRootPlan(month)` (Root's course amounts, Sales
+  Manager and excluded logins written here, only what differs). Root at ROOT_ERP_API_URL with ROOT_ORG_SECRET; a
+  failure throws a sentence with statusCode 502 (503: not set up, or the plan not in Root yet).
+- While on: `resolveSale` (and so `trackSales`, `settlePendingSales`, `preview`) asks Root; `slabsFor` and `payRows`
+  are Root's; `sweepCommission` copies Root's plan in every five minutes.

@@ -11,6 +11,7 @@ import { stepsOf, allDone, waitingOn } from "./enrolmentSteps.js";
 import { slabsFor } from "./salarySlabs.js";
 import { env } from "../config/env.js";
 import { collectionsOf } from "../utils/enrolmentCollections.js";
+import { fromRoot, mirrorRootPlan, rootResolve } from "./rootCommission.js";
 import type {
   CommissionRole,
   CommissionSaleState,
@@ -253,6 +254,8 @@ export interface Resolved {
   team: Types.ObjectId | null;
   teamName: string;
   lines: ICommissionLine[];
+  /** Set when Root worked it out (COMMISSION_FROM_ROOT): the amounts it used — kept on the sale. */
+  plan?: Plan;
 }
 
 /**
@@ -285,10 +288,20 @@ async function teamFor(
  * caller stores it, or — for the closing dialog — only shows it.
  */
 export async function resolveSale(
-  input: { closer: unknown; saleTeam: unknown; plan: Plan },
+  input: { closer: unknown; saleTeam: unknown; plan: Plan; course?: unknown; courses?: unknown[] },
   config: CommissionConfig,
   names: Names = new Names(),
 ): Promise<Resolved> {
+  // Worked out by Root from its plan (2026-11-01): from the course's row there (a bundle's added up), or — a held
+  // sale, no course given — at the amounts it was held at. Root unreachable throws: tried again on the next sweep.
+  if (fromRoot()) {
+    const course = idOf(input.course);
+    const courses = (input.courses ?? []).map(idOf).filter(Boolean);
+    return rootResolve({
+      closer: idOf(input.closer), team: idOf(input.saleTeam),
+      ...(courses.length ? { courses } : course ? { course } : { amounts: input.plan }),
+    });
+  }
   const none = { team: null, teamName: "", lines: [] as ICommissionLine[] };
   const closer = idOf(input.closer);
   if (!closer || !Types.ObjectId.isValid(closer)) {
@@ -456,8 +469,8 @@ export async function trackSales(config: CommissionConfig, names: Names): Promis
 
       // Closed under a shared login: nobody earns it, whatever its steps.
       if (closer && config.excluded.has(closer)) {
-        const resolved = await resolveSale({ closer, saleTeam: student.team, plan: planOf(course) }, config, names);
-        await CommissionSale.updateOne({ student: student._id }, { $set: { ...base, ...resolved, plan: planOf(course) } }, { upsert: true });
+        const resolved = await resolveSale({ closer, saleTeam: student.team, plan: planOf(course), course: course?._id }, config, names);
+        await CommissionSale.updateOne({ student: student._id }, { $set: { ...base, ...resolved, plan: resolved.plan ?? planOf(course) } }, { upsert: true });
         changed++;
         continue;
       }
@@ -478,12 +491,12 @@ export async function trackSales(config: CommissionConfig, names: Names): Promis
 
       // Finance approved: who earns what, at the plan of today.
       const plan = planOf(course);
-      const resolved = await resolveSale({ closer: student.assignedTo, saleTeam: student.team, plan }, config, names);
+      const resolved = await resolveSale({ closer: student.assignedTo, saleTeam: student.team, plan, course: course?._id }, config, names);
       await CommissionSale.updateOne(
         { student: student._id },
         {
           $set: {
-            ...base, ...resolved, plan, stepsDoneAt: new Date(),
+            ...base, ...resolved, plan: resolved.plan ?? plan, stepsDoneAt: new Date(),
             ...(resolved.state === "counted" ? { countedAt: new Date() } : {}),
             ...(base.approvedAt ? {} : { approvedAt: new Date() }),
           },
@@ -655,6 +668,9 @@ export async function refreshPaidShares(): Promise<number> {
 let sweeping = false;
 let lastTrack = 0;
 let lastVoidCheck = 0;
+let lastMirror = 0;
+/** How often Root's plan is copied in while commission comes from Root. */
+const MIRROR_MS = 5 * 60_000;
 
 /**
  * One pass: follow open sales' steps (every two minutes), settle what is held,
@@ -666,6 +682,16 @@ export async function sweepCommission(): Promise<void> {
   if (sweeping) return;
   sweeping = true;
   try {
+    // Root's plan copied in first, every few minutes, while commission comes from Root (2026-11-01).
+    if (fromRoot() && Date.now() - lastMirror >= MIRROR_MS) {
+      lastMirror = Date.now();
+      try {
+        const changed = await mirrorRootPlan(uaeMonthOf(new Date()));
+        if (changed.length) console.log(`[commission] Root's plan copied in: ${changed.join(", ")}`);
+      } catch (err) {
+        console.error(`[commission] Root's plan could not be copied in — ${err instanceof Error ? err.message : err}`);
+      }
+    }
     const config = await loadConfig();
     const names = new Names();
     if (Date.now() - lastTrack >= TRACK_MS) {
@@ -689,6 +715,7 @@ export async function sweepCommission(): Promise<void> {
 export function followNow(): void {
   lastTrack = 0;
   lastVoidCheck = 0;
+  lastMirror = 0;
 }
 
 // ─── Reading it ───────────────────────────────────────────────────────────────
@@ -922,10 +949,10 @@ export class CommissionService {
   async preview(input: { course: string; team?: string; closer?: string }, viewer: Viewer) {
     const course = await Course.findById(input.course).select("name commission").lean();
     if (!course) throw Object.assign(new Error("Course not found"), { statusCode: 404 });
-    const plan = planOf(course);
     const config = await loadConfig();
     const names = new Names();
-    const resolved = await resolveSale({ closer: input.closer, saleTeam: input.team, plan }, config, names);
+    const resolved = await resolveSale({ closer: input.closer, saleTeam: input.team, plan: planOf(course), course: course._id }, config, names);
+    const plan = resolved.plan ?? planOf(course);
     const closer = input.closer ?? "";
 
     // On hold, the closer's own share is still worth showing — it is what they
