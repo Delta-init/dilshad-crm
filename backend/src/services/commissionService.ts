@@ -192,7 +192,11 @@ export interface CommissionScope {
   all: boolean;
   /** Active teams the viewer leads (empty when `all`). */
   ledTeamIds: string[];
-  /** Members and leaders of those teams, the viewer included. */
+  /**
+   * The viewer, and the Sales Staff of those teams — never the Sales Manager nor another team leader, even one listed
+   * on the team (the user, 2026-11-01: "the team leader can see the sales manager's and another team leader's
+   * commission — fix that", in the Sales CRM, then here).
+   */
   teamPeople: Set<string>;
 }
 
@@ -204,16 +208,30 @@ export async function commissionScope(viewer: { userId: string; role?: IRole }):
     ? await Team.find({ leaders: new Types.ObjectId(me), status: { $ne: "inactive" } }).select("_id members leaders").lean()
     : [];
   const teamPeople = new Set<string>([me]);
-  for (const t of led) for (const u of [...(t.members ?? []), ...(t.leaders ?? [])]) teamPeople.add(idOf(u));
+  if (led.length) {
+    // Anyone who leads a team, and the Sales Manager, stay out of a team leader's view.
+    const leaders = new Set(
+      (await Team.find({ status: { $ne: "inactive" } }).select("leaders").lean()).flatMap((t) => (t.leaders ?? []).map(idOf)),
+    );
+    const sm = idOf(s?.salesManager);
+    for (const t of led) for (const u of t.members ?? []) {
+      const id = idOf(u);
+      if (id && id !== sm && !leaders.has(id)) teamPeople.add(id);
+    }
+  }
   return { all: false, ledTeamIds: led.map((t) => String(t._id)), teamPeople };
 }
 
-/** May the viewer see this commission line (an SM line only when `all`)? */
-export function canSeeLine(scope: CommissionScope, viewerId: string, line: { user?: unknown; role?: string }, saleCloser = ""): boolean {
+/**
+ * May the viewer see this commission line? Everyone their own; a team leader also the Sales Staff lines of their
+ * team's members — no Sales Manager's line, no other team leader's (2026-11-01). The sale's closer no longer opens
+ * the sale's other lines; the parameter stays for the callers.
+ */
+export function canSeeLine(scope: CommissionScope, viewerId: string, line: { user?: unknown; role?: string }, _saleCloser = ""): boolean {
   if (scope.all) return true;
   if (idOf(line.user) === viewerId) return true;
-  if (!scope.ledTeamIds.length || line.role === "sm") return false;
-  return scope.teamPeople.has(idOf(line.user)) || (!!saleCloser && scope.teamPeople.has(saleCloser));
+  if (!scope.ledTeamIds.length || line.role !== "sales") return false;
+  return scope.teamPeople.has(idOf(line.user));
 }
 
 /** The rates a viewer may see: a team leader no SM rate, everyone else only the sales rate. */
@@ -865,7 +883,8 @@ export class CommissionService {
         : sale.lines.filter(
             (l) =>
               String(l.user) === me ||
-              (scope === "team" && myTeams.has(String(sale.team)) && l.role !== "sm"),
+              // A team leader: their team's Sales Staff lines — not the SM's, not another team leader's (2026-11-01).
+              (scope === "team" && myTeams.has(String(sale.team)) && l.role === "sales" && who.teamPeople.has(String(l.user))),
           );
 
     // Earned: all of a line once the client paid in full, in the month of the last payment. Balance: all of it while

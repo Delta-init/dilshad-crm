@@ -3587,11 +3587,21 @@ const TABS: { id: Tab; label: string; shortLabel: string; icon: React.ElementTyp
   { id: "audit",          label: "Audit Trail",         shortLabel: "Audit",     icon: Shield       },
 ];
 
+/**
+ * The tabs shown (the user, 2026-11-01: "only the overview and leads, revenue, sources — hide the other tabs"). The
+ * others stay in the code, hidden; a link to one opens the overview.
+ */
+const SHOWN_TABS: readonly Tab[] = ["overview", "split", "revenue", "sources"];
+const VISIBLE_TABS = TABS.filter((t) => SHOWN_TABS.includes(t.id));
+
 function ReportsPageContent() {
   const sp     = useSearchParams();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<Tab>(() => (sp.get("tab") as Tab) ?? "overview");
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const t = sp.get("tab") as Tab | null;
+    return t && SHOWN_TABS.includes(t) ? t : "overview";
+  });
 
   // Shared period state — each tab inherits the same date range
   const [quickPeriod, setQuickPeriod] = useState<QuickPeriod>(() => (sp.get("period") as QuickPeriod) ?? "month");
@@ -3689,7 +3699,7 @@ function ReportsPageContent() {
           {/* Tabs — scrollable on mobile */}
           <div className="overflow-x-auto -mx-6 px-6 pb-0.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             <div className="flex gap-1 p-1 rounded-xl bg-muted/50 w-max">
-              {TABS.map(({ id, label, shortLabel, icon: Icon }) => (
+              {VISIBLE_TABS.map(({ id, label, shortLabel, icon: Icon }) => (
                 <button
                   key={id}
                   title={label}

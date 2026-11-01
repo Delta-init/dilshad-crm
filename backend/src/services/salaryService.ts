@@ -255,7 +255,8 @@ export class SalaryService {
     const scope = await commissionScope(viewer);
     const everyone = scope.all || me?.role === "sm";
     const team = !everyone && scope.ledTeamIds.length > 0;
-    const people = everyone ? rows : team ? rows.filter((r) => scope.teamPeople.has(r.user)) : null;
+    // A team leader: themselves and their team's Sales Staff — never the Sales Manager or another team leader (2026-11-01).
+    const people = everyone ? rows : team ? rows.filter((r) => r.user === viewer.userId || (scope.teamPeople.has(r.user) && r.role === "sales")) : null;
     return {
       month,
       view: everyone ? "all" : team ? "team" : "own",

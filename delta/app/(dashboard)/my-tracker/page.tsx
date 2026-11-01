@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -41,7 +42,20 @@ const dayLabel = (iso: string) =>
 const scoreTone = (s: number) =>
   s >= 75 ? "text-emerald-500" : s >= 40 ? "text-amber-500" : s > 0 ? "text-rose-500" : "text-muted-foreground";
 
+/** My Tracker is hidden (the user, 2026-11-01): the page sends anyone who opens it to the dashboard. */
+const TRACKER_HIDDEN = true;
+
 export default function MyTrackerPage() {
+  return TRACKER_HIDDEN ? <ToDashboard /> : <MyTracker />;
+}
+
+function ToDashboard() {
+  const router = useRouter();
+  useEffect(() => { router.replace("/dashboard"); }, [router]);
+  return null;
+}
+
+function MyTracker() {
   const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, string>>({});
   const [texts, setTexts] = useState<Record<string, string>>({});

@@ -3,7 +3,9 @@
  * members'; the sales manager everyone"):
  *   Case 1  happy path   Earnings, the Plan, My Pay and the close-form preview: a salesperson their own, a team
  *                        leader their team's (no SM line or rate), the Sales Manager and a Super Admin everything
- *   Case 2  edge         a leader of a switched-off team: only their own; the enrolment page's rule (canSeeLine)
+ *   Case 2  edge         a leader of a switched-off team: only their own; the enrolment page's rule (canSeeLine);
+ *                        the Sales Manager and another team leader listed on a team leader's team, and that team
+ *                        leader's line on a team member's sale counted under another team: never seen (2026-11-01)
  *   Case 3  errors       the preview asked for someone else's sale: no lines, nothing of their total
  *   Case 4  permission   no session 401
  *
@@ -48,14 +50,16 @@ await db.collection("roles").insertMany([
   { _id: staff, roleName: "Sales Staff", isSystemRole: false, permissions: { commission: { view: true }, pay: { view: true }, leads: { view: true } } },
 ]);
 const id = () => new Types.ObjectId();
-const P = { boss: id(), sm: id(), tl: id(), ann: id(), ben: id(), oldTl: id(), olly: id() };
-const NAME: Record<string, string> = { boss: "Boss", sm: "Sam Manager", tl: "Tina Lead", ann: "Ann", ben: "Ben", oldTl: "Old Lead", olly: "Olly" };
+const P = { boss: id(), sm: id(), tl: id(), ann: id(), ben: id(), oldTl: id(), olly: id(), gail: id() };
+const NAME: Record<string, string> = { boss: "Boss", sm: "Sam Manager", tl: "Tina Lead", ann: "Ann", ben: "Ben", oldTl: "Old Lead", olly: "Olly", gail: "Gail Lead" };
 await db.collection("users").insertMany(Object.entries(P).map(([k, _id]) => ({
   _id, name: NAME[k], email: `${k}@test.local`, password: "x", role: k === "boss" ? admin : staff, status: "active",
 })));
-const teamA = id(), teamB = id(), teamOld = id();
+const teamA = id(), teamB = id(), teamOld = id(), teamG = id();
 await db.collection("teams").insertMany([
-  { _id: teamA, name: "Alpha", status: "active", leaders: [P.tl], members: [P.ann], settings: {} },
+  // The Sales Manager and Gail (who leads Gamma) listed on Alpha too: Tina, its leader, must still not see them.
+  { _id: teamA, name: "Alpha", status: "active", leaders: [P.tl], members: [P.ann, P.sm, P.gail], settings: {} },
+  { _id: teamG, name: "Gamma", status: "active", leaders: [P.gail], members: [], settings: {} },
   { _id: teamB, name: "Beta", status: "active", leaders: [], members: [P.ben], settings: {} },
   { _id: teamOld, name: "Old team", status: "inactive", leaders: [P.oldTl], members: [P.olly], settings: {} },
 ]);
@@ -72,6 +76,9 @@ await db.collection("commissionsales").insertMany([
     saleDate: new Date(), month, state: "counted", lines: [line("sales", "ben", 300), line("sm", "sm", 50)] },
   { student: id(), studentName: "S3", courseName: "Forex Pro", closer: P.olly, closerName: "Olly", team: teamOld, teamName: "Old team",
     saleDate: new Date(), month, state: "counted", lines: [line("sales", "olly", 300), line("tl", "oldTl", 100), line("sm", "sm", 50)] },
+  // Ann's sale counted under Gamma: Gail's TL line on it.
+  { student: id(), studentName: "S4", courseName: "Forex Pro", closer: P.ann, closerName: "Ann", team: teamG, teamName: "Gamma",
+    saleDate: new Date(), month, state: "counted", lines: [line("sales", "ann", 300), line("tl", "gail", 100), line("sm", "sm", 50)] },
 ]);
 
 const app = express();
@@ -96,11 +103,12 @@ const preview = (who: keyof typeof P, closer: keyof typeof P, team: string) =>
 section("Case 1 — Earnings");
 {
   const ann = await earnings("ann"), tl = await earnings("tl"), sm = await earnings("sm"), boss = await earnings("boss");
-  check("a salesperson: only their own line, scope own", ann?.scope === "own" && JSON.stringify(names(allLines(ann))) === JSON.stringify(["sales:Ann"]), [ann?.scope, names(allLines(ann ?? {}))]);
+  check("a salesperson: only their own lines, scope own", ann?.scope === "own" && JSON.stringify(names(allLines(ann))) === JSON.stringify(["sales:Ann", "sales:Ann"]), [ann?.scope, names(allLines(ann ?? {}))]);
   check("a team leader: their team's lines (Ann's and their own), no SM line, not Beta's", tl?.scope === "team"
     && JSON.stringify(names(allLines(tl))) === JSON.stringify(["sales:Ann", "tl:Tina Lead"]), [tl?.scope, names(allLines(tl ?? {}))]);
-  check("the Sales Manager: every sale, every line", sm?.scope === "all" && allLines(sm).length === 8, [sm?.scope, allLines(sm ?? {}).length]);
-  check("a Super Admin: every sale, every line", boss?.scope === "all" && allLines(boss).length === 8, boss?.scope);
+  check("…not the Sales Manager's nor Gail's, though both are listed on Alpha", !(tl?.people ?? []).some((p: Json) => p.name === "Sam Manager" || p.name === "Gail Lead"), (tl?.people ?? []).map((p: Json) => p.name));
+  check("the Sales Manager: every sale, every line", sm?.scope === "all" && allLines(sm).length === 11, [sm?.scope, allLines(sm ?? {}).length]);
+  check("a Super Admin: every sale, every line", boss?.scope === "all" && allLines(boss).length === 11, boss?.scope);
 }
 
 section("Case 1 — the Plan");
@@ -124,7 +132,8 @@ section("Case 1 — My Pay");
   const sm = (await get(`/commission/pay?month=${month}`, "sm")).body.data as Json;
   const allowed = new Set([String(P.tl), String(P.ann)]);
   check("a salesperson: no one else's pay", ann?.people === null && ann?.view === "own", { view: ann?.view, people: ann?.people });
-  check("a team leader: view team, only their team's people", tl?.view === "team" && Array.isArray(tl?.people) && tl.people.every((r: Json) => allowed.has(r.user)), { view: tl?.view, people: (tl?.people ?? []).map((r: Json) => r.user) });
+  check("a team leader: view team, only themselves and their team's Sales Staff — not the Sales Manager or Gail listed on Alpha",
+    tl?.view === "team" && Array.isArray(tl?.people) && tl.people.length === 2 && tl.people.every((r: Json) => allowed.has(r.user)), { view: tl?.view, people: (tl?.people ?? []).map((r: Json) => r.name) });
   check("the Sales Manager: everyone", sm?.view === "all" && Array.isArray(sm?.people), sm?.view);
 }
 
@@ -155,6 +164,10 @@ section("Case 2 — a leader of a switched-off team");
   const ann = String(P.ann);
   check("the enrolment page's rule: a team leader sees a team sale's lines but the SM's",
     canSeeLine(tlScope, String(P.tl), { user: P.ann, role: "sales" }, ann) && !canSeeLine(tlScope, String(P.tl), { user: P.sm, role: "sm" }, ann));
+  check("…on Ann's sale counted under Gamma: Ann's line, not Gail's TL line, not the SM's",
+    canSeeLine(tlScope, String(P.tl), { user: P.ann, role: "sales" }, ann) && !canSeeLine(tlScope, String(P.tl), { user: P.gail, role: "tl" }, ann)
+    && !canSeeLine(tlScope, String(P.tl), { user: P.sm, role: "sm" }, ann));
+  check("…the Sales Manager and Gail, though listed on Alpha, are not her team's people", !tlScope.teamPeople.has(String(P.sm)) && !tlScope.teamPeople.has(String(P.gail)) && tlScope.teamPeople.has(ann));
   const annScope = await commissionScope({ userId: ann });
   check("…a salesperson only their own", canSeeLine(annScope, ann, { user: P.ann, role: "sales" }, ann) && !canSeeLine(annScope, ann, { user: P.tl, role: "tl" }, ann));
 }
