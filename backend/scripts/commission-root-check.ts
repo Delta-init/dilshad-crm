@@ -7,7 +7,8 @@
  *      this CRM's secret; the closing preview shows Root's lines and amounts; a held sale settles with Root's answer;
  *      the slabs and My Pay (and so finance's payable) are Root's; Root's plan is copied into the CRM's settings,
  *      only what differs, and the sweep does it;
- *   3. Root unreachable, refusing, or not set up: a clear error — the sale is left as it was, to be tried again;
+ *   3. Root unreachable, refusing, or not set up: a clear error — the sale is left as it was, to be tried again; Root
+ *      answering for another CRM (this one's secret mixed up with another's): refused, nothing used or copied in;
  *   4. off again: back to this CRM's own figures.
  *
  * Run by commission-root-check.sh. Scratch database only.
@@ -73,7 +74,7 @@ const commission = await import("../src/services/commissionService.js");
 const { resolveSale, loadConfig, planOf, sweepCommission, followNow, CommissionService, TL_RULE } = commission;
 const { payRows, SalaryService } = await import("../src/services/salaryService.js");
 const { slabsFor } = await import("../src/services/salarySlabs.js");
-const { mirrorRootPlan } = await import("../src/services/rootCommission.js");
+const { mirrorRootPlan, forgetRootPlan, PORTAL } = await import("../src/services/rootCommission.js");
 const { CommissionSale } = await import("../src/models/CommissionSale.js");
 const PAYS_TL = (TL_RULE as string) !== "never";
 
@@ -108,6 +109,15 @@ check("…and Root was never asked", hits.length === 0, j(hits));
 
 section("2. On: Root works it out");
 Object.assign(process.env, { COMMISSION_FROM_ROOT: "on", ROOT_ERP_API_URL: `${ROOT_URL}/`, ROOT_ORG_SECRET: SECRET });
+// Root's plan for this CRM, as its own settings stand — asked first, to check Root answers for this CRM.
+const PLAN_NOW = {
+  portal: PORTAL, tlRule: TL_RULE, tlSlab: true, tlPaidOnOwnClose: false,
+  salesManager: { id: String(ids.Abrar), name: "Abrar" }, excluded: [{ id: String(ids.Shared), name: "Shared" }],
+  courses: [{ courseId: String(MBT), name: "MBT", sales: 230, tl: 85, sm: 100, creditUsd: 500 }],
+  month: "2026-11", slabsFrom: "2000-01",
+  slabs: { sales: [{ name: "Base", target: 0, salary: 2000, percent: 0 }], tl: [{ name: "Base", target: 0, salary: 4000, percent: 50 }], sm: [{ name: "Base", target: 0, salary: 5000, percent: 50 }] },
+};
+answer.plan = PLAN_NOW;
 const line = (role: string, who: string, amount: number, note?: string) => ({ role, user: String(ids[who]), userName: who, amount, ...(note ? { note } : {}) });
 answer.resolve = (body: any) => ({
   state: "counted", reason: "", team: String(TEAM), teamName: "Gladiators",
@@ -141,8 +151,9 @@ const settled = await CommissionSale.findOne({ student: held }).lean();
 check("a held sale settles with Root's answer, at its held amounts", settled?.state === "counted" && settled.lines.map((l) => l.amount).join() === "200,70,90"
   && hits.slice(before).some((h) => h.body?.amounts?.sales === 200), j(settled));
 
+forgetRootPlan();
 answer.plan = {
-  portal: "delta", tlRule: TL_RULE, tlSlab: true, tlPaidOnOwnClose: false,
+  portal: PORTAL, tlRule: TL_RULE, tlSlab: true, tlPaidOnOwnClose: false,
   salesManager: { id: String(ids.Lena), name: "Lena" }, excluded: [{ id: String(ids.Shared), name: "Shared" }, { id: String(ids.Abrar), name: "Abrar" }],
   courses: [{ courseId: String(MBT), name: "MBT", sales: 250, tl: 90, sm: 100, creditUsd: 500 }, { courseId: String(new Types.ObjectId()), name: "Gone", sales: 1, tl: 1, sm: 1, creditUsd: 0 }],
   month: "2026-10", slabsFrom: "2000-01",
@@ -155,8 +166,10 @@ answer.pay = { month: "2026-10", slabsFrom: "2000-01", slabs: answer.plan.slabs,
 const slabs = await slabsFor("2026-10");
 check("the slabs are Root's (built-in there: no month)", slabs.from === null && slabs.slabs.sales[0]?.salary === 2600, j(slabs));
 answer.plan = { ...answer.plan, tlSlab: false, month: "2026-09" };
+forgetRootPlan();
 check("…a CRM with no TL slab (Draw, Remote) gets none", !("tl" in (await slabsFor("2026-09")).slabs));
 answer.plan = { ...answer.plan, tlSlab: true, month: "2026-11", slabsFrom: "2026-11" };
+forgetRootPlan();
 check("…a month Root changed them in is given", (await slabsFor("2026-11")).from === "2026-11");
 const rows = await payRows("2026-10", ownSlabs.slabs);
 check("My Pay is Root's — what finance's payable reads too", rows.length === 1 && rows[0]!.commission.payable === 125 && rows[0]!.level.name === "D"
@@ -182,9 +195,21 @@ await sweepCommission();
 check("the sweep copies Root's plan in (every five minutes)", hits.filter((h) => h.path.endsWith("/plan")).length === planHits + 1
   && String((await db.collection("commissionsettings").findOne({ key: "default" }))?.salesManager) === String(ids.Abrar));
 
-section("3. Root unreachable, refusing, not set up");
+section("3. Root unreachable, refusing, not set up, or answering for another CRM");
+const mine = answer.plan;
+answer.plan = { ...mine, portal: PORTAL === "remote" ? "delta" : "remote", salesManager: { id: String(new Types.ObjectId()), name: "Another CRM's manager" } };
+forgetRootPlan();
+let err: Awaited<ReturnType<typeof fails>>;
+const settingsBefore = JSON.stringify(await db.collection("commissionsettings").findOne({ key: "default" }));
+err = await fails(resolveSale({ closer: ids.Ria, saleTeam: TEAM, plan: planOf(null), course: MBT }, config));
+check("Root answering for another CRM: who earns what refused, saying the secret is mixed up", !!err && /answered for the \w+ CRM, not this one/.test(err.message) && /ROOT_ORG_SECRET/.test(err.message), j(err));
+check("…My Pay refused too", /answered for the/.test((await fails(payRows("2026-10", ownSlabs.slabs)))?.message ?? ""));
+check("…its plan not copied in: the settings as they were", /answered for the/.test((await fails(mirrorRootPlan("2026-11")))?.message ?? "")
+  && JSON.stringify(await db.collection("commissionsettings").findOne({ key: "default" })) === settingsBefore);
+answer.plan = mine;
+forgetRootPlan();
 answer.status = 503;
-let err = await fails(resolveSale({ closer: ids.Ria, saleTeam: TEAM, plan: planOf(null), course: MBT }, config));
+err = await fails(resolveSale({ closer: ids.Ria, saleTeam: TEAM, plan: planOf(null), course: MBT }, config));
 check("Root down: who earns what fails, clearly", !!err && /Root couldn't work out the commission/.test(err.message) && err.statusCode === 502, j(err));
 const held2 = new Types.ObjectId();
 await CommissionSale.create({ student: held2, studentName: "Held 2", closer: ids.Ria, closerName: "Ria", team: TEAM, saleDate: new Date("2026-10-21T08:00:00Z"), month: "2026-10",

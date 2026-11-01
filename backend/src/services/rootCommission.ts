@@ -15,6 +15,13 @@ import type { CommissionRole, ICommissionLine, ISlabRow, ISlabs } from "../types
  * daily tracker reaches it: ROOT_ERP_API_URL, with ROOT_ORG_SECRET proving which CRM is asking.
  */
 
+/**
+ * Which CRM this is, as Root names it. A plan Root answers for another CRM is refused, never used or copied in (the
+ * user, 2026-11-01: the Remote CRM, given the Sales CRM's secret, was sent the Sales CRM's plan and figures and copied
+ * its Sales Manager and excluded logins into its own settings).
+ */
+export const PORTAL = "remote";
+
 /** Whether this CRM takes its commission figures from Root. */
 export const fromRoot = (): boolean => /^(on|true|1|yes)$/i.test(process.env.COMMISSION_FROM_ROOT ?? "");
 
@@ -60,9 +67,25 @@ export async function rootPlan(month: string): Promise<RootPlan> {
   const hit = planCache.get(month);
   if (hit && Date.now() - hit.at < 30_000) return hit.plan;
   const plan = await ask<RootPlan>("GET", "/plan", { params: { month } });
+  if (plan.portal !== PORTAL) {
+    throw Object.assign(
+      new Error(`Root answered for the ${plan.portal} CRM, not this one (${PORTAL}) — ROOT_ORG_SECRET here must be Root's ${PORTAL.toUpperCase()}_SSO_SECRET. Nothing was used.`),
+      { statusCode: 502 },
+    );
+  }
   planCache.set(month, { at: Date.now(), plan });
   return plan;
 }
+
+/** Test hook: Root's plan asked afresh next time. */
+export function forgetRootPlan(): void {
+  planCache.clear();
+}
+
+/** This month in UAE time, YYYY-MM. */
+const thisMonth = () => new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 7);
+/** Root is answering for this CRM: checked on the plan (kept 30 s) before anything else is asked or used. */
+const ensurePortal = () => rootPlan(thisMonth());
 
 /** The slabs of a month from Root, as slabsFor gives them: `from` null while they are the built-in ones. */
 export async function rootSlabs(month: string): Promise<{ slabs: ISlabs; from: string | null }> {
@@ -90,6 +113,7 @@ export interface RootResolved {
  * amounts a held sale was held at.
  */
 export async function rootResolve(input: { closer: string; team: string; course?: string; courses?: string[]; amounts?: Amounts }): Promise<RootResolved> {
+  await ensurePortal();
   const r = await ask<{
     state: RootResolved["state"]; reason: string; team: string | null; teamName: string; plan: Amounts;
     lines: Array<{ role: CommissionRole; user: string; userName: string; amount: number; note?: string }>;
@@ -111,6 +135,7 @@ export async function rootResolve(input: { closer: string; team: string; course?
 
 /** A month's My Pay as Root works it out — the same rows payRows gives. */
 export async function rootPayRows<T>(month: string): Promise<T[]> {
+  await ensurePortal();
   return (await ask<{ people: T[] }>("GET", "/pay", { params: { month } })).people;
 }
 
