@@ -1,5 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 import { handOverOnAssign } from "./leadHandOver.js";
+import { teamOnAssign } from "./leadTeamOnAssign.js";
 import { noteViewAsOnLogs } from "./leadViewAsNote.js";
 import { followUpDateOnStatus } from "./leadFollowUpDate.js";
 import { ENROLMENT_PAYMENT_METHODS, type ILead, type ILeadNote, type IActivityLog, type IReminder, type IPayment, type IFollowUp } from "../types/index.js";
@@ -486,6 +487,8 @@ leadSchema.index({ "reminders.createdBy": 1 });
 leadSchema.index({ "reminders.isDone": 1, "reminders.remindAt": 1 });
 leadSchema.index({ "payments.finance.externalId": 1 }, { sparse: true });
 
+// Before the hand-over: a lead given to someone joins their team first (leadTeamOnAssign.ts).
+teamOnAssign(leadSchema);
 handOverOnAssign(leadSchema);
 noteViewAsOnLogs(leadSchema);
 // After the hand-over, so a status it sets clears an old follow-up date too.

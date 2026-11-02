@@ -496,13 +496,17 @@ export class LeadService {
     const isSuperAdmin =
       userRole?.roleName === "Super Admin" || userRole?.roleName === "Reporter";
 
+    // A team leader's limit, kept apart from the filters so they only narrow it (applied as $and below).
+    let scope: Record<string, unknown> | null = null;
     if (!isSuperAdmin && userId) {
       // Check if the user is a leader of any team
-      const leaderTeam = await Team.findOne({ leaders: userId }).select("_id");
+      const ledTeams = await Team.find({ leaders: userId }).select("_id").lean<{ _id: Types.ObjectId }[]>();
 
-      if (leaderTeam) {
-        // Team leader: scoped to their team only
-        query.team = leaderTeam._id;
+      if (ledTeams.length) {
+        // Team leader: every team they lead — and every lead given to them, whatever team it sits in (2026-11-02:
+        // a team leader's own leads filed under another team were nowhere on their Leads page).
+        const mates = (await phoneMates(userId)).map((m) => new Types.ObjectId(m));
+        scope = { $or: [{ team: { $in: ledTeams.map((t) => t._id) } }, { assignedTo: { $in: mates } }] };
       } else {
         // Regular member / BDE / any non-admin role: only their assigned leads —
         // and those of whoever shares a WhatsApp with them (2026-10-31).
@@ -526,6 +530,7 @@ export class LeadService {
     if (filters.assignedTo) narrow("assignedTo", filters.assignedTo);
     if (filters.team) narrow("team", filters.team);
     if (outsideView) return { leads: [], pagination: buildPagination(0, page, limit) };
+    if (scope) query.$and = [scope];
     if (filters.reporter) query.reporter = filters.reporter;
     if (filters.course) query.course = filters.course;
     if (filters.source) query.source = new RegExp(filters.source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
