@@ -14,7 +14,8 @@ import { useCommissionEarnings } from "@/hooks/useCommission";
 import {
   aed, monthLabel, recentMonths, ROLE_LABEL, ROLE_SHORT, STATE_LABEL, TL_PAID, uaeDate, uaeMonth,
 } from "@/lib/commission";
-import type { CommissionSale, CommissionSaleState } from "@/types/commission";
+import type { CommissionEarnings, CommissionRole, CommissionSale, CommissionSaleState } from "@/types/commission";
+import { PersonSalesDialog } from "./PersonSalesDialog";
 
 const ROLES = TL_PAID ? (["sales", "tl", "sm"] as const) : (["sales", "sm"] as const);
 
@@ -29,6 +30,8 @@ export function EarningsTab() {
   const months = recentMonths();
   const [month, setMonth] = useState(uaeMonth());
   const { data, isLoading, isError, error } = useCommissionEarnings(month);
+  // A person clicked (2026-11-03): their closings behind the figures, in a pop-up — one role's when its figure was clicked.
+  const [pick, setPick] = useState<{ person: CommissionEarnings["people"][number]; role: CommissionRole | null } | null>(null);
 
   return (
     <div className="flex flex-col gap-5">
@@ -112,19 +115,28 @@ export function EarningsTab() {
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.03 }}
-                      className="border-b border-border/30 last:border-0"
+                      tabIndex={0}
+                      title={`See ${p.name}'s closings`}
+                      onClick={() => setPick({ person: p, role: null })}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPick({ person: p, role: null }); } }}
+                      className="cursor-pointer border-b border-border/30 transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
                     >
                       <td className="px-4 py-2.5 font-medium text-foreground">{p.name}</td>
                       {ROLES.map((role) => (
                         <td key={role} className="px-4 py-2.5 text-right tabular-nums">
                           {p[role].count ? (
-                            <>
+                            <button
+                              type="button"
+                              title={`${p.name}'s closings as ${ROLE_LABEL[role]}`}
+                              onClick={(e) => { e.stopPropagation(); setPick({ person: p, role }); }}
+                              className="rounded-md px-1 text-right hover:bg-primary/10 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                            >
                               <span className="text-foreground">{aed(p[role].amount)}</span>
                               <span className="ml-1 text-[11px] text-muted-foreground">· {p[role].count}</span>
                               {(p[role].balance ?? 0) > 0 && (
                                 <span className="block text-[10px] text-amber-600 dark:text-amber-400">+{aed(p[role].balance ?? 0)} waiting</span>
                               )}
-                            </>
+                            </button>
                           ) : (
                             <span className="text-muted-foreground/60">—</span>
                           )}
@@ -147,6 +159,18 @@ export function EarningsTab() {
             </p>
             {data.sales.map((s, i) => <SaleRow key={s._id} sale={s} index={i} />)}
           </div>
+
+          {pick && (
+            <PersonSalesDialog
+              person={pick.person}
+              role={pick.role}
+              month={data.month}
+              sales={data.sales}
+              roles={ROLES}
+              onRole={(role) => setPick({ person: pick.person, role })}
+              onClose={() => setPick(null)}
+            />
+          )}
         </>
       )}
     </div>
