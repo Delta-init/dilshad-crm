@@ -20,6 +20,7 @@ import {
 import { useTeams, useMyTeam } from "@/hooks/useTeams";
 import { TeamDialog } from "@/components/teams/TeamDialog";
 import { DeleteTeamDialog } from "@/components/teams/DeleteTeamDialog";
+import { LeadSourceTeams } from "@/components/teams/LeadSourceTeams";
 import { useAuthStore } from "@/lib/store/authStore";
 import type { Team } from "@/types/team";
 
@@ -27,7 +28,9 @@ import type { Team } from "@/types/team";
 // Only rendered when isSuperAdmin === true, so hooks run unconditionally here.
 
 function AdminTeamsList() {
-  const { hasPermission } = useAuthStore();
+  const { hasPermission, user } = useAuthStore();
+  // Lead sources → teams: the Super Admin's alone (a Reporter sees this list too).
+  const superAdmin = user?.role?.roleName === "Super Admin";
   const canCreate = hasPermission("teams", "create");
   const canEdit   = hasPermission("teams", "edit");
   const canDelete = hasPermission("teams", "delete");
@@ -259,6 +262,8 @@ function AdminTeamsList() {
           </div>
         </div>
       )}
+
+      {superAdmin && <LeadSourceTeams />}
 
       {/* Dialogs */}
       <TeamDialog

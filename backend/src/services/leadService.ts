@@ -17,6 +17,7 @@ import type {
 } from "../types/index.js";
 import { collectAssignments } from "./leadAlertService.js";
 import { phoneMates } from "./whatsapp/sharing.js";
+import { LeadSourceTeam, sourceKey } from "../models/LeadSourceTeam.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1215,13 +1216,30 @@ export class LeadService {
         });
       }
   
-      // Each lead goes to the team with the lowest per-member load; ties break
-      // by fewer raw leads, then stable team order — giving a proportional
-      // round-robin across teams of different sizes.
-      const assignedTeams: (typeof teamLeadCounts)[0][] = [];
+      // Which teams each lead may go to, when no teams were picked (2026-11-03): its source's teams (set on the Teams
+      // page), else every team with auto-assign on — or, when none has it on, every active team as before.
+      let allowedFor: (lead: { source?: unknown }) => Set<string> | null = () => null;
+      if (teamIds === undefined) {
+        const rules = new Map(
+          (await LeadSourceTeam.find().select("key teams").lean<{ key: string; teams: Types.ObjectId[] }[]>())
+            .filter((r) => r.teams?.length)
+            .map((r) => [r.key, new Set(r.teams.map(String))]),
+        );
+        const autoOn = activeTeams.filter((t) => t.settings?.autoAssign).map((t) => String(t._id));
+        const fallback = autoOn.length ? new Set(autoOn) : null;
+        allowedFor = (lead) => rules.get(sourceKey(lead.source)) ?? fallback;
+      }
+
+      // Each lead goes to the team with the lowest per-member load (of those it may go to); ties break by fewer raw
+      // leads, then stable team order — giving a proportional round-robin across teams of different sizes. A lead
+      // none of whose teams has anyone to receive it is left where it is.
+      const assignedTeams: ((typeof teamLeadCounts)[0] | null)[] = [];
       for (let i = 0; i < leadsToAssign.length; i++) {
-        let best = teamLeadCounts[0];
-        for (const t of teamLeadCounts) {
+        const allowed = allowedFor(leadsToAssign[i] as { source?: unknown });
+        const pool = allowed ? teamLeadCounts.filter((t) => allowed.has(String(t.team._id))) : teamLeadCounts;
+        if (!pool.length) { assignedTeams.push(null); continue; }
+        let best = pool[0];
+        for (const t of pool) {
           const bestLoad = best.count / best.memberCount;
           const load = t.count / t.memberCount;
           if (load < bestLoad || (load === bestLoad && t.count < best.count)) best = t;
@@ -1234,7 +1252,9 @@ export class LeadService {
       const updates: Promise<unknown>[] = [];
   
       for (let i = 0; i < leadsToAssign.length; i++) {
-        const { team } = assignedTeams[i];
+        const chosen = assignedTeams[i];
+        if (!chosen) continue;
+        const { team } = chosen;
         const lead = leadsToAssign[i];
   
         updates.push(
@@ -1261,14 +1281,16 @@ export class LeadService {
   
       // ── Trigger intra-team auto-split for every lead that was just assigned a team
       await Promise.all(
-        leadsToAssign.map((lead, i) =>
-          autoSplitLead(
-            assignedTeams[i].team._id.toString(),
+        leadsToAssign.map((lead, i) => {
+          const chosen = assignedTeams[i];
+          if (!chosen) return null;
+          return autoSplitLead(
+            chosen.team._id.toString(),
             lead._id.toString(),
             lead.reporter?.toString() ?? "",
-            memberOverrides?.[assignedTeams[i].team._id.toString()],
-          ),
-        ),
+            memberOverrides?.[chosen.team._id.toString()],
+          );
+        }),
       );
   
       return { assigned: results.length, results };

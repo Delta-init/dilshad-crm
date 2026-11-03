@@ -7,6 +7,9 @@
  *   - Case 2: a lead given to someone joins their team (one they lead first), through save, updateOne, updateMany and
  *     findOneAndUpdate; one already in one of their teams stays; an update naming the team keeps it; someone in no team
  *     leaves it; a new lead with no team gets its owner's; a new lead with a team keeps it.
+ *   - Case 3: lead sources → teams (2026-11-03) — a source with teams set is split only to them (whatever its case);
+ *     one with none to the teams with auto-assign on; teams picked by hand ignore the rules; the Teams-page API is the
+ *     Super Admin's, lists the sources, sets and clears a rule.
  *
  * Run by team-on-assign-check.sh (a throwaway mongod). Scratch database only.
  */
@@ -53,9 +56,12 @@ const server = app.listen(0);
 const port = (server.address() as { port: number }).port;
 
 /* ── People and teams: Mia leads Digital (and is in no other); Ann and Bo in Alpha (led by Lee); Zed in none ── */
-const staffRole = new Types.ObjectId();
+const staffRole = new Types.ObjectId(), superRole = new Types.ObjectId();
 const perms = { leads: { view: true, create: true, edit: true, delete: false, approve: false, export: false } };
-await db.collection("roles").insertOne({ _id: staffRole, roleName: "BDE", isSystemRole: false, permissions: perms });
+await db.collection("roles").insertMany([
+  { _id: staffRole, roleName: "BDE", isSystemRole: false, permissions: perms },
+  { _id: superRole, roleName: "Super Admin", isSystemRole: true, permissions: {} },
+]);
 const ids: Record<string, Types.ObjectId> = {};
 for (const n of ["Mia", "Lee", "Ann", "Bo", "Zed", "Duo"]) {
   ids[n] = new Types.ObjectId();
@@ -153,6 +159,56 @@ try {
   check("a new lead with a team: it stands", await teamOf(kept._id as Types.ObjectId) === String(team.alpha));
   const nobody = await Lead.create({ name: "N3", phone: "+971509999003", status: "new", reporter: ids.Lee });
   check("a new lead with no owner: no team", await teamOf(nobody._id as Types.ObjectId) === "null");
+
+  section("Case 3 — lead sources → teams");
+  await db.collection("leads").deleteMany({});
+  // Alpha and Beta split automatically; Digital doesn't.
+  await db.collection("teams").updateMany({ _id: { $in: [team.alpha, team.beta] } }, { $set: { "settings.autoAssign": true, "settings.splitMode": "round_robin", "settings.splitStrategy": "live" } });
+  await db.collection("teams").updateOne({ _id: team.digital }, { $set: { "settings.autoAssign": false } });
+  const { LeadService } = await import("../src/services/leadService.js");
+  const svc = new LeadService();
+  const fresh = async (source: string, count: number) => {
+    const docs = Array.from({ length: count }, (_, i) => ({ ...raw(`${source} ${i}`, null, null), status: "new", source }));
+    await db.collection("leads").insertMany(docs);
+    return docs.map((d) => String(d._id));
+  };
+  const teamsOfLeads = async (leadIds: string[]) => (await db.collection("leads").find({ _id: { $in: leadIds.map((x) => new Types.ObjectId(x)) } }).toArray()).map((l) => String(l.team ?? null));
+  let got = await teamsOfLeads(await fresh("Sheet A", 6).then(async (x) => { await svc.autoAssignLeads(x); return x; }));
+  check("no rule: only the teams with auto-assign on (Alpha, Beta) — never Digital", got.every((t) => t === String(team.alpha) || t === String(team.beta)) && got.includes(String(team.alpha)) && got.includes(String(team.beta)), got);
+  await db.collection("lead_source_teams").insertOne({ key: "forex", source: "FOREX", teams: [team.digital], updatedByName: "x", createdAt: new Date(), updatedAt: new Date() });
+  got = await teamsOfLeads(await fresh(" Forex ", 4).then(async (x) => { await svc.autoAssignLeads(x); return x; }));
+  check("a rule (FOREX → Digital): every \" Forex \" lead to Digital, auto-assign off or not", got.every((t) => t === String(team.digital)), got);
+  got = await teamsOfLeads(await fresh("FOREX", 3).then(async (x) => { await svc.autoAssignLeads(x, [String(team.alpha)]); return x; }));
+  check("teams picked by hand: the rule doesn't apply", got.every((t) => t === String(team.alpha)), got);
+  await db.collection("lead_source_teams").updateOne({ key: "forex" }, { $set: { teams: [new Types.ObjectId()] } });
+  got = await teamsOfLeads(await fresh("FOREX", 2).then(async (x) => { await svc.autoAssignLeads(x).catch(() => null); return x; }));
+  check("a rule whose team is gone: the leads wait unsplit (no team)", got.every((t) => t === "null"), got);
+  await db.collection("lead_source_teams").deleteMany({});
+
+  // The Teams-page API
+  const superId = new Types.ObjectId();
+  await db.collection("users").insertOne({ _id: superId, name: "Root", email: "root@ta.test", password: "x", role: superRole, status: "active" });
+  const rootToken = jwtUtils.signAccessToken({ userId: String(superId), email: "root@ta.test", roleId: String(superRole) });
+  const call = async (method: string, path: string, tok: string, body?: unknown) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${tok}` }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as { data?: any; message?: string } };
+  };
+  let r = await call("GET", "/teams/source-rules", token("Lee"));
+  check("the rules are the Super Admin's: a team leader is refused", r.status === 403, r.status);
+  r = await call("GET", "/teams/source-rules", rootToken);
+  const sheetA = (r.body.data?.sources ?? []).find((x: any) => x.source === "Sheet A");
+  check("Super Admin: every source with its leads (Sheet A: 6), the teams with auto-assign", r.status === 200 && sheetA?.leads === 6 && sheetA.teams.length === 0
+    && r.body.data.teams.find((t: any) => t.name === "Digital")?.autoAssign === false, { s: r.status, sheetA, teams: r.body.data?.teams });
+  r = await call("PUT", "/teams/source-rules", rootToken, { source: "Sheet A", teams: [String(team.beta)] });
+  check("set: Sheet A → Beta", r.status === 200 && (await db.collection("lead_source_teams").findOne({ key: "sheet a" }))?.teams?.map(String).join() === String(team.beta), r);
+  got = await teamsOfLeads(await fresh("sheet a", 3).then(async (x) => { await svc.autoAssignLeads(x); return x; }));
+  check("…and its next leads go to Beta only", got.every((t) => t === String(team.beta)), got);
+  r = await call("PUT", "/teams/source-rules", rootToken, { source: "Sheet A", teams: [String(new Types.ObjectId())] });
+  check("a team that doesn't exist: refused", r.status === 404, r.status);
+  r = await call("PUT", "/teams/source-rules", rootToken, { source: "Sheet A", teams: [] });
+  check("cleared: back to the default", r.status === 200 && !(await db.collection("lead_source_teams").findOne({ key: "sheet a" })), r);
+  r = await call("PUT", "/teams/source-rules", rootToken, { source: "", teams: [] });
+  check("bad input: refused", r.status === 400, r.status);
 } finally {
   server.close();
   await mongoose.disconnect();

@@ -122,25 +122,14 @@ export const rememberLead = (key: string, leadId: Types.ObjectId) => { byKeyCach
 
 /* ── A number that is no lead's, writing in ─────────────────────────────── */
 
-/** The team new WhatsApp leads go to (the owner, 2026-10-28): the one named "AI Academy", however it is written. */
-const AI_ACADEMY = /^\s*ai[\s_-]*academy\s*$/i;
-let aiAcademyCache: { at: number; id: Types.ObjectId | null } | null = null;
-async function aiAcademyTeam(): Promise<Types.ObjectId | null> {
-  if (aiAcademyCache && Date.now() - aiAcademyCache.at < 5 * 60_000) return aiAcademyCache.id;
-  const { Team } = await import("../../models/Team.js");
-  const team = await Team.findOne({ name: AI_ACADEMY, status: { $ne: "inactive" } }).select("_id").lean<{ _id: Types.ObjectId } | null>();
-  if (!team) console.warn('[whatsapp] no team named "AI Academy" — WhatsApp leads are made without a team');
-  aiAcademyCache = { at: Date.now(), id: team?._id ?? null };
-  return aiAcademyCache.id;
-}
-
 /** One lead at a time per number, so two messages (or two people's WhatsApps) in the same moment make one lead. */
 const makingLead = new Map<string, Promise<Types.ObjectId | null>>();
 
 /**
  * A number that is no lead's has written to someone's WhatsApp (the owner, 2026-10-28: "if they message, create it as
- * a lead … in the AI Academy team, assigned"): a lead is made of it — their WhatsApp name (else "WhatsApp +number"),
- * source WhatsApp, held by the person whose WhatsApp it is, in the AI Academy team — and that person is told.
+ * a lead … assigned"): a lead is made of it — their WhatsApp name (else "WhatsApp +number"), source WhatsApp, held by
+ * the person whose WhatsApp it is, in their team (since 2026-11-03, not always AI Academy: models/leadTeamOnAssign.ts
+ * gives a new lead its owner's team; in no team, none) — and that person is told.
  * A number that turns out to be a lead after all (the 60-second list was behind) gets that lead instead.
  */
 export function leadForNewNumber(owner: Owner, phone: string, key: string, pushName: string): Promise<Types.ObjectId | null> {
@@ -156,10 +145,9 @@ export function leadForNewNumber(owner: Owner, phone: string, key: string, pushN
     const name = (saved && !/^\+?\d+$/.test(saved) ? saved : "")
       || (pushName && !/^\+?\d+$/.test(pushName.trim()) ? pushName.trim().slice(0, 100) : "")
       || `WhatsApp +${phone}`;
-    const team = await aiAcademyTeam();
     const lead = await Lead.create({
       name, phone: `+${phone}`, source: "WhatsApp", status: "assigned",
-      assignedTo: new Types.ObjectId(owner.id), assignedAt: new Date(), team,
+      assignedTo: new Types.ObjectId(owner.id), assignedAt: new Date(),
       reporter: new Types.ObjectId(owner.id),
       activityLogs: [{
         action: "lead_created",
@@ -171,7 +159,7 @@ export function leadForNewNumber(owner: Owner, phone: string, key: string, pushN
     rememberLead(key, lead._id as Types.ObjectId);
     const { notifyLeadAssignment } = await import("../pushService.js");
     void notifyLeadAssignment(owner.id, String(lead._id), name, emitToUser).catch(() => null);
-    console.log(`[whatsapp] new lead ${name} (+${phone}) for ${owner.name}${team ? " in AI Academy" : ""}`);
+    console.log(`[whatsapp] new lead ${name} (+${phone}) for ${owner.name}${lead.team ? "" : " (in no team)"}`);
     return lead._id as Types.ObjectId;
   })().catch((err) => {
     console.error(`[whatsapp] could not make a lead of +${phone}`, err instanceof Error ? err.message : err);

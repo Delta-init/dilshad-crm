@@ -33,7 +33,8 @@ import {
 } from "../controllers/teamController.js";
 import { exportTeamPdf } from "../controllers/exportController.js";
 import { authenticate } from "../middleware/auth.js";
-import { checkPermission } from "../middleware/permissions.js";
+import { checkPermission, requireSuperAdmin } from "../middleware/permissions.js";
+import { getSourceRules, putSourceRule } from "../controllers/leadSourceTeamController.js";
 
 const router = Router();
 
@@ -45,6 +46,9 @@ router.get(   "/",     checkPermission("leads", "view"),   getTeams);
 router.post(  "/",     checkPermission("leads", "create"), createTeam);
 // /mine MUST come before /:id so Express doesn't treat "mine" as an ObjectId
 router.get(   "/mine", checkPermission("leads", "view"),   getMyTeam);
+// Lead sources → teams (2026-11-03): which teams each source's automatic split goes to. Super Admin.
+router.get("/source-rules", requireSuperAdmin, getSourceRules);
+router.put("/source-rules", requireSuperAdmin, putSourceRule);
 router.get(   "/:id",  checkPermission("leads", "view"),   getTeamById);
 router.put(   "/:id", checkPermission("leads", "edit"),   updateTeam);
 router.delete("/:id", checkPermission("leads", "delete"), deleteTeam);

@@ -718,3 +718,26 @@ export const useTeamDailySourceSplit = (teamId: string, date: string, enabled = 
     staleTime: 30_000,
   });
 };
+
+// ─── Lead sources → teams (2026-11-03, Super Admin) ──────────────────────────
+
+export interface LeadSourceRow { source: string; leads: number; teams: string[]; updatedByName: string; updatedAt: string | null }
+export interface LeadSourceRules { sources: LeadSourceRow[]; teams: { id: string; name: string; active: boolean; autoAssign: boolean }[] }
+
+/** Every lead source, the teams its automatic split goes to (none: every team with auto-assign on), and the teams. */
+export const useLeadSourceRules = (enabled = true) =>
+  useQuery({
+    queryKey: [...TEAMS_KEY, "source-rules"],
+    queryFn: async () => (await api.get<ApiResponse<LeadSourceRules>>("/teams/source-rules")).data.data,
+    enabled,
+  });
+
+/** The teams one source's leads are split to; [] = back to every team with auto-assign on. */
+export const useSetLeadSourceRule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { source: string; teams: string[] }) => (await api.put<ApiResponse<{ source: string; teams: string[] }>>("/teams/source-rules", v)).data.data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...TEAMS_KEY, "source-rules"] }),
+    onError: (error: unknown) => toast.error(errMsg(error, "Not saved")),
+  });
+};

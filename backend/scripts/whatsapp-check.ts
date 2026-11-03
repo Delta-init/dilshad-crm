@@ -4,7 +4,7 @@
  *
  *   - Case 1: linking — off in a process that doesn't run the timed jobs; who may link; who is listed for whom.
  *   - Case 2: a message comes in — kept under its owner, matched to the lead by its number's last 9 digits; a
- *     replayed one is one; a number no lead has writing in becomes a lead (AI Academy, the WhatsApp's owner); one
+ *     replayed one is one; a number no lead has writing in becomes a lead (the WhatsApp's owner's, in their team); one
  *     sent from the phone is kept as theirs.
  *   - Case 3: unread — counted, the new ones since the last ask, and read by its owner only.
  *   - Case 4: sending — from your own linked WhatsApp only, to a number on WhatsApp; kept, matched to the lead.
@@ -19,7 +19,7 @@
  *     renamed); messages WhatsApp catches up on kept as they are; "Load older messages" asks the phone; the follow-ups
  *     summary for everyone.
  *   - Case 12: a number that is no lead's writing in (2026-10-28) — a lead at once: their name, source WhatsApp, the
- *     owner's, in the AI Academy team, the owner told; once only, however many messages or WhatsApps; not for one the
+ *     owner's, in the owner's team (2026-11-03; none if they are in none), the owner told; once only, however many messages or WhatsApps; not for one the
  *     salesperson wrote first, a past chat, a catch-up from days ago, a group, or a number already a lead.
  *   - Case 13: Forward — text, a photo with its caption, a voice note as a voice note; to several chats; marked
  *     forwarded; only a message you may read; a file no longer kept, not linked, bad input — refused.
@@ -369,7 +369,10 @@ try {
   await incoming("Omar", "971588888881", "Hi, I saw your ad", { name: "Zara Ali" });
   let zara = await db.collection("leads").findOne({ phone: "+971588888881" });
   check("a lead at once: their WhatsApp name, source WhatsApp, Omar's, Assigned", zara?.name === "Zara Ali" && zara?.source === "WhatsApp" && String(zara?.assignedTo) === String(P("Omar")) && zara?.status === "assigned" && zara?.assignedAt instanceof Date, j(zara));
-  check("…in the AI Academy team (found however it is written)", String(zara?.team) === String(aiAcademy), j(zara?.team));
+  check("…in Omar's team, Others (since 2026-11-03 the owner's team, not always AI Academy)", String(zara?.team) === String(others), j(zara?.team));
+  await incoming("Nora", "971588888899", "Hello", { name: "Nadia" });
+  const nadia = await db.collection("leads").findOne({ phone: "+971588888899" });
+  check("…a WhatsApp of someone in no team: the lead is theirs, in no team", String(nadia?.assignedTo) === String(P("Nora")) && !nadia?.team, j({ to: nadia?.assignedTo, team: nadia?.team }));
   check("…says how it came", /wrote to Omar's WhatsApp/.test(zara?.activityLogs?.[0]?.description ?? "") && String(zara?.reporter) === String(P("Omar")), j(zara?.activityLogs));
   const zaraMsg = await WhatsAppMessage.findOne({ owner: P("Omar"), chat: "971588888881" }).lean();
   check("…the message that came is under that lead", String(zaraMsg?.lead) === String(zara?._id), j(zaraMsg?.lead));
