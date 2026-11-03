@@ -40,9 +40,31 @@ export interface ILeadCall {
   leadName: string;
   user: Types.ObjectId | null;
   userName: string;
+  /** Marked for training (2026-11-03); null when it isn't. */
+  training?: ITrainingMark | null;
   syncedAt: Date;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** What a call is a training example of (the user, 2026-11-03: as recommended). */
+export const TRAINING_CATEGORIES = ["good_example", "closing", "objection", "follow_up", "avoid"] as const;
+export type TrainingCategory = (typeof TRAINING_CATEGORIES)[number];
+
+/**
+ * A call marked for training (2026-11-03): why, by whom, and its recordings kept in the CRM's storage — 3CX deletes
+ * old recordings, a training call must keep playing. `copies` holds those saved so far (by recording index);
+ * `copyError` why the last try to save one failed.
+ */
+export interface ITrainingMark {
+  category: TrainingCategory;
+  note: string;
+  by: Types.ObjectId;
+  byName: string;
+  at: Date;
+  updatedAt: Date;
+  copies: { index: number; key: string; size: number; mimeType: string }[];
+  copyError: string;
 }
 
 const leadCallSchema = new Schema<ILeadCall>(
@@ -68,6 +90,25 @@ const leadCallSchema = new Schema<ILeadCall>(
     leadName: { type: String, default: "" },
     user: { type: Schema.Types.ObjectId, ref: "User", default: null },
     userName: { type: String, default: "" },
+    training: {
+      type: new Schema<ITrainingMark>(
+        {
+          category: { type: String, enum: TRAINING_CATEGORIES, required: true },
+          note: { type: String, default: "", maxlength: 1000 },
+          by: { type: Schema.Types.ObjectId, ref: "User", required: true },
+          byName: { type: String, default: "" },
+          at: { type: Date, required: true },
+          updatedAt: { type: Date, required: true },
+          copies: {
+            type: [new Schema({ index: Number, key: String, size: Number, mimeType: String }, { _id: false })],
+            default: [],
+          },
+          copyError: { type: String, default: "" },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
     syncedAt: { type: Date, default: Date.now },
   },
   { timestamps: true, versionKey: false, collection: "lead_calls" },
@@ -77,5 +118,7 @@ leadCallSchema.index({ startedAt: -1 });
 leadCallSchema.index({ lead: 1, startedAt: -1 });
 leadCallSchema.index({ user: 1, startedAt: -1 });
 leadCallSchema.index({ extension: 1, user: 1 });
+// The Training calls page (2026-11-03): marked calls, newest mark first.
+leadCallSchema.index({ "training.at": -1 }, { partialFilterExpression: { "training.at": { $exists: true } } });
 
 export const LeadCall = mongoose.model<ILeadCall>("LeadCall", leadCallSchema);

@@ -21,6 +21,7 @@ import {
   Settings,
   GraduationCap,
   PhoneCall,
+  Headphones,
   Receipt,
   CalendarCheck,
   CalendarDays,
@@ -64,6 +65,8 @@ export const navItems: { href: string; label: string; icon: React.ElementType; p
   // Team leaders, Super Admins and the Sales Manager only (hidden for everyone else below) — 2026-10-23
   { href: "/repeat-leads", label: "Repeat leads",    icon: Repeat2,         permModule: "leads"     },
   { href: "/calls",     label: "Calls",              icon: PhoneCall,       permModule: "calls"     },
+  /* Calls marked for training, to listen and learn (2026-11-03); open to every role until unticked. */
+  { href: "/training-calls", label: "Training calls", icon: Headphones, permModule: "trainingCalls" },
   { href: "/whatsapp",  label: "WhatsApp",           icon: MessageCircle,   permModule: "whatsapp"  },
   { href: "/reminders", label: "Reminders",          icon: Bell,            permModule: "reminders" },
   /* The Super Admin's, unless a role is given the Inactive Leads box. */

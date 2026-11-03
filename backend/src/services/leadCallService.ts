@@ -195,6 +195,8 @@ function row(c: CallDoc) {
     leadPhone: lead?.phone ?? "",
     recordings: recordingCount(c),
     reason: c.reason ?? "",
+    // Marked for training (2026-11-03).
+    training: c.training ? { category: c.training.category, note: c.training.note ?? "", byName: c.training.byName ?? "", at: c.training.at } : null,
   };
 }
 

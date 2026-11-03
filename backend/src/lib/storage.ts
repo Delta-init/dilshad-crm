@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { Readable } from "node:stream";
 import { env } from "../config/env.js";
 
 /**
@@ -20,7 +21,8 @@ function makeClient(): S3Client | null {
   }
   return new S3Client({
     region: "auto",
-    endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    endpoint: env.R2_ENDPOINT || `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    forcePathStyle: !!env.R2_ENDPOINT,
     credentials: {
       accessKeyId: env.R2_ACCESS_KEY_ID,
       secretAccessKey: env.R2_SECRET_ACCESS_KEY,
@@ -88,6 +90,32 @@ export async function uploadFile(opts: {
     mimeType: opts.mimeType,
     originalName: opts.originalName,
   };
+}
+
+/**
+ * A stored file read back, a byte range of it where asked — a training call's recording kept here (2026-11-03),
+ * played through this server since the bucket's files are not for anyone with the link. Null when it isn't there.
+ */
+export async function readFile(key: string, range?: string): Promise<{
+  status: number; body: Readable; contentType: string; contentLength?: number; contentRange?: string;
+} | null> {
+  if (!client || !key) return null;
+  try {
+    const r = await client.send(new GetObjectCommand({ Bucket: env.R2_BUCKET_NAME, Key: key, ...(range ? { Range: range } : {}) }));
+    if (!r.Body) return null;
+    const raw = r.Body as unknown as Readable | { transformToWebStream: () => ReadableStream };
+    const body = raw instanceof Readable ? raw : Readable.fromWeb(raw.transformToWebStream() as Parameters<typeof Readable.fromWeb>[0]);
+    return {
+      status: r.ContentRange ? 206 : 200,
+      body,
+      contentType: r.ContentType ?? "application/octet-stream",
+      contentLength: r.ContentLength,
+      contentRange: r.ContentRange,
+    };
+  } catch (err) {
+    if ((err as { name?: string }).name === "NoSuchKey" || (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return null;
+    throw err;
+  }
 }
 
 /** Delete a previously uploaded key. Silently ignores missing keys. */

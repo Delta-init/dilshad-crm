@@ -128,6 +128,8 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().default(""),
   R2_BUCKET_NAME:       z.string().default(""),
   R2_PUBLIC_URL:        z.string().default(""),
+  /* Another S3 endpoint in place of R2's own (2026-11-03) — the checks' stand-in. Empty on the servers. */
+  R2_ENDPOINT:          z.string().default(""),
   /*
    * WhatsApp, as in CS Portal and the Sales CRM (2026-10-27): each salesperson links their own WhatsApp by
    * scanning a QR — the server becomes one of their linked devices (Baileys, the WhatsApp Web protocol; no Meta

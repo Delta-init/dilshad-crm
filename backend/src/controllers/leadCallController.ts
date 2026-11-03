@@ -10,7 +10,11 @@ import {
 } from "../services/callSyncService.js";
 import { threecxConfigured, threecxFetch, threecxJson, threecxSettings } from "../lib/threecx.js";
 import { isSuperAdmin } from "../services/commissionService.js";
-import { sendSuccess, sendError } from "../utils/response.js";
+import { sendSuccess, sendError, buildPagination } from "../utils/response.js";
+import {
+  AUDIO_TYPES, TrainingError, canMarkTraining, listTraining, markTraining, trainingCall, unmarkTraining,
+} from "../services/trainingCalls.js";
+import { readFile } from "../lib/storage.js";
 
 /* The 3CX calls (lead_calls): the Calls page, a lead's Calls section and recordings. See leadCallService.ts. */
 
@@ -32,7 +36,8 @@ export const getCallLog = async (req: AuthenticatedRequest, res: Response, next:
       page: q(req.query.page), limit: q(req.query.limit),
     };
     const data = await leadCallService.list(viewerOf(req), f, { maxLimit: exporting ? 5000 : 200 });
-    sendSuccess(res, "Calls fetched", data);
+    // Who may mark a call for training (2026-11-03): the Super Admin, the Sales Manager, team leaders.
+    sendSuccess(res, "Calls fetched", { ...data, canMarkTraining: await canMarkTraining(viewerOf(req)) });
   } catch (err) {
     next(err);
   }
@@ -63,8 +68,6 @@ export const getRecordingLink = async (req: AuthenticatedRequest, res: Response,
   }
 };
 
-const AUDIO_TYPES: Record<string, string> = { wav: "audio/wav", mp3: "audio/mpeg", ogg: "audio/ogg", opus: "audio/ogg", m4a: "audio/mp4", webm: "audio/webm" };
-
 /**
  * GET /calls/log/recording?c&i&e&u&s — the audio, streamed from 3CX (range requests pass through, so it can be
  * scrubbed). No sign-in header (an <audio> element can't send one): the signed, 10-minute link is the permission.
@@ -75,6 +78,23 @@ export const streamRecording = async (req: Request, res: Response): Promise<void
   const link = checkRecordingLink(params);
   if (!link) { res.status(403).type("text/plain").send("This recording link has expired — play it again from the CRM."); return; }
   const call = await LeadCall.findById(link.callId).lean().catch(() => null);
+  // A training call's recording kept in the CRM's storage (2026-11-03) plays from there — 3CX may have deleted it.
+  const copy = call?.training?.copies?.find((c) => c.index === link.index);
+  if (copy) {
+    const kept = await readFile(copy.key, typeof req.headers.range === "string" ? req.headers.range : undefined).catch(() => null);
+    if (kept) {
+      res.status(kept.status);
+      res.setHeader("Content-Type", copy.mimeType || kept.contentType);
+      res.setHeader("Cache-Control", "private, max-age=600");
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Disposition", `inline; filename="call-${link.callId}.${copy.key.split(".").pop() ?? "wav"}"`);
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      if (kept.contentLength !== undefined) res.setHeader("Content-Length", String(kept.contentLength));
+      if (kept.contentRange) res.setHeader("Content-Range", kept.contentRange);
+      kept.body.on("error", () => res.destroy()).pipe(res);
+      return;
+    }
+  }
   const path = recordingSource(call, link.index);
   if (!path) { res.status(404).type("text/plain").send("No recording"); return; }
   const range = req.headers.range;
@@ -103,6 +123,64 @@ export const streamRecording = async (req: Request, res: Response): Promise<void
     if (v) res.setHeader(h, v);
   }
   Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream).on("error", () => res.end()).pipe(res);
+};
+
+/* ── Training calls (2026-11-03, as in the Sales CRM) ────────────────────── */
+
+function trainingFail(res: Response, next: NextFunction, err: unknown) {
+  if (err instanceof TrainingError) { sendError(res, err.message, err.status); return; }
+  next(err);
+}
+
+/** GET /calls/log/training?category&person&search&page&limit — every call marked for training. */
+export const getTrainingCalls = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const r = await listTraining(viewerOf(req), {
+      category: q(req.query.category), person: q(req.query.person), search: q(req.query.search), page: q(req.query.page), limit: q(req.query.limit),
+    });
+    sendSuccess(res, "Training calls", {
+      calls: r.calls, canMark: r.canMark, categories: r.categories, people: r.people, pagination: buildPagination(r.total, r.page, r.limit),
+    });
+  } catch (err) {
+    trainingFail(res, next, err);
+  }
+};
+
+/** GET /calls/log/training/:id/recording-link?index — a training call's recording, for anyone on the Training calls page. */
+export const getTrainingRecordingLink = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const index = /^\d{1,2}$/.test(String(req.query.index ?? "0")) ? Number(req.query.index ?? 0) : -1;
+    if (index < 0) { sendError(res, "index must be a small number", 400); return; }
+    const call = await trainingCall(String(req.params.id ?? ""));
+    const kept = call.training?.copies?.some((c) => c.index === index);
+    if (!kept && !recordingSource(call, index)) { sendError(res, "No recording for this call", 404); return; }
+    sendSuccess(res, "Recording link", { url: recordingPath(String(call._id), index, req.user!.userId), expiresIn: LINK_TTL_S });
+  } catch (err) {
+    trainingFail(res, next, err);
+  }
+};
+
+/** PUT /calls/log/:id/training { category, note } — mark a call for training, or change why. */
+export const putTraining = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const body = (req.body ?? {}) as { category?: unknown; note?: unknown };
+    const training = await markTraining(viewerOf(req), String(req.params.id ?? ""), {
+      category: typeof body.category === "string" ? body.category : "",
+      note: typeof body.note === "string" ? body.note : "",
+    });
+    sendSuccess(res, "Marked for training", { training });
+  } catch (err) {
+    trainingFail(res, next, err);
+  }
+};
+
+/** DELETE /calls/log/:id/training — no longer a training call. */
+export const deleteTraining = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    sendSuccess(res, "No longer a training call", await unmarkTraining(viewerOf(req), String(req.params.id ?? "")));
+  } catch (err) {
+    trainingFail(res, next, err);
+  }
 };
 
 /** POST /calls/log/sync — Super Admin: fetch new calls from 3CX now (the first import runs in the background). */

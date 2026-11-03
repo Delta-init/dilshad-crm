@@ -22,6 +22,10 @@ import {
   streamRecording,
   syncCallsNow,
   testThreecx,
+  getTrainingCalls,
+  getTrainingRecordingLink,
+  putTraining,
+  deleteTraining,
 } from "../controllers/leadCallController.js";
 import { getClickToCall, startThreecxCall, getMyCallState, hangUpMyCall } from "../controllers/clickToCallController.js";
 
@@ -44,6 +48,12 @@ router.post("/log/sync",                   authenticate, requireSuperAdmin, sync
 router.post("/log/test",                   authenticate, requireSuperAdmin, testThreecx);
 router.get("/log/lead/:leadId",            authenticate, checkPermission("leads", "view"), getLeadCallLog);
 router.get("/log/:id/recording-link",      authenticate, getRecordingLink);
+// Training calls (2026-11-03): the page for everyone with the module; marking for whoever may (the service decides —
+// the Super Admin, the Sales Manager, team leaders) on a call they can see on the Calls page.
+router.get("/log/training",                authenticate, checkPermission("trainingCalls", "view"), getTrainingCalls);
+router.get("/log/training/:id/recording-link", authenticate, checkPermission("trainingCalls", "view"), getTrainingRecordingLink);
+router.put("/log/:id/training",            authenticate, checkPermission("calls", "view"), putTraining);
+router.delete("/log/:id/training",         authenticate, checkPermission("calls", "view"), deleteTraining);
 
 // ── The Call button through 3CX (2026-10-14): rings the caller's own extension, then the lead; the call window
 //    follows it and can hang up — always the caller's own extension, never another's.

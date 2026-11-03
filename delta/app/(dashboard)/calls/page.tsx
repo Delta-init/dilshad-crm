@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
-  ArrowDown, ArrowUp, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, Loader2, PhoneCall, PhoneIncoming,
+  ArrowDown, ArrowUp, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, GraduationCap, Loader2, PhoneCall, PhoneIncoming,
   PhoneMissed, PhoneOff, PhoneOutgoing, PlugZap, RefreshCw, Search, Timer, Users, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
   CallPerson, CallResult, RecordingPlayer, SyncNote, RESULTS, fmtClockDuration, fmtTalkTotal, fmtWhen,
 } from "@/components/calls/callUi";
 import { ThreecxTestDialog } from "@/components/calls/ThreecxTestDialog";
+import { TrainingBadge, TrainingMarkDialog } from "@/components/calls/TrainingMarkDialog";
 
 /**
  * Calls (2026-10-14) — every call with a lead through 3CX, synced from 3CX's call log every minute: in or out,
@@ -100,6 +101,8 @@ export default function CallsPage() {
   const { data, isLoading, isFetching, error, refetch } = useCallLog(filters);
   const sync = useSyncCallsNow();
   const [testing, setTesting] = useState(false);
+  // A call being marked for training (2026-11-03).
+  const [marking, setMarking] = useState<ThreecxCall | null>(null);
 
   const calls = data?.calls ?? [];
   const stats = data?.stats;
@@ -409,7 +412,20 @@ export default function CallsPage() {
                       <td className="hidden px-4 py-3 md:table-cell"><CallPerson call={c} /></td>
                       <td className="whitespace-nowrap px-4 py-3 text-right text-xs tabular-nums">{c.talkSeconds ? fmtClockDuration(c.talkSeconds) : dash}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right text-xs tabular-nums text-muted-foreground">{c.ringSeconds ? fmtClockDuration(c.ringSeconds) : dash}</td>
-                      <td className="px-4 py-2.5"><RecordingPlayer call={c} /></td>
+                      <td className="px-4 py-2.5">
+                        <RecordingPlayer call={c} />
+                        {/* Training (2026-11-03): the mark, and who may mark — the Super Admin, the Sales Manager, team leaders. */}
+                        {c.training ? (
+                          <div className="mt-1.5">
+                            <TrainingBadge category={c.training.category} onClick={data?.canMarkTraining ? () => setMarking(c) : undefined} />
+                          </div>
+                        ) : data?.canMarkTraining && c.recordings > 0 ? (
+                          <button type="button" onClick={() => setMarking(c)}
+                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground opacity-70 transition-opacity hover:text-primary hover:opacity-100 group-hover:opacity-100">
+                            <GraduationCap className="h-3 w-3" /> Mark for training
+                          </button>
+                        ) : null}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -433,6 +449,7 @@ export default function CallsPage() {
       </Card>
 
       <ThreecxTestDialog open={testing} onClose={() => setTesting(false)} />
+      {marking && <TrainingMarkDialog call={marking} onClose={() => setMarking(null)} />}
     </div>
   );
 }

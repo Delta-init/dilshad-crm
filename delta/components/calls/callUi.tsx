@@ -78,7 +78,11 @@ export function CallPerson({ call }: { call: Pick<ThreecxCall, "userName" | "age
  * A call's recording: asks the server for a 10-minute link, then plays it in the browser — streamed from 3CX
  * through the backend, never stored here. Several parts (a transferred call): one button each.
  */
-export function RecordingPlayer({ call }: { call: Pick<ThreecxCall, "id" | "recordings"> }) {
+export function RecordingPlayer({ call, link = getRecordingLink }: {
+  call: Pick<ThreecxCall, "id" | "recordings">;
+  /** Where the link comes from — the Training calls page asks its own (2026-11-03). */
+  link?: (callId: string, index: number) => Promise<string>;
+}) {
   const [playing, setPlaying] = useState<{ index: number; url: string } | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -88,7 +92,7 @@ export function RecordingPlayer({ call }: { call: Pick<ThreecxCall, "id" | "reco
     setBusy(index);
     setErr(null);
     try {
-      setPlaying({ index, url: await getRecordingLink(call.id, index) });
+      setPlaying({ index, url: await link(call.id, index) });
     } catch (e) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
       setErr(msg || "Could not open the recording");
