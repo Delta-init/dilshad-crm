@@ -6,8 +6,9 @@ import { sendError, sendSuccess } from "../utils/response.js";
 
 /*
  * My Wallet (2026-11-04: "the wallet on every portal"). The HRMS keeps it — salary a day at a time, what came off and
- * why, commission, what finance has paid — and finds the person by the email they sign in here with. Only ever your
- * own: not while viewing the CRM as somebody else, whose pay is not the viewer's to read.
+ * why, commission, what finance has paid — and finds the person by the email they sign in here with: your own, or,
+ * while viewing the CRM as somebody (a super admin's "View as", read only), theirs (the user, 2026-11-04: "show it
+ * when impersonating also").
  */
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -19,7 +20,6 @@ export async function myWallet(req: AuthenticatedRequest, res: Response, next: N
   try {
     const month = String(req.query.month ?? "");
     if (month && !MONTH.test(month)) { sendError(res, "month must be YYYY-MM", 400); return; }
-    if (req.user!.impersonatedBy) { sendError(res, "Your wallet isn't shown while you're viewing the CRM as someone else.", 403); return; }
     if (!hrmsConfigured()) { sendError(res, "This CRM isn't linked to the HRMS yet, so there is no wallet to show.", 503); return; }
     const u = await User.findById(req.user!.userId).select("email").lean<{ email?: string } | null>();
     const email = String(u?.email ?? "").trim().toLowerCase();
