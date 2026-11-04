@@ -12,6 +12,7 @@ import { CurrencyRedraw } from "@/components/shared/CurrencyRedraw";
 import { useActivityHeartbeat } from "@/hooks/useActivityHeartbeat";
 import { RecentPageTracker } from "@/components/shared/CommandPalette";
 import { SaleCelebration } from "@/components/shared/SaleCelebration";
+import { RewardsPopup } from "@/components/rewards/RewardsPopup";
 import { RootPortalHistoryBridge } from "@/components/shared/RootPortalHistoryBridge";
 import { CallFlowProvider } from "@/components/calls/CallFlow";
 
@@ -81,6 +82,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <RootPortalHistoryBridge />
       <RecentPageTracker />
       <SaleCelebration />
+      <RewardsPopup />
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Every Call button's dialogs: 3CX or phone, the call window, "How did the call go?" */}

@@ -25,6 +25,7 @@ import activityRoutes from "./activityRoutes.js";
 import meetingRoutes from "./meetingRoutes.js";
 import meetingRoomRoutes from "./meetingRoomRoutes.js";
 import walletRoutes from "./walletRoutes.js";
+import rewardsRoutes from "./rewardsRoutes.js";
 import commissionRoutes from "./commissionRoutes.js";
 import leaderboardRoutes from "./leaderboardRoutes.js";
 import publicRoutes from "./publicRoutes.js";
@@ -72,6 +73,8 @@ router.use("/meetings", meetingRoutes);
 router.use("/meeting-rooms", meetingRoomRoutes);
 // My Wallet, from the HRMS (2026-11-04) — see walletRoutes.
 router.use("/wallet", walletRoutes);
+// Gift rewards: this month's target, the gift shelf and the gift chosen (2026-11-04).
+router.use("/rewards", rewardsRoutes);
 // WhatsApp (2026-10-27): each person's own linked WhatsApp, its chats and the lead page's card. Its media links are signed, not authenticated.
 router.use("/whatsapp", whatsappRoutes);
 
