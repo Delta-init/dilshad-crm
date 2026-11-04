@@ -78,6 +78,8 @@ export async function hrmsRequest<T>(
   path: string,
   query: Record<string, string> = {},
   body?: unknown,
+  /** Longer for an answer the HRMS has to ask finance for first — the wallet (2026-11-04). */
+  timeoutMs: number = TIMEOUT_MS,
 ): Promise<T> {
   const qs = new URLSearchParams(query).toString();
   const signedPath = `/api/v1/integrations${path}${qs ? `?${qs}` : ""}`;
@@ -88,7 +90,7 @@ export async function hrmsRequest<T>(
       method,
       headers: { ...signedHeaders(method, signedPath, rawBody), ...(rawBody ? { "Content-Type": "application/json" } : {}) },
       ...(rawBody ? { body: rawBody } : {}),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new HrmsError("The HRMS could not be reached — try again in a moment", 503);

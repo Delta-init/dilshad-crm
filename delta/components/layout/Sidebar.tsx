@@ -32,6 +32,7 @@ import {
   Coins,
   Trophy,
   Wallet,
+  WalletCards,
   HandCoins,
   Repeat2, MessageCircle,
 } from "lucide-react";
@@ -89,6 +90,8 @@ export const navItems: { href: string; label: string; icon: React.ElementType; p
   /* Open to every role by default; the server narrows it to their own month
      (everyone's for a Super Admin and the Sales Manager). */
   { href: "/my-pay",    label: "My Pay",             icon: Wallet,          permModule: "pay"       },
+  /* My Wallet, from the HRMS (2026-11-04): salary a day at a time, deductions and why, commission, what finance paid — everyone's own. */
+  { href: "/wallet",    label: "My Wallet",          icon: WalletCards,     permModule: null },
   { href: "/mentors",   label: "Mentors",            icon: CalendarDays,    permModule: "mentors"   },
   /* The office's meeting rooms, booked through the HRMS (2026-10-19) — open to everyone signed in. */
   { href: "/meeting-rooms", label: "Meeting rooms", icon: DoorOpen, permModule: null },

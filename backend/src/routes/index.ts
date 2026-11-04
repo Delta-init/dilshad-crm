@@ -24,6 +24,7 @@ import inactiveLeadRoutes from "./inactiveLeadRoutes.js";
 import activityRoutes from "./activityRoutes.js";
 import meetingRoutes from "./meetingRoutes.js";
 import meetingRoomRoutes from "./meetingRoomRoutes.js";
+import walletRoutes from "./walletRoutes.js";
 import commissionRoutes from "./commissionRoutes.js";
 import leaderboardRoutes from "./leaderboardRoutes.js";
 import publicRoutes from "./publicRoutes.js";
@@ -69,6 +70,8 @@ router.use("/break", breakRoutes);
 router.use("/meetings", meetingRoutes);
 // The office's meeting rooms, booked through the HRMS — see meetingRoomRoutes.
 router.use("/meeting-rooms", meetingRoomRoutes);
+// My Wallet, from the HRMS (2026-11-04) — see walletRoutes.
+router.use("/wallet", walletRoutes);
 // WhatsApp (2026-10-27): each person's own linked WhatsApp, its chats and the lead page's card. Its media links are signed, not authenticated.
 router.use("/whatsapp", whatsappRoutes);
 
