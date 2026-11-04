@@ -20,7 +20,7 @@ import { phoneOwnerOf, setSharers, sharedFrom, sharersOf, SharingError } from ".
 import { chatCalls, logCall, setStudent, studentKeys, studentMark } from "../services/whatsapp/chatExtras.js";
 import { CallLog } from "../models/CallLog.js";
 import {
-  followupSettings, FollowupError, leadFollowup, listSavedMessages, saveFollowupSettings, sendSavedMessage, setLeadFollowupStopped,
+  followupSettings, FollowupError, leadFollowup, listSavedMessages, messagesOfPerson, saveFollowupSettings, saveTeamMessages, sendSavedMessage, setLeadFollowupStopped,
 } from "../services/whatsapp/followups.js";
 import {
   connect, contactNames, disconnect, fetchOlder, fetchOlderForAll, forwardMessage, rememberLead, intlNumbers, leadsByKey, mediaPath, realMime, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
@@ -427,8 +427,9 @@ router.post("/forward", checkPermission("whatsapp", "create"), async (req: Authe
 /* ── The saved messages (the first reply, the follow-up steps), sent by hand ── */
 
 /** GET /whatsapp/saved-messages — the first reply's parts and the follow-up steps, to pick one and send it now. */
-router.get("/saved-messages", checkPermission("whatsapp", "create"), async (_req: AuthenticatedRequest, res, next) => {
-  try { sendSuccess(res, "Saved messages", await listSavedMessages()); } catch (err) { next(err); }
+router.get("/saved-messages", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
+  // Their team's (its own messages, else the Default — 2026-11-03).
+  try { sendSuccess(res, "Saved messages", await listSavedMessages(req.user!.userId)); } catch (err) { next(err); }
 });
 
 /** POST /whatsapp/send-saved { chat, id } — that saved message ("first_reply:all": the whole first reply), sent now from your WhatsApp ({name} filled in). */
@@ -675,6 +676,8 @@ router.get("/followups/settings", async (req: AuthenticatedRequest, res, next) =
     const withUrl = <T extends { file: { file: string } | null }>(x: T) => (x.file ? { ...x, file: { ...x.file, url: followupFileUrl(x.file.file, req.user!.userId) } } : x);
     sendSuccess(res, "Follow-ups", {
       ...s, steps: s.steps.map(withUrl), firstReply: { ...s.firstReply, items: s.firstReply.items.map(withUrl) },
+      // Each team's own messages (2026-11-03), with their files' links.
+      teamSets: s.teamSets.map((t) => ({ ...t, steps: t.steps.map(withUrl), firstReply: { ...t.firstReply, items: t.firstReply.items.map(withUrl) } })),
       allTeams: teams.map((t) => ({ id: String(t._id), name: t.name ?? "" })),
     });
   } catch (err) { next(err); }
@@ -688,6 +691,31 @@ router.put("/followups/settings", async (req: AuthenticatedRequest, res, next) =
   try {
     if (!superAdminOnly(req, res)) return;
     sendSuccess(res, "Saved", await saveFollowupSettings((req.body ?? {}) as Record<string, unknown>, await myName(req)));
+  } catch (err) {
+    if (err instanceof FollowupError) { sendError(res, err.message, err.statusCode); return; }
+    next(err);
+  }
+});
+
+/**
+ * PUT /whatsapp/followups/team/:teamId { steps, firstReply: { enabled, items } } — a team's own messages (2026-11-03);
+ * DELETE — back to the Default. Super Admin.
+ */
+router.put("/followups/team/:teamId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!superAdminOnly(req, res)) return;
+    await saveTeamMessages(str(req.params.teamId, 40), (req.body ?? {}) as Record<string, unknown>, await myName(req));
+    sendSuccess(res, "Saved — this team's own messages", { teamId: str(req.params.teamId, 40) });
+  } catch (err) {
+    if (err instanceof FollowupError) { sendError(res, err.message, err.statusCode); return; }
+    next(err);
+  }
+});
+router.delete("/followups/team/:teamId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!superAdminOnly(req, res)) return;
+    await saveTeamMessages(str(req.params.teamId, 40), null, await myName(req));
+    sendSuccess(res, "This team uses the Default messages again", { teamId: str(req.params.teamId, 40) });
   } catch (err) {
     if (err instanceof FollowupError) { sendError(res, err.message, err.statusCode); return; }
     next(err);
@@ -724,7 +752,9 @@ router.post("/followups/file", upload.single("file"), async (req: AuthenticatedR
  */
 router.get("/followups/summary", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
   try {
-    const st = await followupSettings();
+    const all = await followupSettings();
+    // Their team's messages (its own, else the Default — 2026-11-03).
+    const st = { ...all, ...(await messagesOfPerson(all, req.user!.userId)) };
     const me = new Types.ObjectId(req.user!.userId);
     const mine = await Team.find({ status: "active", $or: [{ members: me }, { leaders: me }] }).select("name").lean<{ _id: Types.ObjectId; name?: string }[]>();
     sendSuccess(res, "Follow-ups", {

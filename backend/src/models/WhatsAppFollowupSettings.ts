@@ -21,6 +21,14 @@ export interface IFirstReplyItem {
   voice: boolean;
 }
 
+export interface ITeamMessageSet {
+  team: Types.ObjectId;
+  steps: IFollowupStep[];
+  firstReply: { enabled: boolean; startedAt: Date | null; items: IFirstReplyItem[] };
+  updatedByName: string;
+  updatedAt: Date | null;
+}
+
 export interface IWhatsAppFollowupSettings {
   _id: Types.ObjectId;
   key: "default";
@@ -31,6 +39,11 @@ export interface IWhatsAppFollowupSettings {
   steps: IFollowupStep[];
   /** The automatic first reply (2026-10-28): to someone's first message ever, a minute on unless a person answered. */
   firstReply: { enabled: boolean; startedAt: Date | null; items: IFirstReplyItem[] };
+  /**
+   * A team's own messages (2026-11-03: "different ads per team"): its own follow-up steps and first reply, with the first
+   * reply's own switch. A team not here uses the ones above (the "Default").
+   */
+  teamSets: ITeamMessageSet[];
   updatedByName: string;
   updatedAt: Date;
 }
@@ -74,6 +87,20 @@ const settingsSchema = new Schema<IWhatsAppFollowupSettings>(
       enabled: { type: Boolean, default: false },
       startedAt: { type: Date, default: null },
       items: { type: [firstReplyItemSchema], default: [] },
+    },
+    teamSets: {
+      type: [new Schema<ITeamMessageSet>({
+        team: { type: Schema.Types.ObjectId, ref: "Team", required: true },
+        steps: { type: [stepSchema], default: [] },
+        firstReply: {
+          enabled: { type: Boolean, default: false },
+          startedAt: { type: Date, default: null },
+          items: { type: [firstReplyItemSchema], default: [] },
+        },
+        updatedByName: { type: String, default: "" },
+        updatedAt: { type: Date, default: null },
+      }, { _id: false })],
+      default: [],
     },
     updatedByName: { type: String, default: "" },
   },

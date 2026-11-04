@@ -18,6 +18,9 @@
  *     of it); tampered or expired links refused; an old "video" that is sound only shown as audio; the status page's
  *     message totals are right.
  *   - Case 11: none to a student (marked) or a closed lead — no follow-up step, no first reply; others still get them.
+ *   - Case 12: a team's own messages (2026-11-03) — a Super Admin's; checked; its first reply with its own switch (even
+ *     on a team not ticked); its follow-up steps for its leads (other teams keep the Default); its people's saved
+ *     messages; back to the Default.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -491,6 +494,56 @@ try {
   check("first reply: not to the student", (await firsts().findOne({ key: "553000003" }))?.status === "student", j(await firsts().findOne({ key: "553000003" })));
   check("…not to a closed lead", (await firsts().findOne({ key: "553000004" }))?.status === "ended", j(await firsts().findOne({ key: "553000004" })));
   check("…the new person still gets it", (await firsts().findOne({ key: "553000005" }))?.status === "sent" && fr11.sent === 1, j(fr11));
+
+  section("Case 12 — a team's own messages (2026-11-03)");
+  const own = { steps: [{ waitMinutes: 240, text: "Others step 1 for {name}" }], firstReply: { enabled: true, items: [{ text: "Others hello {name}" }] } };
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Sam", own);
+  check("a salesperson can't set a team's messages", r.status === 403, j(r.body));
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", { steps: [], firstReply: own.firstReply });
+  check("no steps: refused", r.status === 400 && /Between 1 and 8 steps/.test(r.body.message ?? ""), j(r.body));
+  r = await call("PUT", `/whatsapp/followups/team/${new Types.ObjectId()}`, "Root", own);
+  check("a team that isn't here: refused", r.status === 404, j(r.body));
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", own);
+  check("Others gets its own messages", r.status === 200, j(r.body));
+  r = await call("GET", "/whatsapp/followups/settings", "Root");
+  const set12 = (r.body.data?.teamSets ?? []).find((t: any) => t.team === String(others));
+  check("…listed with its steps, its first reply switched on (stamped), who set it", set12?.steps?.[0]?.text === "Others step 1 for {name}" && set12.firstReply.enabled === true && !!set12.firstReply.startedAt && set12.updatedByName === "Root", j(set12));
+  check("…the Default unchanged", r.body.data?.steps?.length === 5, j(r.body.data?.steps?.length));
+  // Saved messages: each person their team's.
+  link("Omar");
+  const omarSaved = (await call("GET", "/whatsapp/saved-messages", "Omar")).body.data ?? [];
+  const samSaved = (await call("GET", "/whatsapp/saved-messages", "Sam")).body.data ?? [];
+  check("saved messages: Omar (Others) sees Others' — Sam (Titans) the Default", omarSaved.some((m: any) => m.text === "Others step 1 for {name}") && omarSaved.some((m: any) => m.text === "Others hello {name}")
+    && !samSaved.some((m: any) => /Others/.test(m.text)) && samSaved.filter((m: any) => m.kind === "followup").length === 5, j({ omar: omarSaved.map((m: any) => m.text), sam: samSaved.length }));
+  r = await call("POST", "/whatsapp/send-saved", "Omar", { chat: "971554000009", id: "followup:1" });
+  check("…and sending one sends Others' words", r.status === 200 && /^Others step 1 for there/.test(textOf(outbox.Omar!.at(-1))), j({ s: r.status, t: textOf(outbox.Omar!.at(-1)) }));
+  // First reply: Others isn't ticked for follow-ups, but its own first reply is on.
+  await first("Omar", "971554000001", "OTH-1", "Hello", "Olga");
+  let fr12 = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  check("first reply to Omar's WhatsApp: Others' own (its own switch, team not ticked)", (await firsts().findOne({ key: "554000001" }))?.status === "sent" && textOf(outbox.Omar!.at(-1)) === "Hi Olga".replace("Hi ", "Others hello "), j({ st: await firsts().findOne({ key: "554000001" }), t: textOf(outbox.Omar!.at(-1)) }));
+  // Follow-ups: Others ticked now — its lead gets Others' step; a Titans lead still the Default.
+  const t12 = work(Date.now() + 20 * 60_000);
+  await WFS.updateOne({ key: "default" }, { $set: { enabled: true, startedAt: new Date(t12.getTime() - 10 * D), teams: [titans, others] } });
+  await lead("Otto Lead", "+971 55 400 0002", "Omar", others);
+  await msg("Omar", "971554000002", "out", new Date(t12.getTime() - 5 * H));
+  const omarN = outbox.Omar!.length;
+  // One per person a run: Omar's other quiet Others chats (Bilal from Case 4, Olga above) go too.
+  for (let k = 0; k < 4; k++) await run(new Date(t12.getTime() + k * 3 * 60_000));
+  const new12 = outbox.Omar!.slice(omarN).map(textOf);
+  check("follow-ups on Others leads: Others' step 1 (Otto's, and any other quiet one's)", new12.includes("Others step 1 for Otto") && new12.every((x) => /^Others step 1 for /.test(x)), j(new12));
+  const card12 = await call("GET", `/whatsapp/lead/${(await db.collection("leads").findOne({ name: "Otto Lead" }))!._id}`, "Omar");
+  // (The chat is dated in a later working hour, so the card may still show the step as coming.)
+  const fu12 = card12.body.data?.followup;
+  check("…its lead card counts Others' steps (1, not the Default's 5)", (fu12?.state === "waiting" && fu12.of === 1) || (fu12?.state === "done" && fu12.sent === 1), j(fu12));
+  // Its own first reply switched off: none, even though the Default's is on.
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", { ...own, firstReply: { enabled: false, items: own.firstReply.items } });
+  await first("Omar", "971554000003", "OTH-3", "Hi", "Oli");
+  fr12 = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  check("its own first reply off: none for Omar's WhatsApp", r.status === 200 && (await firsts().findOne({ key: "554000003" }))?.status === "off", j(await firsts().findOne({ key: "554000003" })));
+  // Back to the Default.
+  r = await call("DELETE", `/whatsapp/followups/team/${others}`, "Root");
+  const omarSaved2 = (await call("GET", "/whatsapp/saved-messages", "Omar")).body.data ?? [];
+  check("back to the Default: Omar's saved messages are the Default's", r.status === 200 && !omarSaved2.some((m: any) => /Others/.test(m.text)) && omarSaved2.filter((m: any) => m.kind === "followup").length === 5, j(omarSaved2.map((m: any) => m.text)));
 } finally {
   server.close();
   await mongoose.disconnect();

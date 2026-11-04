@@ -14,7 +14,7 @@ import { Team } from "./Team.js";
 const idOf = (v: unknown): string | null => (v == null ? null : String((v as { _id?: unknown })._id ?? v));
 
 /** Their active teams, and the one a lead given to them goes to — one they lead first. */
-async function teamsOf(owner: string): Promise<{ all: string[]; home: Types.ObjectId | null }> {
+export async function teamsOf(owner: string): Promise<{ all: string[]; home: Types.ObjectId | null }> {
   if (!Types.ObjectId.isValid(owner)) return { all: [], home: null };
   const me = new Types.ObjectId(owner);
   const teams = await Team.find({ status: { $ne: "inactive" }, $or: [{ leaders: me }, { members: me }] })

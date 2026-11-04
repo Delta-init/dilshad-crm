@@ -59,6 +59,13 @@ export interface WAFollowupSettings {
   enabled: boolean; startedAt: string | null; teams: string[]; dailyLimit: number; steps: WAFollowupStep[];
   firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[] };
   updatedByName: string; updatedAt: string | null; allTeams: { id: string; name: string }[];
+  /** Teams with their own messages (2026-11-03); any other team uses the ones above (the Default). */
+  teamSets: WATeamMessages[];
+}
+export interface WATeamMessages {
+  team: string; steps: WAFollowupStep[];
+  firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[] };
+  updatedByName: string; updatedAt: string | null;
 }
 export interface WARecentFollowup {
   id: string; at: string; body: string; step: number; of: number; ownerId: string; ownerName: string; chat: string; phone: string; lead: WALead | null;
@@ -263,6 +270,17 @@ export function useSaveWhatsAppFollowupSettings() {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: async (v: Pick<WAFollowupSettings, "enabled" | "teams" | "dailyLimit" | "steps"> & { firstReply?: { enabled: boolean; items: WAFirstReplyItem[] } }) => data<WAFollowupSettings>(await api.put("/whatsapp/followups/settings", v)),
+    onSuccess: refresh,
+  });
+}
+
+/** A team's own messages (its steps, its first reply with its own switch) — or, with `reset`, back to the Default. */
+export function useSaveTeamMessages() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (v: { team: string; reset?: boolean; steps?: WAFollowupStep[]; firstReply?: { enabled: boolean; items: WAFirstReplyItem[] } }) =>
+      v.reset ? data(await api.delete(`/whatsapp/followups/team/${v.team}`))
+        : data(await api.put(`/whatsapp/followups/team/${v.team}`, { steps: v.steps, firstReply: v.firstReply })),
     onSuccess: refresh,
   });
 }
