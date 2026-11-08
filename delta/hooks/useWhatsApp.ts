@@ -14,7 +14,7 @@ export interface WAMedia { type: string; mime: string; fileName: string; size: n
 export interface WAMessage {
   id: string; direction: "in" | "out"; body: string; at: string; senderName: string; sentByName: string; media: WAMedia | null;
   /** Sent by the CRM on its own — an automatic follow-up, its step. */
-  auto?: { kind?: "followup" | "first_reply"; step: number; of: number } | null;
+  auto?: { kind?: "followup" | "first_reply" | "keyword"; step: number; of: number } | null;
   /** Sent by a person: forwarded from another chat (2026-10-28). */
   forwarded?: boolean;
   /** Sent by a person from the saved messages — which one (a team's saved message: "library", its title). */
@@ -64,8 +64,12 @@ export interface WATeamSettings {
   firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[] };
   /** The team's saved messages, in groups — sent by hand from a chat. */
   savedGroups: WASavedGroup[];
+  /** Keyword replies (2026-11-08): a message with one of a rule's words gets its saved message a minute on. */
+  keywordReplies: { enabled: boolean; startedAt: string | null; rules: WAKeywordRule[] };
   updatedByName: string; updatedAt: string | null;
 }
+/** `reply`: "saved:<message id>" or "group:<group id>". */
+export interface WAKeywordRule { id?: string; keywords: string[]; reply: string; onceDays: number }
 export interface WASavedItem { id?: string; title: string; text: string; file: WAFollowupStep["file"]; voice: boolean }
 export interface WASavedGroup { id?: string; name: string; items: WASavedItem[] }
 export interface WARecentFollowup {
@@ -272,8 +276,11 @@ export function useTeamWhatsApp(teamId: string) {
 export function useSaveTeamWhatsApp() {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: async (v: { teamId: string; enabled: boolean; dailyLimit: number; steps: WAFollowupStep[]; firstReply: { enabled: boolean; items: WAFirstReplyItem[] }; savedGroups: WASavedGroup[] }) =>
-      data<WATeamSettings>(await api.put(`/whatsapp/followups/team/${v.teamId}`, { enabled: v.enabled, dailyLimit: v.dailyLimit, steps: v.steps, firstReply: v.firstReply, savedGroups: v.savedGroups })),
+    mutationFn: async (v: { teamId: string; enabled: boolean; dailyLimit: number; steps: WAFollowupStep[]; firstReply: { enabled: boolean; items: WAFirstReplyItem[] }; savedGroups: WASavedGroup[];
+      keywordReplies: { enabled: boolean; rules: WAKeywordRule[] } }) =>
+      data<WATeamSettings>(await api.put(`/whatsapp/followups/team/${v.teamId}`, {
+        enabled: v.enabled, dailyLimit: v.dailyLimit, steps: v.steps, firstReply: v.firstReply, savedGroups: v.savedGroups, keywordReplies: v.keywordReplies,
+      })),
     onSuccess: refresh,
   });
 }

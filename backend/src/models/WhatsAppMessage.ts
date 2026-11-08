@@ -28,7 +28,7 @@ export interface IWhatsAppMessage {
   read: boolean;
   media: { type: string; mime: string; fileName: string; file: string; size: number } | null;
   /** Sent by the CRM on its own — an automatic follow-up, which step (services/whatsapp/followups.ts). Null: by a person. */
-  auto?: { kind: "followup" | "first_reply"; step: number; of: number } | null;
+  auto?: { kind: "followup" | "first_reply" | "keyword"; step: number; of: number } | null;
   /** Sent by a person from another chat's message (Forward, 2026-10-28). */
   forwarded?: boolean;
   /**
@@ -70,7 +70,8 @@ const whatsAppMessageSchema = new Schema<IWhatsAppMessage>(
     },
     auto: {
       type: new Schema({
-        kind: { type: String, enum: ["followup", "first_reply"], required: true },
+        // "keyword": a reply to a keyword in their message (2026-11-08) — like the first reply, an anchor, not a step.
+        kind: { type: String, enum: ["followup", "first_reply", "keyword"], required: true },
         step: { type: Number, required: true },
         of: { type: Number, required: true },
       }, { _id: false }),

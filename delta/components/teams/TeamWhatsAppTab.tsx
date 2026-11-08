@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { BookmarkCheck, Loader2, Lock, MessageCircle, Repeat, Save, Sparkles, Undo2 } from "lucide-react";
+import { BookmarkCheck, KeyRound, Loader2, Lock, MessageCircle, Repeat, Save, Sparkles, Undo2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,8 +11,8 @@ import { Switch } from "@/components/ui/switch";
 import { listItemVariants } from "@/lib/animations";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { errMsg, useSaveTeamWhatsApp, useTeamWhatsApp, type WAFirstReplyItem, type WAFollowupStep, type WASavedGroup } from "@/hooks/useWhatsApp";
-import { FirstReplyEditor, SavedGroupsEditor, StepsEditor } from "@/components/whatsapp/MessageEditors";
+import { errMsg, useSaveTeamWhatsApp, useTeamWhatsApp, type WAFirstReplyItem, type WAFollowupStep, type WAKeywordRule, type WASavedGroup } from "@/hooks/useWhatsApp";
+import { FirstReplyEditor, KeywordRepliesEditor, SavedGroupsEditor, StepsEditor } from "@/components/whatsapp/MessageEditors";
 
 /*
  * A team's WhatsApp (the owner, 2026-11-08: "by the team, on the team's page"): its automatic follow-ups — on or off,
@@ -42,18 +42,22 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
   const [frOn, setFrOn] = useState(false);
   const [frItems, setFrItems] = useState<WAFirstReplyItem[]>([]);
   const [groups, setGroups] = useState<WASavedGroup[]>([]);
+  const [kwOn, setKwOn] = useState(false);
+  const [rules, setRules] = useState<WAKeywordRule[]>([]);
   const load = () => {
     if (!data) return;
     setEnabled(data.enabled); setLimit(data.dailyLimit); setSteps(data.steps);
     setFrOn(data.firstReply.enabled); setFrItems(data.firstReply.items); setGroups(data.savedGroups ?? []);
+    setKwOn(data.keywordReplies?.enabled ?? false); setRules(data.keywordReplies?.rules ?? []);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [data]);
 
   // Changed since it was loaded: the save bar shows.
-  const dirty = useMemo(() => !!data && JSON.stringify({ enabled, limit, steps, frOn, frItems, groups })
-    !== JSON.stringify({ enabled: data.enabled, limit: data.dailyLimit, steps: data.steps, frOn: data.firstReply.enabled, frItems: data.firstReply.items, groups: data.savedGroups ?? [] }),
-  [data, enabled, limit, steps, frOn, frItems, groups]);
+  const dirty = useMemo(() => !!data && JSON.stringify({ enabled, limit, steps, frOn, frItems, groups, kwOn, rules })
+    !== JSON.stringify({ enabled: data.enabled, limit: data.dailyLimit, steps: data.steps, frOn: data.firstReply.enabled, frItems: data.firstReply.items, groups: data.savedGroups ?? [],
+      kwOn: data.keywordReplies?.enabled ?? false, rules: data.keywordReplies?.rules ?? [] }),
+  [data, enabled, limit, steps, frOn, frItems, groups, kwOn, rules]);
 
   if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (isError || !data) return <p className="py-16 text-center text-sm text-muted-foreground">{errMsg(error, "Couldn't load this team's WhatsApp settings")}</p>;
@@ -63,7 +67,8 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
     if (frOn && !frItems.length) { toast.error("Add what the first reply sends, or switch it off"); return; }
     try {
       if (groups.some((g) => !g.name.trim())) { toast.error("Give every saved-messages group a name"); return; }
-      const r = await save.mutateAsync({ teamId, enabled, dailyLimit: limit, steps, firstReply: { enabled: frOn, items: frItems }, savedGroups: groups });
+      if (rules.some((x) => !x.keywords.length || !x.reply)) { toast.error("Each keyword reply needs a word and a saved message"); return; }
+      const r = await save.mutateAsync({ teamId, enabled, dailyLimit: limit, steps, firstReply: { enabled: frOn, items: frItems }, savedGroups: groups, keywordReplies: { enabled: kwOn, rules } });
       toast.success(`Saved — follow-ups ${r.enabled ? "on" : "off"}, first reply ${r.firstReply.enabled ? "on" : "off"} for ${data.team.name}`);
     } catch (e) { toast.error(errMsg(e, "Not saved")); }
   };
@@ -86,6 +91,7 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
             <div className="flex flex-wrap items-center gap-2">
               <Chip on={data.enabled} label="Follow-ups" />
               <Chip on={data.firstReply.enabled} label="First reply" />
+              <Chip on={!!data.keywordReplies?.enabled} label="Keyword replies" />
             </div>
           </CardContent>
           {(!canEdit || !data.saved || data.updatedByName) && (
@@ -139,6 +145,16 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
               </p>
             </CardHeader>
             <CardContent><SavedGroupsEditor groups={groups} setGroups={setGroups} /></CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Keyword replies */}
+        <motion.div variants={listItemVariants} initial="hidden" animate="visible">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base"><KeyRound className="h-4 w-4 text-primary" />Keyword replies</CardTitle>
+            </CardHeader>
+            <CardContent><KeywordRepliesEditor on={kwOn} setOn={setKwOn} rules={rules} setRules={setRules} groups={groups} /></CardContent>
           </Card>
         </motion.div>
       </fieldset>

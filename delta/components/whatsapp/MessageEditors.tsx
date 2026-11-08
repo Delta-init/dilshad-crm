@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ArrowDown, ArrowUp, BookmarkCheck, ChevronDown, FolderPlus, Loader2, Mic, Paperclip, Plus, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BookmarkCheck, ChevronDown, FlaskConical, FolderPlus, KeyRound, Loader2, Mic, Paperclip, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { errMsg, useUploadFollowupFile, type WAFirstReplyItem, type WAFollowupStep, type WASavedGroup, type WASavedItem } from "@/hooks/useWhatsApp";
+import { errMsg, useUploadFollowupFile, type WAFirstReplyItem, type WAFollowupStep, type WAKeywordRule, type WASavedGroup, type WASavedItem } from "@/hooks/useWhatsApp";
 
 /*
  * The WhatsApp message editors (2026-10-27 → 2026-11-08): the follow-up steps (each so long after the one before, its
@@ -241,6 +241,116 @@ export function SavedGroupsEditor({ groups, setGroups }: { groups: WASavedGroup[
           onClick={() => { setGroups((x) => [...x, { name: "", items: [{ title: "", text: "", file: null, voice: false }] }]); setOpen(groups.length); }}>
           <FolderPlus className="h-3.5 w-3.5" />Add a group
         </Button>
+      )}
+    </div>
+  );
+}
+
+/* ── Keyword replies (2026-11-08) ──────────────────────────────────────── */
+
+// Letters and digits of any script kept, the rest a space (the server does the same with Unicode classes).
+const flat = (v: string) => ` ${v.toLowerCase().normalize("NFKC").replace(/[^0-9a-z\u00c0-\uffff]+/g, " ").replace(/[\u2000-\u206f\u3000-\u303f]+/g, " ").replace(/\s+/g, " ").trim()} `;
+/** As the server matches (followups.ts matchKeyword): a rule's word or phrase, whole, anywhere — the first rule wins. */
+export function matchRule(text: string, rules: WAKeywordRule[]): { index: number; keyword: string } | null {
+  const t = flat(text);
+  for (let index = 0; index < rules.length; index++) {
+    const k = rules[index]!.keywords.find((w) => flat(w).trim() && t.indexOf(flat(w)) >= 0);
+    if (k) return { index, keyword: k };
+  }
+  return null;
+}
+/** Words that would answer nearly everyone. */
+const TOO_COMMON = new Set(["hi", "hello", "hey", "ok", "okay", "yes", "no", "thanks", "thank you", "the", "and", "is", "it"]);
+
+/**
+ * Keyword replies: when someone's message has one of a rule's words or phrases in it, that rule's saved message (or a
+ * whole saved group) goes from the same WhatsApp a minute later, any hour — unless a person answered first. The first
+ * rule that matches wins; a chat gets the same rule's reply once in its days.
+ */
+export function KeywordRepliesEditor({ on, setOn, rules, setRules, groups }: {
+  on: boolean; setOn: (v: boolean) => void; rules: WAKeywordRule[]; setRules: (f: (r: WAKeywordRule[]) => WAKeywordRule[]) => void; groups: WASavedGroup[];
+}) {
+  const [typing, setTyping] = useState<Record<number, string>>({});
+  const [test, setTest] = useState("");
+  const setRule = (i: number, patch: Partial<WAKeywordRule>) => setRules((r) => r.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+  const addWords = (i: number, raw: string) => {
+    const words = raw.split(/[,\n]/).map((w) => w.trim().toLowerCase().replace(/\s+/g, " ")).filter(Boolean);
+    if (!words.length) return;
+    setRule(i, { keywords: Array.from(new Set(rules[i]!.keywords.concat(words))).slice(0, 20) });
+    setTyping((t) => ({ ...t, [i]: "" }));
+  };
+  // Only saved messages can be picked (a new one: save it first).
+  const options = groups.filter((g) => g.id).flatMap((g) => [
+    ...(g.items.filter((it) => it.id).length > 1 ? [{ value: `group:${g.id}`, label: `${g.name} — the whole group (${g.items.length})` }] : []),
+    ...g.items.filter((it) => it.id).map((it) => ({ value: `saved:${it.id}`, label: `${g.name} · ${it.title || it.text.slice(0, 30) || it.file?.name || "Message"}` })),
+  ]);
+  const labelOf = (v: string) => options.find((o) => o.value === v)?.label;
+  const hit = test.trim() ? matchRule(test, rules) : null;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          A minute after a message with one of these words or phrases, its saved message goes from the same WhatsApp — any hour, unless someone answered first.
+          Not on someone&apos;s first message (the first reply answers that), not to students or closed leads. The first rule that matches wins.
+        </p>
+        <Switch checked={on} onCheckedChange={setOn} aria-label="Send keyword replies" />
+      </div>
+      {!options.length && <p className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"><AlertTriangle className="h-3.5 w-3.5" />Add and save a saved message first — a keyword reply sends one of them.</p>}
+      {rules.map((r, i) => (
+        <div key={r.id ?? `new-${i}`} className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center gap-2 text-sm">
+            <KeyRound className="h-4 w-4 text-primary" /><span className="font-medium">When a message says</span>
+            <span className="ml-auto flex gap-1">
+              <Button type="button" size="icon" variant="ghost" className="h-7 w-7" disabled={i === 0} aria-label="Move up" onClick={() => setRules((x) => { const n = [...x]; const [y] = n.splice(i, 1); n.splice(i - 1, 0, y!); return n; })}><ArrowUp className="h-3.5 w-3.5" /></Button>
+              <Button type="button" size="icon" variant="ghost" className="h-7 w-7" disabled={i === rules.length - 1} aria-label="Move down" onClick={() => setRules((x) => { const n = [...x]; const [y] = n.splice(i, 1); n.splice(i + 1, 0, y!); return n; })}><ArrowDown className="h-3.5 w-3.5" /></Button>
+              <Button type="button" size="icon" variant="ghost" className="h-7 w-7" aria-label="Remove the keyword reply" onClick={() => setRules((x) => x.filter((_, k) => k !== i))}><Trash2 className="h-3.5 w-3.5" /></Button>
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-background p-1.5">
+            {r.keywords.map((k) => {
+              const risky = k.length < 3 || TOO_COMMON.has(k);
+              return (
+                <span key={k} title={risky ? "Very short or common — it would answer almost everyone" : ""}
+                  className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs", risky ? "bg-amber-500/15 text-amber-700 dark:text-amber-400" : "bg-primary/10 text-primary")}>
+                  {risky && <AlertTriangle className="h-3 w-3" />}{k}
+                  <button type="button" aria-label={`Remove ${k}`} onClick={() => setRule(i, { keywords: r.keywords.filter((x) => x !== k) })}><X className="h-3 w-3" /></button>
+                </span>
+              );
+            })}
+            <input value={typing[i] ?? ""} placeholder={r.keywords.length ? "add another…" : "price, how much, fees — Enter after each"}
+              onChange={(e) => (/,/.test(e.target.value) ? addWords(i, e.target.value) : setTyping((t) => ({ ...t, [i]: e.target.value })))}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addWords(i, typing[i] ?? ""); } }}
+              onBlur={() => addWords(i, typing[i] ?? "")}
+              className="min-w-[10rem] flex-1 bg-transparent px-1 text-sm outline-none" />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-muted-foreground">send</span>
+            <Select value={labelOf(r.reply) ? r.reply : ""} onValueChange={(v) => setRule(i, { reply: v })}>
+              <SelectTrigger className="h-8 w-72 max-w-full"><SelectValue placeholder="Pick a saved message" /></SelectTrigger>
+              <SelectContent>{options.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+            <span className="text-muted-foreground">— once per chat every</span>
+            <Input type="number" min={1} max={90} className="h-8 w-16" value={r.onceDays} onChange={(e) => setRule(i, { onceDays: Number(e.target.value) })} />
+            <span className="text-muted-foreground">days</span>
+          </div>
+        </div>
+      ))}
+      {rules.length < 30 && (
+        <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={!options.length}
+          onClick={() => setRules((x) => [...x, { keywords: [], reply: options[0]?.value ?? "", onceDays: 7 }])}>
+          <Plus className="h-3.5 w-3.5" />Add a keyword reply
+        </Button>
+      )}
+      {rules.length > 0 && (
+        <div className="space-y-1.5 rounded-lg bg-muted/40 p-3">
+          <Label className="flex items-center gap-1.5 text-xs"><FlaskConical className="h-3.5 w-3.5" />Try it — type a message as a client would</Label>
+          <Input value={test} onChange={(e) => setTest(e.target.value)} placeholder="e.g. Hi, how much is the course?" className="h-8" />
+          {test.trim() && (
+            <p className="text-xs">
+              {hit ? <>Matches <b>&ldquo;{hit.keyword}&rdquo;</b> → sends <b>{labelOf(rules[hit.index]!.reply) ?? "(no saved message picked)"}</b></> : "No keyword reply would go."}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

@@ -6,7 +6,7 @@ import { Team } from "../../models/Team.js";
 import { User } from "../../models/User.js";
 import { WhatsAppLink, WhatsAppMessage } from "../../models/WhatsAppMessage.js";
 import { type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
-import { WhatsAppTeamSettings, type ISavedGroup } from "../../models/WhatsAppTeamSettings.js";
+import { WhatsAppTeamSettings, type IKeywordRule, type ISavedGroup } from "../../models/WhatsAppTeamSettings.js";
 import { teamsOf } from "../../models/leadTeamOnAssign.js";
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
 import { isStudentKey, studentKeys } from "./chatExtras.js";
@@ -67,15 +67,19 @@ export type TeamWa = {
   team: string; enabled: boolean; startedAt: Date | null; dailyLimit: number; steps: IFollowupStep[]; firstReply: FirstReply;
   /** Its saved messages, in groups (2026-11-08) — sent by hand from a chat. */
   savedGroups: SavedGroup[];
+  /** Keyword replies (2026-11-08). */
+  keywordReplies: { enabled: boolean; startedAt: Date | null; rules: KeywordRule[] };
   updatedByName: string; updatedAt: Date | null;
   /** False: never set — everything off, the steps shown are the suggested ones. */
   saved: boolean;
 };
 export type SavedItem = { id: string; title: string; text: string; file: { file: string; name: string; mime: string; size: number } | null; voice: boolean };
 export type SavedGroup = { id: string; name: string; items: SavedItem[] };
+export type KeywordRule = { id: string; keywords: string[]; reply: string; onceDays: number };
 const NOTHING = (team: string): TeamWa => ({
   team, enabled: false, startedAt: null, dailyLimit: DEFAULT_DAILY_LIMIT, steps: DEFAULT_STEPS,
-  firstReply: { enabled: false, startedAt: null, items: [] }, savedGroups: [], updatedByName: "", updatedAt: null, saved: false,
+  firstReply: { enabled: false, startedAt: null, items: [] }, savedGroups: [], keywordReplies: { enabled: false, startedAt: null, rules: [] },
+  updatedByName: "", updatedAt: null, saved: false,
 });
 
 /**
@@ -113,6 +117,11 @@ export async function allTeamWa(fresh = false): Promise<Map<string, TeamWa>> {
       id: String(g._id), name: g.name,
       items: (g.items ?? []).map((i) => ({ id: String(i._id), title: i.title ?? "", text: i.text ?? "", file: realFile(i.file ?? null), voice: i.voice === true })),
     })),
+    keywordReplies: {
+      enabled: d.keywordReplies?.enabled ?? false,
+      startedAt: d.keywordReplies?.startedAt ?? null,
+      rules: (d.keywordReplies?.rules ?? []).map((r) => ({ id: String(r._id), keywords: r.keywords ?? [], reply: r.reply, onceDays: r.onceDays ?? 7 })),
+    },
     updatedByName: d.updatedByName ?? "",
     updatedAt: d.updatedAt ?? null,
     saved: true,
@@ -206,6 +215,46 @@ function parseSavedGroups(input: unknown): ISavedGroup[] {
 }
 
 /**
+ * Keyword replies, checked (2026-11-08): up to 30 rules, each 1–20 words or phrases (2–60 letters, compared without
+ * case), the saved message or group it sends (one of those being saved), and how many days (1–90) before the same
+ * chat gets it again. Switched on now, only messages from now on.
+ */
+function parseKeywordReplies(input: unknown, groups: ISavedGroup[], before: TeamWa["keywordReplies"]): { enabled: boolean; startedAt: Date | null; rules: IKeywordRule[] } {
+  const kr = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const raw = Array.isArray(kr.rules) ? kr.rules : [];
+  if (raw.length > 30) throw new FollowupError("At most 30 keyword replies");
+  const items = new Set(groups.flatMap((g) => g.items.map((i) => `saved:${i._id}`)));
+  const whole = new Set(groups.map((g) => `group:${g._id}`));
+  const rules = raw.map((x, i) => {
+    const r = (x ?? {}) as Record<string, unknown>;
+    const keywords = [...new Set((Array.isArray(r.keywords) ? r.keywords : []).map((k) => String(k ?? "").trim().toLowerCase().replace(/\s+/g, " ")).filter(Boolean))];
+    if (!keywords.length || keywords.length > 20) throw new FollowupError(`Keyword reply ${i + 1}: 1 to 20 words or phrases`);
+    const short = keywords.find((k) => k.length < 2 || k.length > 60);
+    if (short !== undefined) throw new FollowupError(`Keyword reply ${i + 1}: "${short}" — 2 to 60 letters`);
+    const reply = String(r.reply ?? "");
+    if (!items.has(reply) && !whole.has(reply)) throw new FollowupError(`Keyword reply ${i + 1}: pick a saved message (or group) to send — save a new one first`);
+    const days = Math.round(Number(r.onceDays ?? 7));
+    if (!Number.isFinite(days) || days < 1 || days > 90) throw new FollowupError(`Keyword reply ${i + 1}: once in 1 to 90 days`);
+    return { _id: typeof r.id === "string" && /^[a-f0-9]{24}$/.test(r.id) ? new Types.ObjectId(r.id) : new Types.ObjectId(), keywords, reply, onceDays: days };
+  });
+  const on = kr.enabled === true;
+  if (on && !rules.length) throw new FollowupError("Add a keyword reply, or switch them off");
+  return { enabled: on, rules, startedAt: on ? (before.enabled && before.startedAt ? before.startedAt : new Date()) : null };
+}
+
+/** The first rule a message matches: one of its words or phrases, whole, anywhere in it — case and accents aside. */
+export function matchKeyword(text: string, rules: KeywordRule[]): { rule: KeywordRule; keyword: string } | null {
+  const t = ` ${text.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ")} `;
+  for (const rule of rules) {
+    for (const k of rule.keywords) {
+      const w = k.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+      if (w && t.includes(` ${w} `)) return { rule, keyword: k };
+    }
+  }
+  return null;
+}
+
+/**
  * A team's settings, saved (by a Super Admin or its leader — the route decides): follow-ups on or off (switched on
  * now, only chats written in from now on), 1–8 steps, a limit of 1–300 a day, and the first reply.
  */
@@ -220,9 +269,11 @@ export async function saveTeamWa(teamId: string, input: Record<string, unknown>,
   const firstReply = parseFirstReply(fr, before.firstReply);
   // The saved messages: as sent, or as they were when the screen sends none.
   const savedGroups = Array.isArray(input.savedGroups) ? parseSavedGroups(input.savedGroups) : parseSavedGroups(before.savedGroups);
+  // Keyword replies: as sent, or as they were (each still pointing at a saved message being kept).
+  const keywordReplies = parseKeywordReplies(input.keywordReplies && typeof input.keywordReplies === "object" ? input.keywordReplies : before.keywordReplies, savedGroups, before.keywordReplies);
   await WhatsAppTeamSettings.updateOne({ team: new Types.ObjectId(teamId) }, {
     $set: {
-      team: new Types.ObjectId(teamId), enabled, steps, dailyLimit: limit, firstReply, savedGroups, updatedByName: byName,
+      team: new Types.ObjectId(teamId), enabled, steps, dailyLimit: limit, firstReply, savedGroups, keywordReplies, updatedByName: byName,
       startedAt: enabled ? (before.enabled && before.startedAt ? before.startedAt : new Date()) : null,
     },
   }, { upsert: true });
@@ -250,7 +301,7 @@ export function chainOf(newestFirst: Msg[], settings: Pick<TeamWa, "startedAt" |
   let anchor: Msg | null = null;
   for (const m of newestFirst) {
     // An automatic first reply is our message like one a person writes: the follow-ups count from it.
-    if (m.direction === "out" && m.auto && m.auto.kind !== "first_reply") { sent++; continue; }
+    if (m.direction === "out" && m.auto && m.auto.kind !== "first_reply" && m.auto.kind !== "keyword") { sent++; continue; }
     if (m.direction === "in") return { state: "replied" };   // can't be: nothing goes after an answer on its own
     anchor = m;
     break;
@@ -532,6 +583,11 @@ export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Mat
 /** Every minute, in the process that holds the WhatsApp links — does nothing until switched on. */
 export function startWhatsAppFollowups(): void {
   if (!whatsappEnabled()) return;
+  // Keyword replies, every 15 seconds — like the first reply, a minute after their message.
+  setInterval(() => {
+    void runKeywordReplies().then((r) => { if (r.sent) console.log(`[whatsapp keyword reply] ${r.sent} sent`); })
+      .catch((err) => console.error("[whatsapp keyword reply] not run", err));
+  }, 15_000);
   const tick = async () => {
     const r = await runFollowups().catch((err) => ({ ok: false, sent: 0, skipped: String(err) }) as RunResult);
     if (r.sent || r.failed) console.log(`[whatsapp follow-ups] ${r.sent} sent${r.failed ? `, ${r.failed} not sent` : ""}`);
@@ -553,6 +609,100 @@ export function resetFollowupPacingForCheck(): void {
   failedUntil.clear();
   cache = null;
   firstRunning = false;
+  keywordRunning = false;
+}
+
+/* ── Keyword replies (2026-11-08) ───────────────────────────────────────── */
+
+const HITS = "whatsapp_keyword_hits";
+let keywordRunning = false;
+
+/**
+ * A message just received on someone's WhatsApp: when their team's keyword replies are on and it matches a rule, it is
+ * noted (one per message), to be answered a minute on by runKeywordReplies.
+ */
+export async function noteKeywordHit(ownerId: string, key: string, chat: string, messageId: string, text: string, at: Date): Promise<void> {
+  const team = await teamWaOfPerson(ownerId);
+  const kr = team?.keywordReplies;
+  // Switched on before it reached the CRM (WhatsApp's own times are whole seconds — as the first reply goes by).
+  if (!team || !kr?.enabled || !kr.startedAt || Date.now() < kr.startedAt.getTime() || !kr.rules.length) return;
+  const hit = matchKeyword(text, kr.rules);
+  if (!hit) return;
+  await WhatsAppMessage.db.collection(HITS).insertOne({
+    _id: messageId as never, owner: new Types.ObjectId(ownerId), team: team.team, key, chat, rule: hit.rule.id, keyword: hit.keyword,
+    reply: hit.rule.reply, at, status: "waiting", createdAt: new Date(),
+  }).catch(() => undefined);   // noted already
+}
+
+/**
+ * One look at the keyword hits noted: a minute on, the rule's saved message (or whole group) goes from the same
+ * WhatsApp — unless a person (or the first reply) answered, they are a student or a closed/lost/repeated lead, the
+ * same chat had this rule's reply within its days, or the rule is gone or switched off. Let go after 30 minutes.
+ */
+export async function runKeywordReplies(now = new Date(), gapMs = () => 3000 + Math.floor(Math.random() * 2000)): Promise<{ sent: number; skipped: number }> {
+  if (keywordRunning) return { sent: 0, skipped: 0 };
+  keywordRunning = true;
+  const col = WhatsAppMessage.db.collection(HITS);
+  let sent = 0, skipped = 0;
+  try {
+    skipped += (await col.updateMany({ status: "waiting", at: { $lt: new Date(now.getTime() - FIRST_REPLY_WAIT_LINK_MS) } }, { $set: { status: "too_late", decidedAt: now } })).modifiedCount;
+    const linked = connectedOwnerIds().map((id) => new Types.ObjectId(id));
+    if (!linked.length) return { sent, skipped };
+    cache = null;
+    const due = (await col.find({ status: "waiting", owner: { $in: linked }, at: { $lte: new Date(now.getTime() - FIRST_REPLY_AFTER_MS) } }).sort({ at: 1 }).limit(200).toArray()) as unknown as
+      { _id: string; owner: Types.ObjectId; key: string; chat: string; rule: string; reply: string; at: Date }[];
+    for (const d of due) {
+      const close = async (status: string) => { await col.updateOne({ _id: d._id as never }, { $set: { status, decidedAt: now } }); skipped++; };
+      const owner = String(d.owner);
+      const team = await teamWaOfPerson(owner);
+      const rule = team?.keywordReplies.enabled ? team.keywordReplies.rules.find((r) => r.id === d.rule) : undefined;
+      if (!team || !rule) { await close("off"); continue; }
+      if (await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at } })) { await close("answered"); continue; }
+      // Their first message ever: the first reply answers it, not this.
+      const first = await WhatsAppMessage.db.collection(FIRST).findOne({ _id: `${owner}|${d.key}` as never, status: { $in: ["waiting", "sending", "sent"] } });
+      if (first && Math.abs(new Date(first.at).getTime() - d.at.getTime()) < 10 * MIN) { await close("first_reply"); continue; }
+      if (await isStudentKey(d.key)) { await close("student"); continue; }
+      const leadId = (await leadsByKey()).get(d.key);
+      const leadDoc = leadId ? await Lead.findById(leadId).select("name status").lean<{ name?: string; status?: string } | null>() : null;
+      if (leadDoc && ENDED.has(String(leadDoc.status))) { await close("ended"); continue; }
+      const again = await col.findOne({ owner: d.owner, key: d.key, rule: d.rule, status: "sent", at: { $gte: new Date(d.at.getTime() - rule.onceDays * 24 * 60 * MIN) } });
+      if (again) { await close("once"); continue; }
+      const [kind, id] = rule.reply.split(":");
+      const group = team.savedGroups.find((g) => (kind === "group" ? g.id === id : g.items.some((it) => it.id === id)));
+      const items = kind === "group" ? group?.items ?? [] : (group?.items ?? []).filter((it) => it.id === id);
+      if (!items.length) { await close("off"); continue; }
+      if (!isConnected(owner)) continue;
+      const claim = await col.updateOne({ _id: d._id as never, status: "waiting" }, { $set: { status: "sending", decidedAt: now } });
+      if (claim.modifiedCount !== 1) continue;
+      const ownerDoc = await User.findById(owner).select("name").lean<{ name?: string } | null>();
+      const theirName = leadDoc?.name || (await contactNames(owner, [d.key])).get(d.key) || "";
+      let parts = 0;
+      try {
+        for (const [i, item] of items.entries()) {
+          if (i > 0) await sleep(gapMs());
+          const auto = { kind: "keyword" as const, step: i + 1, of: items.length };
+          const text = fillText(item.text, theirName, ownerDoc?.name);
+          if (item.file && existsSync(mediaPath(item.file.file))) {
+            const buffer = await readFile(mediaPath(item.file.file));
+            await sendFile(owner, d.chat, buffer, item.file.mime || "application/octet-stream", item.file.name || "file", item.voice ? "" : text, item.voice, { auto, storedFile: item.file.file });
+            if (item.voice && text) await sendText(owner, d.chat, text, { auto });
+          } else if (text) {
+            await sendText(owner, d.chat, text, { auto });
+          }
+          parts++;
+        }
+        await col.updateOne({ _id: d._id as never }, { $set: { status: "sent", parts, sentAt: new Date() } });
+        sent++;
+        if (leadId) await Lead.updateOne({ _id: leadId }, { $push: { activityLogs: { action: "whatsapp_followup", description: `WhatsApp keyword reply sent automatically from ${ownerDoc?.name ?? "their"} WhatsApp ("${items[0]!.title}")`, createdAt: new Date() } } });
+      } catch (err) {
+        await col.updateOne({ _id: d._id as never }, { $set: { status: "failed", parts, error: err instanceof Error ? err.message : String(err) } });
+        console.warn(`[whatsapp keyword reply] to ${d.chat} stopped after ${parts} part(s)`, err instanceof Error ? err.message : err);
+      }
+    }
+    return { sent, skipped };
+  } finally {
+    keywordRunning = false;
+  }
 }
 
 /* ── The saved messages, sent by hand ───────────────────────────────────── */

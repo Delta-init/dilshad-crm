@@ -23,6 +23,9 @@
  *     for its leads once on (Titans keeps its own), its people's saved messages; switched off, nothing.
  *   - Case 13: a team's saved messages in groups (2026-11-08) — set with its settings, checked, kept with their ids;
  *     its people see them (not another team's); one sent, or a whole group in order, {name} filled, marked.
+ *   - Case 14: keyword replies (2026-11-08) — checked; a word or phrase, whole, any case, gets its saved message (or
+ *     group) a minute on, marked; not twice in the rule's days, not when a person answered, not on a first message
+ *     (the first reply's), not to a student; no match, no reply; another team's rules not used; not a follow-up step.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -593,6 +596,77 @@ try {
   check("a whole group: its messages in order", r.status === 200 && r.body.data?.parts === 2 && outbox.Sam!.length === n13 + 2 && /^Hi Gina/.test(textOf(outbox.Sam![n13])) && /^We take card/.test(textOf(outbox.Sam![n13 + 1])), j({ p: r.body.data, t: outbox.Sam!.slice(n13).map(textOf) }));
   r = await call("POST", "/whatsapp/send-saved", "Omar", { chat: "971555000001", id: price.id });
   check("another team's saved message: not there for Omar", r.status === 404, j(r.body));
+
+  section("Case 14 — keyword replies");
+  const s14 = (await call("GET", `/whatsapp/followups/team/${titans}`, "Lina")).body.data;
+  const keep14 = { enabled: s14.enabled, dailyLimit: s14.dailyLimit, steps: s14.steps, firstReply: { enabled: s14.firstReply.enabled, items: s14.firstReply.items }, savedGroups: s14.savedGroups };
+  const priceId = s14.savedGroups[0].items[0].id, locGroup = s14.savedGroups[1].id;
+  const rules = [{ keywords: ["Price", "how much"], reply: `saved:${priceId}`, onceDays: 7 }, { keywords: ["location"], reply: `group:${locGroup}`, onceDays: 7 }];
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", { ...keep14, keywordReplies: { enabled: true, rules: [{ ...rules[0], keywords: ["a"] }] } });
+  check("a one-letter keyword: refused", r.status === 400 && /2 to 60 letters/.test(r.body.message ?? ""), j(r.body));
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", { ...keep14, keywordReplies: { enabled: true, rules: [{ ...rules[0], reply: `saved:${new Types.ObjectId()}` }] } });
+  check("a reply that isn't one of the team's saved messages: refused", r.status === 400 && /pick a saved message/.test(r.body.message ?? ""), j(r.body));
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", { ...keep14, keywordReplies: { enabled: true, rules: [] } });
+  check("switched on with no rules: refused", r.status === 400, j(r.body));
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", { ...keep14, keywordReplies: { enabled: true, rules } });
+  check("two rules saved, on, stamped; keywords kept in lower case", r.status === 200 && r.body.data.keywordReplies.enabled && !!r.body.data.keywordReplies.startedAt
+    && j(r.body.data.keywordReplies.rules[0].keywords) === j(["price", "how much"]), j(r.body.data?.keywordReplies));
+  const ruleIds = r.body.data.keywordReplies.rules.map((x: any) => x.id);
+  const M = await import("../src/services/whatsapp/followups.js");
+  const parsedRules = r.body.data.keywordReplies.rules;
+  check("matching: whole words or phrases, any case, any punctuation — not inside another word",
+    M.matchKeyword("What is the PRICE?", parsedRules)?.rule.id === ruleIds[0] && M.matchKeyword("How   much is it", parsedRules)?.rule.id === ruleIds[0]
+    && M.matchKeyword("location pls", parsedRules)?.rule.id === ruleIds[1] && M.matchKeyword("it's priceless", parsedRules) === null && M.matchKeyword("hello", parsedRules) === null);
+  F.resetFollowupPacingForCheck();
+  link("Sam");
+  const hits = () => db.collection("whatsapp_keyword_hits");
+  // The latest hit noted in a chat (each is kept under the CRM's message id).
+  const hitIn = async (key: string) => (await hits().find({ key }).sort({ createdAt: -1 }).limit(1).toArray())[0] ?? null;
+  const sec = () => new Promise((ok) => setTimeout(ok, 1100));   // WhatsApp times are whole seconds
+  // A chat going on already (not a first message).
+  await lead("Kim Keyword", "+971 55 600 0001", "Sam", titans);
+  await msg("Sam", "971556000001", "in", new Date(Date.now() - 2 * H));
+  await msg("Sam", "971556000001", "out", new Date(Date.now() - H));
+  await first("Sam", "971556000001", "KW-1", "Hi, what's the price?", "Kim");
+  check("their message with a keyword: noted, waiting", (await hits().countDocuments({ key: "556000001", status: "waiting" })) === 1);
+  let k14 = await M.runKeywordReplies(new Date(Date.now() + 30_000), () => 0);
+  check("half a minute on: nothing yet", k14.sent === 0, j(k14));
+  const nK = outbox.Sam!.length;
+  k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
+  const kw = await db.collection("whatsapp_messages").findOne({ owner: P("Sam"), key: "556000001", "auto.kind": "keyword" });
+  check("a minute on: the Price message, {name} filled, marked as a keyword reply", k14.sent === 1 && outbox.Sam!.length === nK + 1 && textOf(outbox.Sam!.at(-1)) === "Hi Kim, the course is AED 2,250." && kw?.sentByName === "Auto keyword reply", j({ k14, t: textOf(outbox.Sam!.at(-1)), kw: kw?.auto }));
+  await sec();
+  await first("Sam", "971556000001", "KW-2", "how much again?", "Kim");
+  k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
+  check("the same rule again within its 7 days: not sent", k14.sent === 0 && (await hitIn("556000001"))?.status === "once", j(await hitIn("556000001")));
+  await sec();
+  await first("Sam", "971556000001", "KW-3", "and the location?", "Kim");
+  const nG = outbox.Sam!.length;
+  k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
+  check("another rule (location → the Location group): its messages", k14.sent === 1 && outbox.Sam!.length === nG + 1 && /Business Bay/.test(textOf(outbox.Sam!.at(-1))), j({ k14, t: textOf(outbox.Sam!.at(-1)) }));
+  // Answered by a person first.
+  await msg("Sam", "971556000002", "in", new Date(Date.now() - 3 * H));
+  await first("Sam", "971556000002", "KW-4", "price?", "Lee");
+  await call("POST", "/whatsapp/send", "Sam", { chat: "971556000002", text: "It's 2,250 — Sam" });
+  k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
+  check("a person answered within the minute: none", (await hitIn("556000002"))?.status === "answered", j(await hitIn("556000002")));
+  // A first message ever: the first reply's, not this.
+  await first("Sam", "971556000003", "KW-5", "Hello, price please", "New");
+  k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
+  check("someone's first message ever: left to the first reply", (await hitIn("556000003"))?.status === "first_reply", j(await hitIn("556000003")));
+  // A student.
+  await msg("Sam", "971556000004", "in", new Date(Date.now() - 3 * H));
+  await db.collection("whatsapp_tags").insertOne({ key: "556000004", student: true, byName: "Sam", by: P("Sam"), at: new Date() });
+  await first("Sam", "971556000004", "KW-6", "price?", "Stu");
+  k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
+  check("a student: none", (await hitIn("556000004"))?.status === "student", j(await hitIn("556000004")));
+  // No keyword; and another team's WhatsApp.
+  await first("Sam", "971556000001", "KW-7", "thanks!", "Kim");
+  await msg("Omar", "971556000009", "in", new Date(Date.now() - 3 * H));
+  await first("Omar", "971556000009", "KW-8", "price?", "Ola");
+  check("no keyword, or another team's (no rules there): nothing noted", (await hits().countDocuments({ key: "556000001" })) === 3 && !(await hitIn("556000009")));
+  const card14 = await call("GET", `/whatsapp/lead/${(await db.collection("leads").findOne({ name: "Kim Keyword" }))!._id}`, "Sam");
+  check("a keyword reply isn't counted as a follow-up step (the chain starts again from it)", card14.body.data?.followup?.state !== "done" && (card14.body.data?.followup?.step ?? 1) === 1, j(card14.body.data?.followup));
 } finally {
   server.close();
   await mongoose.disconnect();

@@ -357,6 +357,11 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
       }).catch(() => undefined);   // noted already
     }
   }
+  // A keyword in it (2026-11-08): noted for the team's keyword reply (followups.ts runKeywordReplies) — sent just now only.
+  if (kept && !fromMe && !history && !opts.quiet && key && fresh && body) {
+    await import("./followups.js").then((f) => f.noteKeywordHit(owner.id, key, kept.chat, kept.id, body, new Date(ts > 0 ? ts * 1000 : Date.now())))
+      .catch((err) => console.warn("[whatsapp keyword reply] not noted", err instanceof Error ? err.message : err));
+  }
   // A new message to them: a push to their phone and computer, and the open CRM refreshes its chats and count.
   if (kept && !fromMe && !history && !opts.quiet) {
     const { Lead } = await import("../../models/Lead.js");
@@ -585,7 +590,7 @@ function connected(userId: string): WASocket {
 
 /** How a send was made: by a person (the default), or by the CRM on its own — an automatic follow-up. */
 export type SendOpts = {
-  auto?: { kind: "followup" | "first_reply"; step: number; of: number };
+  auto?: { kind: "followup" | "first_reply" | "keyword"; step: number; of: number };
   /** By a person: Forward from another chat, or one of the saved messages picked — a person's message, not automatic. */
   forwarded?: boolean;
   saved?: { kind: "followup" | "first_reply" | "library"; step: number; title?: string };
@@ -602,7 +607,7 @@ async function keepSent(owner: Owner, to: { jid: string; phone: string }, chat: 
     chat: phone || chat, phone, key, jid: to.jid,
     direction: "out", body, messageId: sentId,
     senderName: (opts.by ?? owner).name, sentBy: new Types.ObjectId((opts.by ?? owner).id),
-    sentByName: opts.auto ? (opts.auto.kind === "first_reply" ? "Auto first reply" : "Auto follow-up") : (opts.by ?? owner).name,
+    sentByName: opts.auto ? (opts.auto.kind === "first_reply" ? "Auto first reply" : opts.auto.kind === "keyword" ? "Auto keyword reply" : "Auto follow-up") : (opts.by ?? owner).name,
     lead: (await leadsByKey()).get(key || chat) ?? null,
     read: true, media, at: new Date(), auto: opts.auto ?? null,
     ...(opts.forwarded ? { forwarded: true } : {}),

@@ -11,6 +11,8 @@ import type { IFirstReplyItem, IFollowupStep } from "./WhatsAppFollowupSettings.
  */
 export interface ISavedItem { _id: Types.ObjectId; title: string; text: string; file: { file: string; name: string; mime: string; size: number } | null; voice: boolean }
 export interface ISavedGroup { _id: Types.ObjectId; name: string; items: ISavedItem[] }
+/** `reply`: "saved:<item id>" or "group:<group id>" — one of the team's saved messages, or a whole group in order. */
+export interface IKeywordRule { _id: Types.ObjectId; keywords: string[]; reply: string; onceDays: number }
 
 export interface IWhatsAppTeamSettings {
   _id: Types.ObjectId;
@@ -26,6 +28,11 @@ export interface IWhatsAppTeamSettings {
    * sends one — or a whole group, in order — from a chat at any time. Each a title, words and/or a file.
    */
   savedGroups: ISavedGroup[];
+  /**
+   * Keyword replies (2026-11-08): a message with one of a rule's words or phrases in it gets that rule's saved message
+   * (or whole group) a minute later, any hour, unless a person answered — once per chat per rule in `onceDays`.
+   */
+  keywordReplies: { enabled: boolean; startedAt: Date | null; rules: IKeywordRule[] };
   updatedByName: string;
   updatedAt: Date;
 }
@@ -77,6 +84,18 @@ const settingsSchema = new Schema<IWhatsAppTeamSettings>(
         },
       })],
       default: [],
+    },
+    keywordReplies: {
+      enabled: { type: Boolean, default: false },
+      startedAt: { type: Date, default: null },
+      rules: {
+        type: [new Schema<IKeywordRule>({
+          keywords: { type: [String], default: [] },
+          reply: { type: String, required: true },
+          onceDays: { type: Number, default: 7 },
+        })],
+        default: [],
+      },
     },
     updatedByName: { type: String, default: "" },
   },
