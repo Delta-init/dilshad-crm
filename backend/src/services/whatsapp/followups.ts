@@ -5,7 +5,8 @@ import { Lead } from "../../models/Lead.js";
 import { Team } from "../../models/Team.js";
 import { User } from "../../models/User.js";
 import { WhatsAppLink, WhatsAppMessage } from "../../models/WhatsAppMessage.js";
-import { WhatsAppFollowupSettings, type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
+import { type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
+import { WhatsAppTeamSettings } from "../../models/WhatsAppTeamSettings.js";
 import { teamsOf } from "../../models/leadTeamOnAssign.js";
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
 import { isStudentKey, studentKeys } from "./chatExtras.js";
@@ -58,25 +59,20 @@ const ENDED = new Set(["closed", "lost", "repeated"]);
 const LOOK_BACK_DAYS = 45;
 const DEFAULT_DAILY_LIMIT = 60;
 
-/* ── Settings ───────────────────────────────────────────────────────────── */
+/* ── Settings — each team's own (2026-11-08) ────────────────────────────── */
 
 export type FirstReply = IWhatsAppFollowupSettings["firstReply"];
-/** A team's own messages (2026-11-03) — its follow-up steps and its first reply (with its own switch). */
-export type TeamMessages = { team: string; steps: IFollowupStep[]; firstReply: FirstReply; updatedByName: string; updatedAt: Date | null };
-export type FollowupSettings = Pick<IWhatsAppFollowupSettings, "enabled" | "startedAt" | "dailyLimit" | "steps" | "updatedByName" | "firstReply"> & {
-  teams: string[]; updatedAt: Date | null; teamSets: TeamMessages[];
+/** A team's WhatsApp settings (models/WhatsAppTeamSettings.ts): its follow-ups and its first reply. */
+export type TeamWa = {
+  team: string; enabled: boolean; startedAt: Date | null; dailyLimit: number; steps: IFollowupStep[]; firstReply: FirstReply;
+  updatedByName: string; updatedAt: Date | null;
+  /** False: never set — everything off, the steps shown are the suggested ones. */
+  saved: boolean;
 };
-
-/** The messages a team uses: its own, else the Default (the set at the top). */
-export function messagesFor(settings: FollowupSettings, team: unknown): { steps: IFollowupStep[]; firstReply: FirstReply; own: boolean } {
-  const own = team ? settings.teamSets.find((t) => t.team === String(team)) : undefined;
-  return own ? { steps: own.steps, firstReply: own.firstReply, own: true } : { steps: settings.steps, firstReply: settings.firstReply, own: false };
-}
-
-/** A person's messages: their team's (one they lead first, as their leads' team), else the Default. */
-export async function messagesOfPerson(settings: FollowupSettings, userId: string) {
-  return messagesFor(settings, (await teamsOf(userId)).home);
-}
+const NOTHING = (team: string): TeamWa => ({
+  team, enabled: false, startedAt: null, dailyLimit: DEFAULT_DAILY_LIMIT, steps: DEFAULT_STEPS,
+  firstReply: { enabled: false, startedAt: null, items: [] }, updatedByName: "", updatedAt: null, saved: false,
+});
 
 /**
  * A file's type as it really is: one uploaded as an MP4 before sound-only MP4s were told apart ("AUDIO-….m4a.mp4",
@@ -93,37 +89,39 @@ function realFile<T extends { file: string; mime: string } | null>(f: T): T {
   return audio ? { ...f, mime: "audio/mp4" } : f;
 }
 
-let cache: { at: number; value: FollowupSettings } | null = null;
-export async function followupSettings(fresh = false): Promise<FollowupSettings> {
+let cache: { at: number; value: Map<string, TeamWa> } | null = null;
+/** Every team's settings that were ever saved, by team. */
+export async function allTeamWa(fresh = false): Promise<Map<string, TeamWa>> {
   if (!fresh && cache && Date.now() - cache.at < 30_000) return cache.value;
-  const doc = await WhatsAppFollowupSettings.findOne({ key: "default" }).lean();
-  const value: FollowupSettings = {
-    enabled: doc?.enabled ?? false,
-    startedAt: doc?.startedAt ?? null,
-    teams: (doc?.teams ?? []).map(String),
-    dailyLimit: doc?.dailyLimit ?? DEFAULT_DAILY_LIMIT,
-    steps: doc?.steps?.length ? doc.steps.map((s) => ({ waitMinutes: s.waitMinutes, text: s.text, file: realFile(s.file ?? null) })) : DEFAULT_STEPS,
-    updatedByName: doc?.updatedByName ?? "",
-    updatedAt: doc?.updatedAt ?? null,
+  const docs = await WhatsAppTeamSettings.find().lean();
+  const value = new Map(docs.map((d) => [String(d.team), {
+    team: String(d.team),
+    enabled: d.enabled ?? false,
+    startedAt: d.startedAt ?? null,
+    dailyLimit: d.dailyLimit ?? DEFAULT_DAILY_LIMIT,
+    steps: d.steps?.length ? d.steps.map((x) => ({ waitMinutes: x.waitMinutes, text: x.text, file: realFile(x.file ?? null) })) : DEFAULT_STEPS,
     firstReply: {
-      enabled: doc?.firstReply?.enabled ?? false,
-      startedAt: doc?.firstReply?.startedAt ?? null,
-      items: (doc?.firstReply?.items ?? []).map((i) => ({ text: i.text ?? "", file: realFile(i.file ?? null), voice: i.voice === true })),
+      enabled: d.firstReply?.enabled ?? false,
+      startedAt: d.firstReply?.startedAt ?? null,
+      items: (d.firstReply?.items ?? []).map((i) => ({ text: i.text ?? "", file: realFile(i.file ?? null), voice: i.voice === true })),
     },
-    teamSets: (doc?.teamSets ?? []).map((t) => ({
-      team: String(t.team),
-      steps: (t.steps ?? []).map((s) => ({ waitMinutes: s.waitMinutes, text: s.text, file: realFile(s.file ?? null) })),
-      firstReply: {
-        enabled: t.firstReply?.enabled ?? false,
-        startedAt: t.firstReply?.startedAt ?? null,
-        items: (t.firstReply?.items ?? []).map((i) => ({ text: i.text ?? "", file: realFile(i.file ?? null), voice: i.voice === true })),
-      },
-      updatedByName: t.updatedByName ?? "",
-      updatedAt: t.updatedAt ?? null,
-    })),
-  };
+    updatedByName: d.updatedByName ?? "",
+    updatedAt: d.updatedAt ?? null,
+    saved: true,
+  } satisfies TeamWa]));
   cache = { at: Date.now(), value };
   return value;
+}
+
+/** A team's settings — never set: everything off. */
+export async function teamWa(team: unknown, fresh = false): Promise<TeamWa | null> {
+  if (!team) return null;
+  return (await allTeamWa(fresh)).get(String(team)) ?? NOTHING(String(team));
+}
+
+/** A person's team's settings: the team they lead, else the first they're in (as their leads' team); none: null. */
+export async function teamWaOfPerson(userId: string, fresh = false): Promise<TeamWa | null> {
+  return teamWa((await teamsOf(userId)).home, fresh);
 }
 
 export class FollowupError extends Error {
@@ -168,46 +166,27 @@ function parseFirstReply(fr: Record<string, unknown>, before: FirstReply): First
   return { enabled: on, items, startedAt: on && !before.enabled ? new Date() : on ? before.startedAt : null };
 }
 
-/** A Super Admin's change to the Default and the switches, checked: 1–8 steps; a limit of 1–300. */
-export async function saveFollowupSettings(input: Record<string, unknown>, byName: string): Promise<FollowupSettings> {
-  const before = await followupSettings(true);
+/**
+ * A team's settings, saved (by a Super Admin or its leader — the route decides): follow-ups on or off (switched on
+ * now, only chats written in from now on), 1–8 steps, a limit of 1–300 a day, and the first reply.
+ */
+export async function saveTeamWa(teamId: string, input: Record<string, unknown>, byName: string): Promise<TeamWa> {
+  if (!/^[a-f0-9]{24}$/.test(teamId) || !(await Team.exists({ _id: new Types.ObjectId(teamId) }))) throw new FollowupError("No such team", 404);
+  const before = (await teamWa(teamId, true))!;
   const steps = parseSteps(input.steps);
   const limit = Math.round(Number(input.dailyLimit ?? DEFAULT_DAILY_LIMIT));
   if (!Number.isFinite(limit) || limit < 1 || limit > 300) throw new FollowupError("The daily limit is 1 to 300 messages");
-  const teamIds = [...new Set((Array.isArray(input.teams) ? input.teams : []).map(String))].filter((t) => /^[a-f0-9]{24}$/.test(t));
-  const known = await Team.countDocuments({ _id: { $in: teamIds.map((t) => new Types.ObjectId(t)) } });
-  if (known !== teamIds.length) throw new FollowupError("One of those teams isn't here");
   const enabled = input.enabled === true;
-  // The first reply: kept as it was by a screen that doesn't send it.
-  const fr = input.firstReply as Record<string, unknown> | undefined;
-  const firstReply = fr && typeof fr === "object" ? parseFirstReply(fr, before.firstReply) : before.firstReply;
-  await WhatsAppFollowupSettings.updateOne({ key: "default" }, {
+  const fr = (input.firstReply && typeof input.firstReply === "object" ? input.firstReply : { enabled: false, items: [] }) as Record<string, unknown>;
+  const firstReply = parseFirstReply(fr, before.firstReply);
+  await WhatsAppTeamSettings.updateOne({ team: new Types.ObjectId(teamId) }, {
     $set: {
-      key: "default", enabled, steps, dailyLimit: limit, teams: teamIds.map((t) => new Types.ObjectId(t)), updatedByName: byName, firstReply,
-      // Switched on now: only chats written in from now on.
-      ...(enabled && !before.enabled ? { startedAt: new Date() } : {}),
+      team: new Types.ObjectId(teamId), enabled, steps, dailyLimit: limit, firstReply, updatedByName: byName,
+      startedAt: enabled ? (before.enabled && before.startedAt ? before.startedAt : new Date()) : null,
     },
   }, { upsert: true });
   cache = null;
-  return followupSettings(true);
-}
-
-/**
- * A team's own messages (2026-11-03), set by a Super Admin: its follow-up steps and its first reply (its own switch).
- * `input` null: the team goes back to the Default.
- */
-export async function saveTeamMessages(teamId: string, input: Record<string, unknown> | null, byName: string): Promise<FollowupSettings> {
-  if (!/^[a-f0-9]{24}$/.test(teamId) || !(await Team.exists({ _id: new Types.ObjectId(teamId) }))) throw new FollowupError("No such team", 404);
-  const before = await followupSettings(true);
-  await WhatsAppFollowupSettings.updateOne({ key: "default" }, { $pull: { teamSets: { team: new Types.ObjectId(teamId) } } }, { upsert: true });
-  if (input) {
-    const was = before.teamSets.find((t) => t.team === teamId)?.firstReply ?? { enabled: false, startedAt: null, items: [] };
-    const fr = (input.firstReply && typeof input.firstReply === "object" ? input.firstReply : { enabled: false, items: [] }) as Record<string, unknown>;
-    const set = { team: new Types.ObjectId(teamId), steps: parseSteps(input.steps), firstReply: parseFirstReply(fr, was), updatedByName: byName, updatedAt: new Date() };
-    await WhatsAppFollowupSettings.updateOne({ key: "default" }, { $push: { teamSets: set } });
-  }
-  cache = null;
-  return followupSettings(true);
+  return (await teamWa(teamId, true))!;
 }
 
 /* ── One chat's chain, read from its messages ───────────────────────────── */
@@ -222,7 +201,7 @@ export type ChainState =
   | { state: "waiting"; step: number; of: number; dueAt: Date; chat: string };
 
 /** Where a chat stands: newest first, the automatic messages since the last one a person sent, and what comes next. */
-export function chainOf(newestFirst: Msg[], settings: FollowupSettings, stopped: { at: Date | null; byName: string }): ChainState | null {
+export function chainOf(newestFirst: Msg[], settings: Pick<TeamWa, "startedAt" | "steps">, stopped: { at: Date | null; byName: string }): ChainState | null {
   const last = newestFirst[0];
   if (!last) return null;
   if (last.direction === "in") return { state: "replied" };
@@ -269,11 +248,12 @@ export type LeadFollowup = {
 };
 
 export async function leadFollowup(leadId: string): Promise<LeadFollowup> {
-  const settings = await followupSettings();
   const lead = await Lead.findById(leadId).select("phone status team assignedTo waFollowupStoppedAt waFollowupStoppedByName")
     .lean<{ phone?: string; status?: string; team?: Types.ObjectId | null; assignedTo?: Types.ObjectId | null; waFollowupStoppedAt?: Date | null; waFollowupStoppedByName?: string } | null>();
   if (!lead) return { on: false, state: "off" };
-  const on = settings.enabled && !!lead.team && settings.teams.includes(String(lead.team));
+  // The lead's team's follow-ups (2026-11-08).
+  const settings = await teamWa(lead.team);
+  const on = !!settings?.enabled;
   if (!on) return { on, state: "off" };
   if (ENDED.has(String(lead.status))) return { on, state: "ended" };
   // A student — marked so in a chat, or enrolled — gets none (2026-10-30).
@@ -289,7 +269,7 @@ export async function leadFollowup(leadId: string): Promise<LeadFollowup> {
   }
   const base = { on, ownerName: String(owner?.name ?? ""), linked: isConnected(String(lead.assignedTo)) };
   // The lead's team's steps (its own, else the Default).
-  const chain = chainOf(best, { ...settings, steps: messagesFor(settings, lead.team).steps }, { at: lead.waFollowupStoppedAt ?? null, byName: lead.waFollowupStoppedByName ?? "" });
+  const chain = chainOf(best, settings!, { at: lead.waFollowupStoppedAt ?? null, byName: lead.waFollowupStoppedByName ?? "" });
   if (!chain) return { ...base, state: "no_chat" };
   if (chain.state === "waiting") return { ...base, state: "waiting", step: chain.step, of: chain.of, nextAt: (await nextWorkingMoment(chain.dueAt)).toISOString() };
   if (chain.state === "done") return { ...base, state: "done", sent: chain.sent };
@@ -319,11 +299,13 @@ export async function runFollowups(now = new Date()): Promise<RunResult> {
   if (running) return { ok: false, sent: 0, skipped: "a run is already going" };
   running = true;
   try {
-    const settings = await followupSettings(true);
-    if (!settings.enabled || !settings.teams.length || !settings.startedAt) return { ok: true, sent: 0, skipped: "off" };
+    // Each team its own (2026-11-08): the teams with follow-ups on.
+    const teams = new Map([...(await allTeamWa(true))].filter(([, t]) => t.enabled && t.startedAt));
+    if (!teams.size) return { ok: true, sent: 0, skipped: "off" };
+    const firstOn = Math.min(...[...teams.values()].map((t) => t.startedAt!.getTime()));
     if (!isWithinWorkingHours(await getAppSettings(), now)) return { ok: true, sent: 0, skipped: "outside working hours" };
 
-    const since = new Date(Math.max(settings.startedAt.getTime(), now.getTime() - LOOK_BACK_DAYS * 24 * 60 * MIN));
+    const since = new Date(Math.max(firstOn, now.getTime() - LOOK_BACK_DAYS * 24 * 60 * MIN));
     // Each chat's latest message (by number), where it is ours: theirs is an answer, and nothing is due.
     const lasts = await WhatsAppMessage.aggregate<{ _id: { owner: Types.ObjectId; key: string }; direction: string }>([
       { $match: { at: { $gte: since }, key: { $gt: "" } } },
@@ -344,19 +326,20 @@ export async function runFollowups(now = new Date()): Promise<RunResult> {
       .lean<{ _id: Types.ObjectId; name?: string; status?: string; team?: Types.ObjectId | null; assignedTo?: Types.ObjectId | null; waFollowupStoppedAt?: Date | null; waFollowupStoppedByName?: string }[]>())
       .map((l) => [String(l._id), l]));
 
-    type Due = { owner: string; key: string; lead: NonNullable<ReturnType<typeof leads.get>>; chain: Extract<ChainState, { state: "waiting" }>; steps: IFollowupStep[] };
+    type Due = { owner: string; key: string; lead: NonNullable<ReturnType<typeof leads.get>>; chain: Extract<ChainState, { state: "waiting" }>; steps: IFollowupStep[]; limit: number };
     const due: Due[] = [];
     for (const c of live) {
       const owner = String(c._id.owner);
       const lead = leads.get(String(byKey.get(c._id.key) ?? ""));
       // The lead's own salesperson, on a team switched on, and not over.
-      if (!lead || String(lead.assignedTo ?? "") !== owner || !lead.team || !settings.teams.includes(String(lead.team)) || ENDED.has(String(lead.status))) continue;
+      const settings = lead?.team ? teams.get(String(lead.team)) : undefined;
+      if (!lead || String(lead.assignedTo ?? "") !== owner || !settings || ENDED.has(String(lead.status))) continue;
       // The lead's team's own steps, else the Default (2026-11-03).
-      const steps = messagesFor(settings, lead.team).steps;
-      const chain = chainOf(await recent(owner, c._id.key), { ...settings, steps }, { at: lead.waFollowupStoppedAt ?? null, byName: lead.waFollowupStoppedByName ?? "" });
+      const steps = settings.steps;
+      const chain = chainOf(await recent(owner, c._id.key), settings, { at: lead.waFollowupStoppedAt ?? null, byName: lead.waFollowupStoppedByName ?? "" });
       if (chain?.state !== "waiting" || chain.dueAt > now) continue;
       if ((failedUntil.get(`${owner}|${c._id.key}|${chain.step}`) ?? 0) > now.getTime()) continue;
-      due.push({ owner, key: c._id.key, lead, chain, steps });
+      due.push({ owner, key: c._id.key, lead, chain, steps, limit: settings.dailyLimit });
     }
     due.sort((a, b) => a.chain.dueAt.getTime() - b.chain.dueAt.getTime());
 
@@ -367,7 +350,7 @@ export async function runFollowups(now = new Date()): Promise<RunResult> {
     for (const d of due) {
       if (done.has(d.owner) || (nextSendAt.get(d.owner) ?? 0) > now.getTime()) continue;
       const today = await WhatsAppMessage.countDocuments({ owner: new Types.ObjectId(d.owner), "auto.kind": "followup", at: { $gte: dayStart } });
-      if (today >= settings.dailyLimit) { done.add(d.owner); continue; }
+      if (today >= d.limit) { done.add(d.owner); continue; }
       done.add(d.owner);
       nextSendAt.set(d.owner, now.getTime() + gapMs());
       const step = d.steps[d.chain.step - 1]!;
@@ -438,7 +421,7 @@ export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Mat
     )).modifiedCount;
     if (!linked.length) return { sent, skipped };
 
-    const settings = await followupSettings(true);
+    cache = null;   // the teams' settings read fresh, once a run
     const due = (await col.find({ status: "waiting", owner: { $in: linked }, at: { $lte: new Date(now.getTime() - FIRST_REPLY_AFTER_MS) } }).sort({ at: 1 }).limit(200).toArray()) as unknown as
       { _id: string; owner: Types.ObjectId; key: string; chat: string; at: Date; createdAt?: Date }[];
 
@@ -446,14 +429,12 @@ export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Mat
       const close = async (status: string) => { await col.updateOne({ _id: d._id as never }, { $set: { status, decidedAt: now } }); skipped++; };
       // The WhatsApp owner's team's first reply (2026-11-03): its own — with its own switch — else the Default, for
       // someone on a team ticked for follow-ups.
-      const mine = await messagesOfPerson(settings, String(d.owner));
+      // The WhatsApp owner's team's first reply, on its own switch (2026-11-08); someone in no team: none.
+      const mine = await teamWaOfPerson(String(d.owner));
+      if (!mine) { await close("not_on_team"); return; }
       const fr = mine.firstReply;
       // Before it was switched on — by when it reached the CRM (WhatsApp's own times are whole seconds).
       if (!fr.enabled || !fr.items.length || !fr.startedAt || (d.createdAt ?? d.at) < fr.startedAt) { await close("off"); return; }
-      if (!mine.own) {
-        const onTeam = await Team.countDocuments({ _id: { $in: settings.teams.map((t) => new Types.ObjectId(t)) }, status: "active", $or: [{ members: d.owner }, { leaders: d.owner }] });
-        if (!onTeam) { await close("not_on_team"); return; }
-      }
       const answered = await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at } });
       if (answered) { await close("answered"); return; }
       // Not to a student, nor to a lead already closed, lost or a repeat (2026-10-30).
@@ -557,7 +538,8 @@ const afterWait = (minutes: number) =>
  */
 export async function listSavedMessages(userId?: string): Promise<SavedMessage[]> {
   // The person's team's (2026-11-03), else the Default.
-  const s = userId ? await messagesOfPerson(await followupSettings(), userId) : await followupSettings();
+  const s = userId ? await teamWaOfPerson(userId) : null;
+  if (!s) return [];
   const first = s.firstReply?.items ?? [];
   return [
     ...first.map((it, i) => ({
@@ -583,7 +565,7 @@ export async function sendSavedMessage(userId: string, chat: string, id: string,
   by?: Owner): Promise<{ parts: number }> {
   const [kind, stepRaw] = id.split(":");
   // The sender's team's messages (2026-11-03) — the same list they picked from.
-  const s = await messagesOfPerson(await followupSettings(), by?.id ?? userId);
+  const s = (await teamWaOfPerson(by?.id ?? userId)) ?? NOTHING("");
   // {salesperson}: whoever sends it — someone the WhatsApp is shared with, else its owner.
   const owner = by ?? await User.findById(userId).select("name").lean<{ name?: string } | null>();
   // {name}: the lead's, else theirs as saved in the phone or on WhatsApp.

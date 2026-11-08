@@ -3,7 +3,8 @@
  * follow-up we need in our CRMs, first the Sales CRM"), on a scratch database, through the API and the job, with a
  * stand-in for WhatsApp:
  *
- *   - Case 1: settings — a Super Admin's only; checked; switching on stamps when.
+ *   - Case 1: settings — each team's own (2026-11-08): changed by a Super Admin or the team's leader, seen by its
+ *     people, not by another team's; checked; switching on stamps when.
  *   - Case 2: a quiet chat — step 1 once it is due, with {name}/{salesperson}; marked, logged on the lead; then step 2.
  *   - Case 3: it stops — they answer; a person writes again (starts over); Stop on the lead; Closed; the last step.
  *   - Case 4: only where it should — the lead's own salesperson, a team switched on, linked, written in after it was
@@ -18,9 +19,8 @@
  *     of it); tampered or expired links refused; an old "video" that is sound only shown as audio; the status page's
  *     message totals are right.
  *   - Case 11: none to a student (marked) or a closed lead — no follow-up step, no first reply; others still get them.
- *   - Case 12: a team's own messages (2026-11-03) — a Super Admin's; checked; its first reply with its own switch (even
- *     on a team not ticked); its follow-up steps for its leads (other teams keep the Default); its people's saved
- *     messages; back to the Default.
+ *   - Case 12: another team's own settings — its first reply on its own switch (follow-ups off), its follow-up steps
+ *     for its leads once on (Titans keeps its own), its people's saved messages; switched off, nothing.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -150,25 +150,33 @@ const textOf = (s: Sent | undefined) => String(s?.content?.text ?? s?.content?.c
 
 try {
   section("Case 1 — settings");
-  let r = await call("GET", "/whatsapp/followups/settings", "Sam");
-  check("a salesperson can't open them", r.status === 403);
-  r = await call("GET", "/whatsapp/followups/settings", "Root");
-  check("a Super Admin: off, the five default steps (4h, 1d, 3d, 7d, 14d), every team to pick", r.status === 200 && r.body.data.enabled === false
-    && j(r.body.data.steps.map((s: any) => s.waitMinutes)) === j([240, 1440, 4320, 10080, 20160]) && r.body.data.allTeams.length === 2, j(r.body.data));
+  const T = `/whatsapp/followups/team/${titans}`;
+  let r = await call("GET", T, "Omar");
+  check("another team's person can't open Titans' settings", r.status === 403, String(r.status));
+  r = await call("GET", T, "Sam");
+  check("a Titans member sees them, can't change them", r.status === 200 && r.body.data.canEdit === false, j(r.body.data?.canEdit));
+  r = await call("GET", T, "Root");
+  check("a Super Admin: never set — off, the five suggested steps (4h, 1d, 3d, 7d, 14d), may change them", r.status === 200 && r.body.data.enabled === false && r.body.data.saved === false
+    && j(r.body.data.steps.map((s: any) => s.waitMinutes)) === j([240, 1440, 4320, 10080, 20160]) && r.body.data.canEdit === true && r.body.data.team?.name === "Titans", j(r.body.data));
   const steps = r.body.data.steps;
-  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps: [{ waitMinutes: 10, text: "x" }] });
+  r = await call("PUT", T, "Root", { enabled: true, dailyLimit: 60, steps: [{ waitMinutes: 10, text: "x" }] });
   check("a step 10 minutes after: refused", r.status === 400 && /30 minutes/.test(r.body.message ?? ""), j(r.body));
-  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps: [{ waitMinutes: 60, text: "  " }] });
+  r = await call("PUT", T, "Root", { enabled: true, dailyLimit: 60, steps: [{ waitMinutes: 60, text: "  " }] });
   check("a step with no words: refused", r.status === 400 && /write its message/.test(r.body.message ?? ""));
-  r = await call("PUT", "/whatsapp/followups/settings", "Sam", { enabled: true, teams: [], steps });
+  r = await call("PUT", T, "Sam", { enabled: true, steps });
   check("a salesperson can't save them", r.status === 403);
-  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps });
-  check("switched on for Titans: when is stamped", r.status === 200 && r.body.data.enabled === true && r.body.data.startedAt && j(r.body.data.teams) === j([String(titans)]) && r.body.data.updatedByName === "Root", j(r.body.data));
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Lina", { enabled: true, dailyLimit: 60, steps });
+  check("a team leader can't change another team's", r.status === 403);
+  r = await call("PUT", T, "Lina", { enabled: true, dailyLimit: 60, steps });
+  check("Titans' leader switches them on: when is stamped", r.status === 200 && r.body.data.enabled === true && !!r.body.data.startedAt, j(r.body.data));
   const started = new Date(r.body.data.startedAt);
-  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps });
+  r = await call("PUT", T, "Root", { enabled: true, dailyLimit: 60, steps });
   check("saved again while on: the time it was switched on stays", new Date(r.body.data.startedAt).getTime() === started.getTime());
+  r = await call("GET", T, "Root");
+  check("…and who saved them last", r.body.data.updatedByName === "Root" && r.body.data.saved === true, j(r.body.data?.updatedByName));
   // The chats below were written in after it was switched on: move that back a week, as if it had been on a while.
-  await db.collection("whatsapp_followup_settings").updateOne({ key: "default" }, { $set: { startedAt: new Date(Date.now() - 7 * D) } });
+  await db.collection("whatsapp_team_settings").updateOne({ team: titans }, { $set: { startedAt: new Date(Date.now() - 7 * D) } });
+  F.resetFollowupPacingForCheck();
 
   section("Case 2 — a quiet chat");
   link("Sam");
@@ -266,7 +274,7 @@ try {
   check("two due for Sally: one a run, and not again within a minute", res.sent === 1 && r2.sent === 0 && outbox.Sally!.length === 2, j({ res, r2 }));
   const r3 = await F.runFollowups(new Date(t.getTime() + 2 * 60_000 + 1000));
   check("…the other after the gap", r3.sent === 1 && outbox.Sally!.length === 3, j(r3));
-  await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 1, steps });
+  await call("PUT", `/whatsapp/followups/team/${titans}`, "Root", { enabled: true, dailyLimit: 1, steps });
   await lead("Ivy Three", "+971 54 100 0003", "Sally", titans);
   await msg("Sally", "971541000003", "out", new Date(Date.now() - 5 * H));
   const day = work(Date.now() + 5 * 60_000);
@@ -274,7 +282,7 @@ try {
   res = await run(day);
   check("the daily limit (1) reached: nothing more for her that day", res.sent === 0 && outbox.Sally!.length === 3, j(res));
   await db.collection("whatsapp_messages").deleteMany({ owner: P("Sally"), key: "549999999" });
-  await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps });
+  await call("PUT", `/whatsapp/followups/team/${titans}`, "Root", { enabled: true, dailyLimit: 60, steps });
   await db.collection("whatsapp_messages").deleteMany({ owner: P("Sally"), key: "971541000003".slice(-9) });
   await lead("Not On WA", "+971 54 200 0000", "Sally", titans);                  // the stand-in says …0000 is not on WhatsApp
   // Never reached WhatsApp (no address on it): a chat already going on, with its address, is sent to without asking.
@@ -300,7 +308,7 @@ try {
   const file = ((await up.json()) as any).data;
   check("a video: kept under followups/", up.status === 201 && /^followups\/[\w-]+\.mp4$/.test(file.file) && fs.existsSync(path.join(MEDIA, file.file)), j(file));
   const withFile = steps.map((s: any, i: number) => (i === 0 ? { ...s, file } : s));
-  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps: withFile });
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Root", { enabled: true, dailyLimit: 60, steps: withFile });
   check("…put on step 1", r.status === 200 && r.body.data.steps[0].file?.file === file.file);
   await lead("Jo Video", "+971 56 300 0001", "Sally", titans);
   await msg("Sally", "971563000001", "out", new Date(Date.now() - 5 * H));
@@ -325,7 +333,7 @@ try {
   r = await call("GET", "/whatsapp/followups/recent", "Omar");
   check("…Omar: none of theirs", r.status === 200 && r.body.data.length === 0, j(r.body.data));
 
-  await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: false, teams: [String(titans)], dailyLimit: 60, steps });
+  await call("PUT", `/whatsapp/followups/team/${titans}`, "Root", { enabled: false, dailyLimit: 60, steps });
   await lead("Kay Off", "+971 56 300 0002", "Sally", titans);
   await msg("Sally", "971563000002", "out", new Date(Date.now() - 5 * H));
   res = await run(work(Date.now() + 5 * 60_000));
@@ -351,11 +359,11 @@ try {
     { text: "Hi {name}, all the details: https://deltainstitutions.com/course" },
     { file: pdf, text: "Our brochure" },
   ];
-  r = await call("PUT", "/whatsapp/followups/settings", "Sam", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps, firstReply: { enabled: true, items } });
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Sam", { enabled: true, dailyLimit: 60, steps, firstReply: { enabled: true, items } });
   check("a salesperson can't set it up", r.status === 403);
-  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps, firstReply: { enabled: true, items: [] } });
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Root", { enabled: true, dailyLimit: 60, steps, firstReply: { enabled: true, items: [] } });
   check("switched on with nothing to send: refused", r.status === 400 && /Add what the first reply sends/.test(r.body.message ?? ""), j(r.body));
-  r = await call("PUT", "/whatsapp/followups/settings", "Root", { enabled: true, teams: [String(titans)], dailyLimit: 60, steps, firstReply: { enabled: true, items } });
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Root", { enabled: true, dailyLimit: 60, steps, firstReply: { enabled: true, items } });
   check("switched on: 4 parts — the .opus a voice note, the MP3 ordinary audio — when stamped", r.status === 200 && r.body.data.firstReply.enabled && r.body.data.firstReply.items.length === 4
     && r.body.data.firstReply.items[0].voice === true && r.body.data.firstReply.items[1].voice === false && !!r.body.data.firstReply.startedAt, j(r.body.data?.firstReply));
   const first = async (owner: string, phone: string, id: string, body = "Hi, is this Delta?", name = "Nadia") =>
@@ -385,7 +393,7 @@ try {
   check("a person answered within the minute: no first reply", fr.sent === 0 && (await firsts().findOne({ key: "551110002" }))?.status === "answered", j(fr));
   await first("Omar", "971551110003", "NEW-3");
   fr = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
-  check("on a team not switched on: none", fr.sent === 0 && (await firsts().findOne({ key: "551110003" }))?.status === "not_on_team");
+  check("on a team whose first reply isn't on (Others has none set): none", fr.sent === 0 && (await firsts().findOne({ key: "551110003" }))?.status === "off");
   await wa.receive({ id: String(P("Sally")), name: "Sally" }, {} as never, {
     key: { remoteJid: "971551110004@s.whatsapp.net", fromMe: false, id: "OLD-1" }, message: { conversation: "From last year" }, messageTimestamp: Math.floor(Date.now() / 1000) - 300 * 86400,
   } as never, { history: true });
@@ -440,9 +448,10 @@ try {
   const soundMp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x14]), Buffer.from("ftypM4A "), Buffer.alloc(8), Buffer.from([0, 0, 0, 0x21]), Buffer.from("hdlr"), Buffer.alloc(8), Buffer.from("soun"), Buffer.alloc(13)]);
   fs.mkdirSync(path.join(MEDIA, "followups"), { recursive: true });
   fs.writeFileSync(path.join(MEDIA, "followups", "old-audio.mp4"), soundMp4);
-  const { WhatsAppFollowupSettings: WFS } = await import("../src/models/WhatsAppFollowupSettings.js");
-  await WFS.updateOne({ key: "default" }, { $push: { "firstReply.items": { text: "", file: { file: "followups/old-audio.mp4", name: "AUDIO-2026-10-24-11-20-02.m4a.mp4", mime: "video/mp4", size: soundMp4.length }, voice: false } } });
-  r = await call("GET", "/whatsapp/followups/settings", "Root");
+  const WTS = db.collection("whatsapp_team_settings");
+  await WTS.updateOne({ team: titans }, { $push: { "firstReply.items": { text: "", file: { file: "followups/old-audio.mp4", name: "AUDIO-2026-10-24-11-20-02.m4a.mp4", mime: "video/mp4", size: soundMp4.length }, voice: false } } });
+  F.resetFollowupPacingForCheck();
+  r = await call("GET", `/whatsapp/followups/team/${titans}`, "Root");
   const items10 = r.body.data?.firstReply?.items as any[];
   const oldAudio = items10?.find((x) => x.file?.file === "followups/old-audio.mp4");
   check("an old \"video\" that is sound only: shown as audio", oldAudio?.file?.mime === "audio/mp4", j(oldAudio?.file));
@@ -461,8 +470,8 @@ try {
   u10.searchParams.set("e", String(Math.floor(Date.now() / 1000) - 10));
   fres = await fetch(u10);
   check("an expired link: refused (410)", fres.status === 410, String(fres.status));
-  r = await call("GET", "/whatsapp/followups/settings", "Sam");
-  check("Settings with its links is the Super Admin's only", r.status === 403, String(r.status));
+  r = await call("GET", `/whatsapp/followups/team/${titans}`, "Omar");
+  check("a team's settings with their links: not for another team's people", r.status === 403, String(r.status));
   r = await call("GET", "/whatsapp/saved-messages", "Sam");
   check("the saved-messages list shows it as audio too", (r.body.data as any[])?.find((m) => m.file?.name === "AUDIO-2026-10-24-11-20-02.m4a.mp4")?.file?.mime === "audio/mp4", j(r.body.data));
   r = await call("GET", "/whatsapp/status", "Root");
@@ -473,7 +482,8 @@ try {
   section("Case 11 — nothing automatic to a student, or to a closed lead (2026-10-30)");
   // Follow-ups: two quiet chats due at the same moment, one of them a student.
   const t11 = work(Date.now() + 10 * 60_000);
-  await WFS.updateOne({ key: "default" }, { $set: { enabled: true, startedAt: new Date(t11.getTime() - 10 * D), teams: [titans] } });
+  await WTS.updateOne({ team: titans }, { $set: { enabled: true, startedAt: new Date(t11.getTime() - 10 * D) } });
+  F.resetFollowupPacingForCheck();
   await lead("Plain Lead", "+971 55 300 0001", "Sally", titans);
   await lead("Student Lead", "+971 55 300 0002", "Sam", titans);
   await msg("Sally", "971553000001", "out", new Date(t11.getTime() - 5 * H));
@@ -495,35 +505,37 @@ try {
   check("…not to a closed lead", (await firsts().findOne({ key: "553000004" }))?.status === "ended", j(await firsts().findOne({ key: "553000004" })));
   check("…the new person still gets it", (await firsts().findOne({ key: "553000005" }))?.status === "sent" && fr11.sent === 1, j(fr11));
 
-  section("Case 12 — a team's own messages (2026-11-03)");
-  const own = { steps: [{ waitMinutes: 240, text: "Others step 1 for {name}" }], firstReply: { enabled: true, items: [{ text: "Others hello {name}" }] } };
-  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Sam", own);
-  check("a salesperson can't set a team's messages", r.status === 403, j(r.body));
-  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", { steps: [], firstReply: own.firstReply });
+  section("Case 12 — another team's own settings");
+  const own = { enabled: false, dailyLimit: 60, steps: [{ waitMinutes: 240, text: "Others step 1 for {name}" }], firstReply: { enabled: true, items: [{ text: "Others hello {name}" }] } };
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Omar", own);
+  check("a member can't set their team's", r.status === 403, j(r.body));
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", { ...own, steps: [] });
   check("no steps: refused", r.status === 400 && /Between 1 and 8 steps/.test(r.body.message ?? ""), j(r.body));
   r = await call("PUT", `/whatsapp/followups/team/${new Types.ObjectId()}`, "Root", own);
   check("a team that isn't here: refused", r.status === 404, j(r.body));
   r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", own);
-  check("Others gets its own messages", r.status === 200, j(r.body));
-  r = await call("GET", "/whatsapp/followups/settings", "Root");
-  const set12 = (r.body.data?.teamSets ?? []).find((t: any) => t.team === String(others));
-  check("…listed with its steps, its first reply switched on (stamped), who set it", set12?.steps?.[0]?.text === "Others step 1 for {name}" && set12.firstReply.enabled === true && !!set12.firstReply.startedAt && set12.updatedByName === "Root", j(set12));
-  check("…the Default unchanged", r.body.data?.steps?.length === 5, j(r.body.data?.steps?.length));
+  check("Others gets its own (follow-ups off, first reply on)", r.status === 200 && r.body.data.enabled === false, j(r.body));
+  r = await call("GET", `/whatsapp/followups/team/${others}`, "Omar");
+  check("…Omar sees them: its step, its first reply on (stamped)", r.body.data?.steps?.[0]?.text === "Others step 1 for {name}" && r.body.data.firstReply.enabled === true && !!r.body.data.firstReply.startedAt, j(r.body.data));
+  r = await call("GET", `/whatsapp/followups/team/${titans}`, "Root");
+  check("…Titans' unchanged", r.body.data?.steps?.length === 5, j(r.body.data?.steps?.length));
   // Saved messages: each person their team's.
   link("Omar");
   const omarSaved = (await call("GET", "/whatsapp/saved-messages", "Omar")).body.data ?? [];
   const samSaved = (await call("GET", "/whatsapp/saved-messages", "Sam")).body.data ?? [];
-  check("saved messages: Omar (Others) sees Others' — Sam (Titans) the Default", omarSaved.some((m: any) => m.text === "Others step 1 for {name}") && omarSaved.some((m: any) => m.text === "Others hello {name}")
+  check("saved messages: Omar (Others) sees Others' — Sam (Titans) Titans'", omarSaved.some((m: any) => m.text === "Others step 1 for {name}") && omarSaved.some((m: any) => m.text === "Others hello {name}")
     && !samSaved.some((m: any) => /Others/.test(m.text)) && samSaved.filter((m: any) => m.kind === "followup").length === 5, j({ omar: omarSaved.map((m: any) => m.text), sam: samSaved.length }));
   r = await call("POST", "/whatsapp/send-saved", "Omar", { chat: "971554000009", id: "followup:1" });
   check("…and sending one sends Others' words", r.status === 200 && /^Others step 1 for there/.test(textOf(outbox.Omar!.at(-1))), j({ s: r.status, t: textOf(outbox.Omar!.at(-1)) }));
-  // First reply: Others isn't ticked for follow-ups, but its own first reply is on.
+  // First reply: Others' own, on its own switch (its follow-ups are off).
   await first("Omar", "971554000001", "OTH-1", "Hello", "Olga");
   let fr12 = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
-  check("first reply to Omar's WhatsApp: Others' own (its own switch, team not ticked)", (await firsts().findOne({ key: "554000001" }))?.status === "sent" && textOf(outbox.Omar!.at(-1)) === "Hi Olga".replace("Hi ", "Others hello "), j({ st: await firsts().findOne({ key: "554000001" }), t: textOf(outbox.Omar!.at(-1)) }));
-  // Follow-ups: Others ticked now — its lead gets Others' step; a Titans lead still the Default.
+  check("first reply to Omar's WhatsApp: Others' own (its own switch)", (await firsts().findOne({ key: "554000001" }))?.status === "sent" && textOf(outbox.Omar!.at(-1)) === "Others hello Olga", j({ st: await firsts().findOne({ key: "554000001" }), t: textOf(outbox.Omar!.at(-1)) }));
+  // Follow-ups: Others' switched on — its leads get Others' step.
   const t12 = work(Date.now() + 20 * 60_000);
-  await WFS.updateOne({ key: "default" }, { $set: { enabled: true, startedAt: new Date(t12.getTime() - 10 * D), teams: [titans, others] } });
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", { ...own, enabled: true });
+  await db.collection("whatsapp_team_settings").updateOne({ team: others }, { $set: { startedAt: new Date(t12.getTime() - 10 * D) } });
+  F.resetFollowupPacingForCheck();
   await lead("Otto Lead", "+971 55 400 0002", "Omar", others);
   await msg("Omar", "971554000002", "out", new Date(t12.getTime() - 5 * H));
   const omarN = outbox.Omar!.length;
@@ -534,16 +546,14 @@ try {
   const card12 = await call("GET", `/whatsapp/lead/${(await db.collection("leads").findOne({ name: "Otto Lead" }))!._id}`, "Omar");
   // (The chat is dated in a later working hour, so the card may still show the step as coming.)
   const fu12 = card12.body.data?.followup;
-  check("…its lead card counts Others' steps (1, not the Default's 5)", (fu12?.state === "waiting" && fu12.of === 1) || (fu12?.state === "done" && fu12.sent === 1), j(fu12));
-  // Its own first reply switched off: none, even though the Default's is on.
+  check("…its lead card counts Others' steps (1, not Titans' 5)", (fu12?.state === "waiting" && fu12.of === 1) || (fu12?.state === "done" && fu12.sent === 1), j(fu12));
+  // Its first reply switched off: none.
   r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", { ...own, firstReply: { enabled: false, items: own.firstReply.items } });
   await first("Omar", "971554000003", "OTH-3", "Hi", "Oli");
   fr12 = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
-  check("its own first reply off: none for Omar's WhatsApp", r.status === 200 && (await firsts().findOne({ key: "554000003" }))?.status === "off", j(await firsts().findOne({ key: "554000003" })));
-  // Back to the Default.
-  r = await call("DELETE", `/whatsapp/followups/team/${others}`, "Root");
-  const omarSaved2 = (await call("GET", "/whatsapp/saved-messages", "Omar")).body.data ?? [];
-  check("back to the Default: Omar's saved messages are the Default's", r.status === 200 && !omarSaved2.some((m: any) => /Others/.test(m.text)) && omarSaved2.filter((m: any) => m.kind === "followup").length === 5, j(omarSaved2.map((m: any) => m.text)));
+  check("its first reply off: none for Omar's WhatsApp", r.status === 200 && (await firsts().findOne({ key: "554000003" }))?.status === "off", j(await firsts().findOne({ key: "554000003" })));
+  r = await call("GET", "/whatsapp/followups/summary", "Omar");
+  check("Omar's summary: his team's settings, not his to change", r.body.data?.teamId === String(others) && r.body.data.canEdit === false && r.body.data.steps?.[0]?.text === "Others step 1 for {name}", j(r.body.data));
 } finally {
   server.close();
   await mongoose.disconnect();

@@ -445,19 +445,19 @@ try {
   check("no WhatsApp access: refused", r.status === 403, j(r.body));
 
   section("Case 14 — the saved messages, sent by hand");
-  const { WhatsAppFollowupSettings } = await import("../src/models/WhatsAppFollowupSettings.js");
-  const { followupSettings } = await import("../src/services/whatsapp/followups.js");
+  const { allTeamWa } = await import("../src/services/whatsapp/followups.js");
   fs.mkdirSync(path.join(MEDIA, "followups"), { recursive: true });
   fs.writeFileSync(path.join(MEDIA, "followups", "intro.ogg"), "OggS-fake-intro");
-  await WhatsAppFollowupSettings.updateOne({ key: "default" }, { $set: {
-    key: "default", enabled: false, teams: [], dailyLimit: 60,
+  // Sam's team's (2026-11-08: each team its own).
+  await db.collection("whatsapp_team_settings").updateOne({ team: titans }, { $set: {
+    team: titans, enabled: false, startedAt: null, dailyLimit: 60,
     steps: [{ waitMinutes: 240, text: "Hi {name}, just checking you saw my message. — {salesperson}", file: null }, { waitMinutes: 1440, text: "Hi {name}, would a call help?", file: null }],
     firstReply: { enabled: false, startedAt: null, items: [
       { text: "Hi {name}! Thanks for writing to Delta.", file: null, voice: false },
       { text: "Listen to this", file: { file: "followups/intro.ogg", name: "intro.ogg", mime: "audio/ogg", size: 15 }, voice: true },
     ] },
   } }, { upsert: true });
-  await followupSettings(true);
+  await allTeamWa(true);
   r = await call("GET", "/whatsapp/saved-messages", "Sam");
   const list = r.body.data as any[];
   check("listed for a salesperson: the first reply's 2 parts, then the 2 follow-up steps", r.status === 200 && list?.length === 4 && list[0].id === "first_reply:1" && list[1].voice === true && list[1].file?.name === "intro.ogg"

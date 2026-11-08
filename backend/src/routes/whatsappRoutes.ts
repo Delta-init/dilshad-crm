@@ -20,7 +20,7 @@ import { phoneOwnerOf, setSharers, sharedFrom, sharersOf, SharingError } from ".
 import { chatCalls, logCall, setStudent, studentKeys, studentMark } from "../services/whatsapp/chatExtras.js";
 import { CallLog } from "../models/CallLog.js";
 import {
-  followupSettings, FollowupError, leadFollowup, listSavedMessages, messagesOfPerson, saveFollowupSettings, saveTeamMessages, sendSavedMessage, setLeadFollowupStopped,
+  allTeamWa, FollowupError, leadFollowup, listSavedMessages, saveTeamWa, sendSavedMessage, setLeadFollowupStopped, teamWa, teamWaOfPerson,
 } from "../services/whatsapp/followups.js";
 import {
   connect, contactNames, disconnect, fetchOlder, fetchOlderForAll, forwardMessage, rememberLead, intlNumbers, leadsByKey, mediaPath, realMime, sendFile, sendText, status, whatsappEnabled, WhatsAppError,
@@ -142,8 +142,7 @@ router.get("/followups/file-view", async (req, res, next) => {
     if (want.length !== got.length || !timingSafeEqual(want, got)) { sendError(res, "Not found", 404); return; }
     const path = mediaPath(f);
     if (!existsSync(path)) { sendError(res, "Not found", 404); return; }
-    const settings = await followupSettings();
-    const meta = [...settings.steps.map((x) => x.file), ...settings.firstReply.items.map((x) => x.file)].find((x) => x?.file === f);
+    const meta = [...(await allTeamWa()).values()].flatMap((t) => [...t.steps.map((x) => x.file), ...t.firstReply.items.map((x) => x.file)]).find((x) => x?.file === f);
     serveFile(req, res, next, path, meta?.mime || "application/octet-stream", meta?.name || f.split("/").pop() || "file");
   } catch (err) { next(err); }
 });
@@ -659,63 +658,52 @@ router.put("/sharing", async (req: AuthenticatedRequest, res, next) => {
 
 /* ── Automatic follow-ups (services/whatsapp/followups.ts) ──────────────── */
 
-const superAdminOnly = (req: AuthenticatedRequest, res: Response): boolean => {
-  if (isSuperAdmin(req.user!.role ?? null)) return true;
-  sendError(res, "Only a Super Admin sets up the automatic follow-ups", 403);
-  return false;
-};
 const myName = async (req: AuthenticatedRequest) => String((await User.findById(req.user!.userId).select("name").lean<{ name?: string } | null>())?.name ?? "");
 
-/** GET /whatsapp/followups/settings — the steps, the teams switched on, the daily limit; and every team to pick from. Super Admin. */
-router.get("/followups/settings", async (req: AuthenticatedRequest, res, next) => {
+/*
+ * Each team's WhatsApp settings (2026-11-08, Teams → the team → WhatsApp): its follow-ups and its first reply. Changed
+ * by a Super Admin or the team's leader; seen by them and the team's people.
+ */
+async function teamRights(req: AuthenticatedRequest, teamId: string): Promise<{ read: boolean; edit: boolean }> {
+  if (isSuperAdmin(req.user!.role ?? null)) return { read: true, edit: true };
+  if (!isId(teamId)) return { read: false, edit: false };
+  const me = new Types.ObjectId(req.user!.userId);
+  const t = await Team.findById(teamId).select("leaders members").lean<{ leaders?: Types.ObjectId[]; members?: Types.ObjectId[] } | null>();
+  const leads = !!t?.leaders?.some((x) => String(x) === String(me));
+  return { read: leads || !!t?.members?.some((x) => String(x) === String(me)), edit: leads };
+}
+
+/** A team's settings as the page shows them: each file with a link to play it, the team, whether you may change them. */
+async function teamWaView(req: AuthenticatedRequest, teamId: string, canEdit: boolean) {
+  const team = await Team.findById(teamId).select("name").lean<{ name?: string } | null>();
+  if (!team) return null;
+  const s = (await teamWa(teamId, true))!;
+  const withUrl = <T extends { file: { file: string } | null }>(x: T) => (x.file ? { ...x, file: { ...x.file, url: followupFileUrl(x.file.file, req.user!.userId) } } : x);
+  return { ...s, team: { id: teamId, name: team.name ?? "" }, canEdit, steps: s.steps.map(withUrl), firstReply: { ...s.firstReply, items: s.firstReply.items.map(withUrl) } };
+}
+
+/** GET /whatsapp/followups/team/:teamId — the team's follow-ups and first reply (files with links to play them), and whether you may change them. */
+router.get("/followups/team/:teamId", async (req: AuthenticatedRequest, res, next) => {
   try {
-    if (!superAdminOnly(req, res)) return;
-    const teams = await Team.find({ status: "active" }).select("name").sort({ name: 1 }).lean<{ _id: Types.ObjectId; name?: string }[]>();
-    const s = await followupSettings(true);
-    // Each file with a link to look at or listen to it here.
-    const withUrl = <T extends { file: { file: string } | null }>(x: T) => (x.file ? { ...x, file: { ...x.file, url: followupFileUrl(x.file.file, req.user!.userId) } } : x);
-    sendSuccess(res, "Follow-ups", {
-      ...s, steps: s.steps.map(withUrl), firstReply: { ...s.firstReply, items: s.firstReply.items.map(withUrl) },
-      // Each team's own messages (2026-11-03), with their files' links.
-      teamSets: s.teamSets.map((t) => ({ ...t, steps: t.steps.map(withUrl), firstReply: { ...t.firstReply, items: t.firstReply.items.map(withUrl) } })),
-      allTeams: teams.map((t) => ({ id: String(t._id), name: t.name ?? "" })),
-    });
+    const teamId = str(req.params.teamId, 40);
+    const rights = await teamRights(req, teamId);
+    if (!rights.read) { sendError(res, "Only the team's people, its leader and a Super Admin see its WhatsApp settings", 403); return; }
+    const view = await teamWaView(req, teamId, rights.edit);
+    if (!view) { sendError(res, "Team not found", 404); return; }
+    sendSuccess(res, "WhatsApp settings", view);
   } catch (err) { next(err); }
 });
 
 /**
- * PUT /whatsapp/followups/settings { enabled, teams, dailyLimit, steps: [{ waitMinutes, text, file? }],
- *   firstReply?: { enabled, items: [{ text, file?, voice? }] } } — Super Admin.
- */
-router.put("/followups/settings", async (req: AuthenticatedRequest, res, next) => {
-  try {
-    if (!superAdminOnly(req, res)) return;
-    sendSuccess(res, "Saved", await saveFollowupSettings((req.body ?? {}) as Record<string, unknown>, await myName(req)));
-  } catch (err) {
-    if (err instanceof FollowupError) { sendError(res, err.message, err.statusCode); return; }
-    next(err);
-  }
-});
-
-/**
- * PUT /whatsapp/followups/team/:teamId { steps, firstReply: { enabled, items } } — a team's own messages (2026-11-03);
- * DELETE — back to the Default. Super Admin.
+ * PUT /whatsapp/followups/team/:teamId { enabled, dailyLimit, steps: [{ waitMinutes, text, file? }],
+ *   firstReply: { enabled, items: [{ text, file?, voice? }] } } — the team's leader or a Super Admin.
  */
 router.put("/followups/team/:teamId", async (req: AuthenticatedRequest, res, next) => {
   try {
-    if (!superAdminOnly(req, res)) return;
-    await saveTeamMessages(str(req.params.teamId, 40), (req.body ?? {}) as Record<string, unknown>, await myName(req));
-    sendSuccess(res, "Saved — this team's own messages", { teamId: str(req.params.teamId, 40) });
-  } catch (err) {
-    if (err instanceof FollowupError) { sendError(res, err.message, err.statusCode); return; }
-    next(err);
-  }
-});
-router.delete("/followups/team/:teamId", async (req: AuthenticatedRequest, res, next) => {
-  try {
-    if (!superAdminOnly(req, res)) return;
-    await saveTeamMessages(str(req.params.teamId, 40), null, await myName(req));
-    sendSuccess(res, "This team uses the Default messages again", { teamId: str(req.params.teamId, 40) });
+    const teamId = str(req.params.teamId, 40);
+    if (!(await teamRights(req, teamId)).edit) { sendError(res, "Only the team's leader or a Super Admin changes its WhatsApp settings", 403); return; }
+    const saved = await saveTeamWa(teamId, (req.body ?? {}) as Record<string, unknown>, await myName(req));
+    sendSuccess(res, saved.enabled ? "Saved — follow-ups are on for this team" : "Saved — follow-ups are off for this team", await teamWaView(req, teamId, true));
   } catch (err) {
     if (err instanceof FollowupError) { sendError(res, err.message, err.statusCode); return; }
     next(err);
@@ -729,10 +717,12 @@ const mimeOfUpload = (mime: string, name: string) => {
   if (m === "audio/opus" || (/\.(opus|ogg)$/i.test(name) && (!m || m === "application/octet-stream"))) return "audio/ogg";
   return m;
 };
-/** POST /whatsapp/followups/file (form: file) — a photo, video, audio or PDF for a step, up to 25 MB; kept once, sent to each. Super Admin. */
+/** POST /whatsapp/followups/file (form: file) — a photo, video, audio or PDF for a step, up to 25 MB; kept once, sent to each. A Super Admin or a team leader. */
 router.post("/followups/file", upload.single("file"), async (req: AuthenticatedRequest, res, next) => {
   try {
-    if (!superAdminOnly(req, res)) return;
+    if (!isSuperAdmin(req.user!.role ?? null) && !(await Team.exists({ leaders: new Types.ObjectId(req.user!.userId) }))) {
+      sendError(res, "Only a team leader or a Super Admin adds files to the WhatsApp messages", 403); return;
+    }
     const file = (req as AuthenticatedRequest & { file?: Express.Multer.File }).file;
     if (!file) { sendError(res, "file is required", 400); return; }
     // An "AUDIO-….m4a.mp4" (sound only) is audio, whatever the browser called it — it goes as audio, not a video.
@@ -752,15 +742,16 @@ router.post("/followups/file", upload.single("file"), async (req: AuthenticatedR
  */
 router.get("/followups/summary", checkPermission("whatsapp", "view"), async (req: AuthenticatedRequest, res, next) => {
   try {
-    const all = await followupSettings();
-    // Their team's messages (its own, else the Default — 2026-11-03).
-    const st = { ...all, ...(await messagesOfPerson(all, req.user!.userId)) };
+    // Their team's settings (2026-11-08); in no team: nothing automatic.
+    const st = (await teamWaOfPerson(req.user!.userId)) ?? { team: "", enabled: false, dailyLimit: 0, steps: [], firstReply: { enabled: false, startedAt: null, items: [] } };
     const me = new Types.ObjectId(req.user!.userId);
-    const mine = await Team.find({ status: "active", $or: [{ members: me }, { leaders: me }] }).select("name").lean<{ _id: Types.ObjectId; name?: string }[]>();
+    const mine = await Team.find({ status: "active", $or: [{ members: me }, { leaders: me }] }).select("name leaders").lean<{ _id: Types.ObjectId; name?: string; leaders?: Types.ObjectId[] }[]>();
+    const all = await allTeamWa();
     sendSuccess(res, "Follow-ups", {
       enabled: st.enabled,
-      canEdit: isSuperAdmin(req.user!.role ?? null),
-      myTeams: mine.map((t) => ({ name: t.name ?? "", on: st.teams.includes(String(t._id)) })),
+      teamId: st.team || null,
+      canEdit: isSuperAdmin(req.user!.role ?? null) || mine.some((t) => String(t._id) === st.team && t.leaders?.some((l) => String(l) === String(me))),
+      myTeams: mine.map((t) => ({ id: String(t._id), name: t.name ?? "", on: !!all.get(String(t._id))?.enabled })),
       dailyLimit: st.dailyLimit,
       steps: st.steps.map((x) => ({ waitMinutes: x.waitMinutes, text: x.text, fileName: x.file?.name ?? "" })),
       firstReply: { enabled: st.firstReply.enabled, items: st.firstReply.items.map((i) => ({ text: i.text, fileName: i.file?.name ?? "", voice: i.voice })) },

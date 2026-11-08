@@ -135,6 +135,7 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { useTeamSocket } from "@/hooks/useTeamSocket";
 import { cn, formatDate, getInitials } from "@/lib/utils";
 import { TeamDialog } from "@/components/teams/TeamDialog";
+import { TeamWhatsAppTab } from "@/components/teams/TeamWhatsAppTab";
 import TeamRemindersTab from "@/components/teams/TeamRemindersTab";
 import { TeamMemberKanban } from "@/components/teams/TeamMemberKanban";
 import { TeamSettingsTab } from "@/components/teams/TeamSettingsTab";
@@ -206,7 +207,7 @@ interface TeamLog {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-type TabId = "dashboard" | "members" | "leads" | "kanban" | "batch" | "dailysplit" | "logs" | "updates" | "revenue" | "reminders" | "report" | "settings";
+type TabId = "dashboard" | "members" | "leads" | "kanban" | "batch" | "dailysplit" | "logs" | "updates" | "revenue" | "reminders" | "report" | "whatsapp" | "settings";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "dashboard",  label: "Dashboard"   },
@@ -220,6 +221,8 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "report",     label: "Report"     },
   { id: "updates",    label: "Updates"    },
   { id: "logs",       label: "Logs"       },
+  // The team's WhatsApp follow-ups and first reply (2026-11-08) — its people see them, its leader changes them.
+  { id: "whatsapp",   label: "WhatsApp"   },
   { id: "settings",   label: "Settings"   },
 ];
 
@@ -3565,7 +3568,7 @@ function TeamDetailPageContent() {
   const { user, hasPermission } = useAuthStore();
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     const t = searchParams.get("tab") as TabId | null;
-    const valid: TabId[] = ["dashboard", "members", "leads", "kanban", "batch", "dailysplit", "logs", "updates", "revenue", "reminders", "report", "settings"];
+    const valid: TabId[] = ["dashboard", "members", "leads", "kanban", "batch", "dailysplit", "logs", "updates", "revenue", "reminders", "report", "whatsapp", "settings"];
     return t && valid.includes(t) ? t : "dashboard";
   });
 
@@ -4039,6 +4042,18 @@ function TeamDetailPageContent() {
               transition={{ duration: 0.2 }}
             >
               <LogsTab teamId={teamId} />
+            </motion.div>
+          )}
+
+          {activeTab === "whatsapp" && (
+            <motion.div
+              key="whatsapp"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <TeamWhatsAppTab teamId={teamId} />
             </motion.div>
           )}
 

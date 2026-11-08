@@ -55,15 +55,12 @@ export interface WAFollowup {
 /** `url`: to look at or listen to it (Settings only, a short-lived link). */
 export interface WAFollowupStep { waitMinutes: number; text: string; file: { file: string; name: string; mime: string; size: number; url?: string } | null }
 export interface WAFirstReplyItem { text: string; file: WAFollowupStep["file"]; voice: boolean }
-export interface WAFollowupSettings {
-  enabled: boolean; startedAt: string | null; teams: string[]; dailyLimit: number; steps: WAFollowupStep[];
-  firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[] };
-  updatedByName: string; updatedAt: string | null; allTeams: { id: string; name: string }[];
-  /** Teams with their own messages (2026-11-03); any other team uses the ones above (the Default). */
-  teamSets: WATeamMessages[];
-}
-export interface WATeamMessages {
-  team: string; steps: WAFollowupStep[];
+/** A team's WhatsApp settings (2026-11-08, Teams → the team → WhatsApp): its follow-ups and its first reply. */
+export interface WATeamSettings {
+  team: { id: string; name: string }; canEdit: boolean;
+  /** False: never set — everything off, the steps shown are the suggested ones. */
+  saved: boolean;
+  enabled: boolean; startedAt: string | null; dailyLimit: number; steps: WAFollowupStep[];
   firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[] };
   updatedByName: string; updatedAt: string | null;
 }
@@ -256,31 +253,21 @@ export function useWhatsAppChatTools() {
 
 /* ── Automatic follow-ups ── */
 
-/** The Super Admin's settings — only asked for when `enabled` (anyone else is refused). */
-export function useWhatsAppFollowupSettings(enabled: boolean) {
+/** A team's WhatsApp settings — for its people, its leader and a Super Admin (`canEdit`: its leader or a Super Admin). */
+export function useTeamWhatsApp(teamId: string) {
   return useQuery({
-    queryKey: ["whatsapp", "followup-settings"],
-    queryFn: async () => data<WAFollowupSettings>(await api.get("/whatsapp/followups/settings")),
-    enabled,
+    queryKey: ["whatsapp", "team-settings", teamId],
+    queryFn: async () => data<WATeamSettings>(await api.get(`/whatsapp/followups/team/${teamId}`)),
+    enabled: !!teamId,
     retry: false,
   });
 }
 
-export function useSaveWhatsAppFollowupSettings() {
+export function useSaveTeamWhatsApp() {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: async (v: Pick<WAFollowupSettings, "enabled" | "teams" | "dailyLimit" | "steps"> & { firstReply?: { enabled: boolean; items: WAFirstReplyItem[] } }) => data<WAFollowupSettings>(await api.put("/whatsapp/followups/settings", v)),
-    onSuccess: refresh,
-  });
-}
-
-/** A team's own messages (its steps, its first reply with its own switch) — or, with `reset`, back to the Default. */
-export function useSaveTeamMessages() {
-  const refresh = useRefresh();
-  return useMutation({
-    mutationFn: async (v: { team: string; reset?: boolean; steps?: WAFollowupStep[]; firstReply?: { enabled: boolean; items: WAFirstReplyItem[] } }) =>
-      v.reset ? data(await api.delete(`/whatsapp/followups/team/${v.team}`))
-        : data(await api.put(`/whatsapp/followups/team/${v.team}`, { steps: v.steps, firstReply: v.firstReply })),
+    mutationFn: async (v: { teamId: string; enabled: boolean; dailyLimit: number; steps: WAFollowupStep[]; firstReply: { enabled: boolean; items: WAFirstReplyItem[] } }) =>
+      data<WATeamSettings>(await api.put(`/whatsapp/followups/team/${v.teamId}`, { enabled: v.enabled, dailyLimit: v.dailyLimit, steps: v.steps, firstReply: v.firstReply })),
     onSuccess: refresh,
   });
 }
@@ -307,7 +294,8 @@ export function useRecentFollowups(enabled = true) {
 
 /** For anyone with WhatsApp: whether follow-ups are on (for their teams), the steps; a Super Admin may edit. */
 export interface WAFollowupSummary {
-  enabled: boolean; canEdit: boolean; myTeams: { name: string; on: boolean }[]; dailyLimit: number;
+  /** Their team's (2026-11-08): `teamId` its settings' team, `canEdit` its leader or a Super Admin. */
+  enabled: boolean; canEdit: boolean; teamId: string | null; myTeams: { id: string; name: string; on: boolean }[]; dailyLimit: number;
   steps: { waitMinutes: number; text: string; fileName: string }[];
   firstReply?: { enabled: boolean; items: { text: string; fileName: string; voice: boolean }[] };
 }
