@@ -6,7 +6,7 @@ import { Team } from "../../models/Team.js";
 import { User } from "../../models/User.js";
 import { WhatsAppLink, WhatsAppMessage } from "../../models/WhatsAppMessage.js";
 import { type IFirstReplyItem, type IFollowupStep, type IWhatsAppFollowupSettings } from "../../models/WhatsAppFollowupSettings.js";
-import { WhatsAppTeamSettings } from "../../models/WhatsAppTeamSettings.js";
+import { WhatsAppTeamSettings, type ISavedGroup } from "../../models/WhatsAppTeamSettings.js";
 import { teamsOf } from "../../models/leadTeamOnAssign.js";
 import { getAppSettings, isWithinWorkingHours } from "../settingsService.js";
 import { isStudentKey, studentKeys } from "./chatExtras.js";
@@ -65,13 +65,17 @@ export type FirstReply = IWhatsAppFollowupSettings["firstReply"];
 /** A team's WhatsApp settings (models/WhatsAppTeamSettings.ts): its follow-ups and its first reply. */
 export type TeamWa = {
   team: string; enabled: boolean; startedAt: Date | null; dailyLimit: number; steps: IFollowupStep[]; firstReply: FirstReply;
+  /** Its saved messages, in groups (2026-11-08) — sent by hand from a chat. */
+  savedGroups: SavedGroup[];
   updatedByName: string; updatedAt: Date | null;
   /** False: never set — everything off, the steps shown are the suggested ones. */
   saved: boolean;
 };
+export type SavedItem = { id: string; title: string; text: string; file: { file: string; name: string; mime: string; size: number } | null; voice: boolean };
+export type SavedGroup = { id: string; name: string; items: SavedItem[] };
 const NOTHING = (team: string): TeamWa => ({
   team, enabled: false, startedAt: null, dailyLimit: DEFAULT_DAILY_LIMIT, steps: DEFAULT_STEPS,
-  firstReply: { enabled: false, startedAt: null, items: [] }, updatedByName: "", updatedAt: null, saved: false,
+  firstReply: { enabled: false, startedAt: null, items: [] }, savedGroups: [], updatedByName: "", updatedAt: null, saved: false,
 });
 
 /**
@@ -105,6 +109,10 @@ export async function allTeamWa(fresh = false): Promise<Map<string, TeamWa>> {
       startedAt: d.firstReply?.startedAt ?? null,
       items: (d.firstReply?.items ?? []).map((i) => ({ text: i.text ?? "", file: realFile(i.file ?? null), voice: i.voice === true })),
     },
+    savedGroups: (d.savedGroups ?? []).map((g) => ({
+      id: String(g._id), name: g.name,
+      items: (g.items ?? []).map((i) => ({ id: String(i._id), title: i.title ?? "", text: i.text ?? "", file: realFile(i.file ?? null), voice: i.voice === true })),
+    })),
     updatedByName: d.updatedByName ?? "",
     updatedAt: d.updatedAt ?? null,
     saved: true,
@@ -167,6 +175,37 @@ function parseFirstReply(fr: Record<string, unknown>, before: FirstReply): First
 }
 
 /**
+ * The saved message groups, checked (2026-11-08): up to 20 groups of up to 30 messages, each group named, each message
+ * words or a file (a title, else its first words). An id the screen sent back is kept, so a message keeps its id.
+ */
+function parseSavedGroups(input: unknown): ISavedGroup[] {
+  const raw = Array.isArray(input) ? input : [];
+  if (raw.length > 20) throw new FollowupError("At most 20 groups of saved messages");
+  const idOr = (v: unknown) => (typeof v === "string" && /^[a-f0-9]{24}$/.test(v) ? new Types.ObjectId(v) : new Types.ObjectId());
+  return raw.map((g, gi) => {
+    const r = (g ?? {}) as Record<string, unknown>;
+    const name = String(r.name ?? "").trim().slice(0, 60);
+    if (!name) throw new FollowupError(`Saved messages group ${gi + 1}: give it a name`);
+    const items = Array.isArray(r.items) ? r.items : [];
+    if (items.length > 30) throw new FollowupError(`${name}: at most 30 messages`);
+    return {
+      _id: idOr(r.id), name,
+      items: items.map((x, i) => {
+        const it = (x ?? {}) as Record<string, unknown>;
+        const f = it.file as Record<string, unknown> | null | undefined;
+        const file = f && typeof f.file === "string" && /^followups\/[\w-]+\.\w{1,10}$/.test(f.file)
+          ? { file: f.file, name: String(f.name ?? "").slice(0, 200), mime: String(f.mime ?? "").slice(0, 100), size: Number(f.size) || 0 }
+          : null;
+        const text = String(it.text ?? "").trim().slice(0, 1000);
+        if (!text && !file) throw new FollowupError(`${name}, message ${i + 1}: words or a file`);
+        const title = (String(it.title ?? "").trim() || text.split("\n")[0]!.slice(0, 40) || file?.name || `Message ${i + 1}`).slice(0, 80);
+        return { _id: idOr(it.id), title, text, file, voice: !!file && /^audio\/(ogg|webm)/.test(file.mime) && it.voice !== false };
+      }),
+    };
+  });
+}
+
+/**
  * A team's settings, saved (by a Super Admin or its leader — the route decides): follow-ups on or off (switched on
  * now, only chats written in from now on), 1–8 steps, a limit of 1–300 a day, and the first reply.
  */
@@ -179,9 +218,11 @@ export async function saveTeamWa(teamId: string, input: Record<string, unknown>,
   const enabled = input.enabled === true;
   const fr = (input.firstReply && typeof input.firstReply === "object" ? input.firstReply : { enabled: false, items: [] }) as Record<string, unknown>;
   const firstReply = parseFirstReply(fr, before.firstReply);
+  // The saved messages: as sent, or as they were when the screen sends none.
+  const savedGroups = Array.isArray(input.savedGroups) ? parseSavedGroups(input.savedGroups) : parseSavedGroups(before.savedGroups);
   await WhatsAppTeamSettings.updateOne({ team: new Types.ObjectId(teamId) }, {
     $set: {
-      team: new Types.ObjectId(teamId), enabled, steps, dailyLimit: limit, firstReply, updatedByName: byName,
+      team: new Types.ObjectId(teamId), enabled, steps, dailyLimit: limit, firstReply, savedGroups, updatedByName: byName,
       startedAt: enabled ? (before.enabled && before.startedAt ? before.startedAt : new Date()) : null,
     },
   }, { upsert: true });
@@ -518,8 +559,10 @@ export function resetFollowupPacingForCheck(): void {
 
 /** One of the Super Admin's saved messages, as the chat's picker lists it. */
 export type SavedMessage = {
-  id: string;                                   // "first_reply:1", "followup:3"
-  kind: "first_reply" | "followup";
+  id: string;                                   // "first_reply:1", "followup:3", "saved:<id>" (a team's saved message)
+  kind: "first_reply" | "followup" | "library";
+  /** A team's saved message: its group. */
+  group?: { id: string; name: string };
   step: number;
   label: string;                                // "First reply · part 1 of 2", "Follow-up 3 of 5 · after 3 days"
   text: string;                                 // as written, {name}/{salesperson} unfilled
@@ -542,6 +585,11 @@ export async function listSavedMessages(userId?: string): Promise<SavedMessage[]
   if (!s) return [];
   const first = s.firstReply?.items ?? [];
   return [
+    // The team's saved messages, group by group (2026-11-08).
+    ...s.savedGroups.flatMap((g) => g.items.map((it, i) => ({
+      id: `saved:${it.id}`, kind: "library" as const, step: i + 1, group: { id: g.id, name: g.name },
+      label: it.title, text: it.text, file: it.file ? { name: it.file.name, mime: it.file.mime } : null, voice: it.voice,
+    }))),
     ...first.map((it, i) => ({
       id: `first_reply:${i + 1}`, kind: "first_reply" as const, step: i + 1,
       label: first.length > 1 ? `First reply · part ${i + 1} of ${first.length}` : "First reply",
@@ -575,7 +623,7 @@ export async function sendSavedMessage(userId: string, chat: string, id: string,
   const theirName = lead?.name || (key ? (await contactNames(userId, [key])).get(key) : "") || "";
 
   /** One part; how many messages it took (a voice note with words is two), 0 when it had nothing left to send. */
-  const one = async (item: { text?: string; file?: { file: string; name: string; mime: string } | null; voice?: boolean }, saved: { kind: "first_reply" | "followup"; step: number }) => {
+  const one = async (item: { text?: string; file?: { file: string; name: string; mime: string } | null; voice?: boolean }, saved: { kind: "first_reply" | "followup" | "library"; step: number; title?: string }) => {
     const text = fillText(item.text ?? "", theirName, owner?.name);
     const voice = !!item.voice;
     if (item.file && existsSync(mediaPath(item.file.file))) {
@@ -590,6 +638,20 @@ export async function sendSavedMessage(userId: string, chat: string, id: string,
     await sendText(userId, chat, text, { saved, by });
     return 1;
   };
+
+  // A team's saved message, or a whole group of them in order (2026-11-08).
+  if (kind === "saved" || kind === "group") {
+    const group = kind === "group" ? s.savedGroups.find((g) => g.id === stepRaw) : s.savedGroups.find((g) => g.items.some((it) => it.id === stepRaw));
+    const items = kind === "group" ? group?.items ?? [] : (group?.items ?? []).filter((it) => it.id === stepRaw);
+    if (!group || !items.length) throw new WhatsAppError("That saved message is not there any more — reopen the list", 404);
+    let parts = 0;
+    for (const it of items) {
+      if (parts > 0) await sleep(gapMs());
+      parts += await one(it, { kind: "library", step: group.items.indexOf(it) + 1, title: it.title });
+    }
+    if (!parts) throw new WhatsAppError("That saved message's file is no longer kept here", 410);
+    return { parts };
+  }
 
   if (kind === "first_reply" && stepRaw === "all") {
     const items = s.firstReply?.items ?? [];

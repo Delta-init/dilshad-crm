@@ -142,14 +142,14 @@ router.get("/followups/file-view", async (req, res, next) => {
     if (want.length !== got.length || !timingSafeEqual(want, got)) { sendError(res, "Not found", 404); return; }
     const path = mediaPath(f);
     if (!existsSync(path)) { sendError(res, "Not found", 404); return; }
-    const meta = [...(await allTeamWa()).values()].flatMap((t) => [...t.steps.map((x) => x.file), ...t.firstReply.items.map((x) => x.file)]).find((x) => x?.file === f);
+    const meta = [...(await allTeamWa()).values()].flatMap((t) => [...t.steps.map((x) => x.file), ...t.firstReply.items.map((x) => x.file), ...t.savedGroups.flatMap((g) => g.items.map((x) => x.file))]).find((x) => x?.file === f);
     serveFile(req, res, next, path, meta?.mime || "application/octet-stream", meta?.name || f.split("/").pop() || "file");
   } catch (err) { next(err); }
 });
 
 type MessageDoc = { _id: Types.ObjectId; direction: string; body?: string; at: Date; senderName?: string; sentByName?: string;
   media?: { type: string; mime: string; fileName: string; size: number; file: string } | null; auto?: { kind?: string; step: number; of: number } | null;
-  forwarded?: boolean; saved?: { kind?: string; step: number } | null };
+  forwarded?: boolean; saved?: { kind?: string; step: number; title?: string } | null };
 const shape = (m: MessageDoc, viewerId: string) => ({
   id: String(m._id),
   direction: m.direction,
@@ -162,7 +162,7 @@ const shape = (m: MessageDoc, viewerId: string) => ({
   auto: m.auto ? { kind: m.auto.kind ?? "followup", step: m.auto.step, of: m.auto.of } : null,
   // By a person: forwarded from another chat, or one of the saved messages (which).
   forwarded: m.forwarded === true,
-  saved: m.saved ? { kind: m.saved.kind ?? "followup", step: m.saved.step } : null,
+  saved: m.saved ? { kind: m.saved.kind ?? "followup", step: m.saved.step, title: m.saved.title ?? "" } : null,
 });
 
 async function leadsBrief(ids: unknown[]) {
@@ -435,7 +435,7 @@ router.get("/saved-messages", checkPermission("whatsapp", "create"), async (req:
 router.post("/send-saved", checkPermission("whatsapp", "create"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const chat = str(req.body?.chat, 120), id = str(req.body?.id, 40);
-    if (!chat || !/^(first_reply:(\d{1,2}|all)|followup:\d{1,2})$/.test(id)) { sendError(res, "chat and a saved message are required", 400); return; }
+    if (!chat || !/^(first_reply:(\d{1,2}|all)|followup:\d{1,2}|(saved|group):[a-f0-9]{24})$/.test(id)) { sendError(res, "chat and a saved message are required", 400); return; }
     const phone = await phoneOf(req);
     const result = await sendSavedMessage(phone, chat, id, undefined, await senderOn(req, phone));
     sendSuccess(res, "Sent", { chat, ...result });
@@ -679,7 +679,10 @@ async function teamWaView(req: AuthenticatedRequest, teamId: string, canEdit: bo
   if (!team) return null;
   const s = (await teamWa(teamId, true))!;
   const withUrl = <T extends { file: { file: string } | null }>(x: T) => (x.file ? { ...x, file: { ...x.file, url: followupFileUrl(x.file.file, req.user!.userId) } } : x);
-  return { ...s, team: { id: teamId, name: team.name ?? "" }, canEdit, steps: s.steps.map(withUrl), firstReply: { ...s.firstReply, items: s.firstReply.items.map(withUrl) } };
+  return {
+    ...s, team: { id: teamId, name: team.name ?? "" }, canEdit, steps: s.steps.map(withUrl), firstReply: { ...s.firstReply, items: s.firstReply.items.map(withUrl) },
+    savedGroups: s.savedGroups.map((g) => ({ ...g, items: g.items.map(withUrl) })),
+  };
 }
 
 /** GET /whatsapp/followups/team/:teamId — the team's follow-ups and first reply (files with links to play them), and whether you may change them. */

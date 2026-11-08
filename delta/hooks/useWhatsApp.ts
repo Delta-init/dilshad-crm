@@ -17,8 +17,8 @@ export interface WAMessage {
   auto?: { kind?: "followup" | "first_reply"; step: number; of: number } | null;
   /** Sent by a person: forwarded from another chat (2026-10-28). */
   forwarded?: boolean;
-  /** Sent by a person from the saved messages — which one. */
-  saved?: { kind?: "followup" | "first_reply"; step: number } | null;
+  /** Sent by a person from the saved messages — which one (a team's saved message: "library", its title). */
+  saved?: { kind?: "followup" | "first_reply" | "library"; step: number; title?: string } | null;
   /** Only on this screen, before the server has it: on its way, or it didn't go (and why). */
   pending?: "sending" | "failed";
   failedReason?: string;
@@ -62,8 +62,12 @@ export interface WATeamSettings {
   saved: boolean;
   enabled: boolean; startedAt: string | null; dailyLimit: number; steps: WAFollowupStep[];
   firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[] };
+  /** The team's saved messages, in groups — sent by hand from a chat. */
+  savedGroups: WASavedGroup[];
   updatedByName: string; updatedAt: string | null;
 }
+export interface WASavedItem { id?: string; title: string; text: string; file: WAFollowupStep["file"]; voice: boolean }
+export interface WASavedGroup { id?: string; name: string; items: WASavedItem[] }
 export interface WARecentFollowup {
   id: string; at: string; body: string; step: number; of: number; ownerId: string; ownerName: string; chat: string; phone: string; lead: WALead | null;
 }
@@ -203,8 +207,10 @@ export function useWhatsAppForward() {
 
 /** The Super Admin's first reply (its parts) and follow-up steps, to pick one and send it now. */
 export interface WASavedMessage {
-  id: string; kind: "first_reply" | "followup"; step: number; label: string; text: string;
+  id: string; kind: "first_reply" | "followup" | "library"; step: number; label: string; text: string;
   file: { name: string; mime: string } | null; voice: boolean;
+  /** A team's saved message: its group (2026-11-08). */
+  group?: { id: string; name: string };
 }
 export function useWhatsAppSavedMessages(enabled: boolean) {
   return useQuery({
@@ -266,8 +272,8 @@ export function useTeamWhatsApp(teamId: string) {
 export function useSaveTeamWhatsApp() {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: async (v: { teamId: string; enabled: boolean; dailyLimit: number; steps: WAFollowupStep[]; firstReply: { enabled: boolean; items: WAFirstReplyItem[] } }) =>
-      data<WATeamSettings>(await api.put(`/whatsapp/followups/team/${v.teamId}`, { enabled: v.enabled, dailyLimit: v.dailyLimit, steps: v.steps, firstReply: v.firstReply })),
+    mutationFn: async (v: { teamId: string; enabled: boolean; dailyLimit: number; steps: WAFollowupStep[]; firstReply: { enabled: boolean; items: WAFirstReplyItem[] }; savedGroups: WASavedGroup[] }) =>
+      data<WATeamSettings>(await api.put(`/whatsapp/followups/team/${v.teamId}`, { enabled: v.enabled, dailyLimit: v.dailyLimit, steps: v.steps, firstReply: v.firstReply, savedGroups: v.savedGroups })),
     onSuccess: refresh,
   });
 }

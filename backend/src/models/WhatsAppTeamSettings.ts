@@ -9,6 +9,9 @@ import type { IFirstReplyItem, IFollowupStep } from "./WhatsAppFollowupSettings.
  *
  * The one-for-everyone document before it (whatsapp_followup_settings) was moved here once, to AI Academy.
  */
+export interface ISavedItem { _id: Types.ObjectId; title: string; text: string; file: { file: string; name: string; mime: string; size: number } | null; voice: boolean }
+export interface ISavedGroup { _id: Types.ObjectId; name: string; items: ISavedItem[] }
+
 export interface IWhatsAppTeamSettings {
   _id: Types.ObjectId;
   team: Types.ObjectId;
@@ -18,6 +21,11 @@ export interface IWhatsAppTeamSettings {
   dailyLimit: number;
   steps: IFollowupStep[];
   firstReply: { enabled: boolean; startedAt: Date | null; items: IFirstReplyItem[] };
+  /**
+   * The team's saved messages, in groups (2026-11-08: "message can save also here … group as like"): anyone in the team
+   * sends one — or a whole group, in order — from a chat at any time. Each a title, words and/or a file.
+   */
+  savedGroups: ISavedGroup[];
   updatedByName: string;
   updatedAt: Date;
 }
@@ -54,6 +62,21 @@ const settingsSchema = new Schema<IWhatsAppTeamSettings>(
         }, { _id: false })],
         default: [],
       },
+    },
+    savedGroups: {
+      type: [new Schema<ISavedGroup>({
+        name: { type: String, required: true, maxlength: 60 },
+        items: {
+          type: [new Schema<ISavedItem>({
+            title: { type: String, default: "", maxlength: 80 },
+            text: { type: String, default: "", maxlength: 1000 },
+            file: { type: fileSchema, default: null },
+            voice: { type: Boolean, default: false },
+          })],
+          default: [],
+        },
+      })],
+      default: [],
     },
     updatedByName: { type: String, default: "" },
   },

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, Lock, MessageCircle, Repeat, Save, Sparkles, Undo2 } from "lucide-react";
+import { BookmarkCheck, Loader2, Lock, MessageCircle, Repeat, Save, Sparkles, Undo2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,14 +11,15 @@ import { Switch } from "@/components/ui/switch";
 import { listItemVariants } from "@/lib/animations";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { errMsg, useSaveTeamWhatsApp, useTeamWhatsApp, type WAFirstReplyItem, type WAFollowupStep } from "@/hooks/useWhatsApp";
-import { FirstReplyEditor, StepsEditor } from "@/components/whatsapp/MessageEditors";
+import { errMsg, useSaveTeamWhatsApp, useTeamWhatsApp, type WAFirstReplyItem, type WAFollowupStep, type WASavedGroup } from "@/hooks/useWhatsApp";
+import { FirstReplyEditor, SavedGroupsEditor, StepsEditor } from "@/components/whatsapp/MessageEditors";
 
 /*
  * A team's WhatsApp (the owner, 2026-11-08: "by the team, on the team's page"): its automatic follow-ups — on or off,
  * how many a day from each person's WhatsApp, the steps — and its first reply. Its leader or a Super Admin changes
  * them; its people see them. Sent from each person's own linked WhatsApp: follow-ups to the team's leads, the first
- * reply to anyone writing to someone in the team for the first time.
+ * reply to anyone writing to someone in the team for the first time. And its saved messages, in groups (2026-11-08),
+ * sent by hand from any chat.
  */
 
 const fmtWhen = (iso: string | null) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
@@ -40,18 +41,19 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
   const [steps, setSteps] = useState<WAFollowupStep[]>([]);
   const [frOn, setFrOn] = useState(false);
   const [frItems, setFrItems] = useState<WAFirstReplyItem[]>([]);
+  const [groups, setGroups] = useState<WASavedGroup[]>([]);
   const load = () => {
     if (!data) return;
     setEnabled(data.enabled); setLimit(data.dailyLimit); setSteps(data.steps);
-    setFrOn(data.firstReply.enabled); setFrItems(data.firstReply.items);
+    setFrOn(data.firstReply.enabled); setFrItems(data.firstReply.items); setGroups(data.savedGroups ?? []);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [data]);
 
   // Changed since it was loaded: the save bar shows.
-  const dirty = useMemo(() => !!data && JSON.stringify({ enabled, limit, steps, frOn, frItems })
-    !== JSON.stringify({ enabled: data.enabled, limit: data.dailyLimit, steps: data.steps, frOn: data.firstReply.enabled, frItems: data.firstReply.items }),
-  [data, enabled, limit, steps, frOn, frItems]);
+  const dirty = useMemo(() => !!data && JSON.stringify({ enabled, limit, steps, frOn, frItems, groups })
+    !== JSON.stringify({ enabled: data.enabled, limit: data.dailyLimit, steps: data.steps, frOn: data.firstReply.enabled, frItems: data.firstReply.items, groups: data.savedGroups ?? [] }),
+  [data, enabled, limit, steps, frOn, frItems, groups]);
 
   if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (isError || !data) return <p className="py-16 text-center text-sm text-muted-foreground">{errMsg(error, "Couldn't load this team's WhatsApp settings")}</p>;
@@ -60,7 +62,8 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
   const submit = async () => {
     if (frOn && !frItems.length) { toast.error("Add what the first reply sends, or switch it off"); return; }
     try {
-      const r = await save.mutateAsync({ teamId, enabled, dailyLimit: limit, steps, firstReply: { enabled: frOn, items: frItems } });
+      if (groups.some((g) => !g.name.trim())) { toast.error("Give every saved-messages group a name"); return; }
+      const r = await save.mutateAsync({ teamId, enabled, dailyLimit: limit, steps, firstReply: { enabled: frOn, items: frItems }, savedGroups: groups });
       toast.success(`Saved — follow-ups ${r.enabled ? "on" : "off"}, first reply ${r.firstReply.enabled ? "on" : "off"} for ${data.team.name}`);
     } catch (e) { toast.error(errMsg(e, "Not saved")); }
   };
@@ -125,6 +128,18 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
         <motion.div variants={listItemVariants} initial="hidden" animate="visible">
           <FirstReplyEditor id={`wa-fr-${teamId}`} on={frOn} setOn={setFrOn} items={frItems} setItems={setFrItems}
             help={`When someone messages the WhatsApp of someone in ${data.team.name} for the first time ever, these go out a minute later, in order — unless someone answered them first.`} />
+        </motion.div>
+        {/* Saved messages, in groups */}
+        <motion.div variants={listItemVariants} initial="hidden" animate="visible">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base"><BookmarkCheck className="h-4 w-4 text-primary" />Saved messages</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Ready answers for the team, in groups. Anyone in {data.team.name} sends one — or a whole group, in order — from a chat&apos;s bookmark button, any time.
+              </p>
+            </CardHeader>
+            <CardContent><SavedGroupsEditor groups={groups} setGroups={setGroups} /></CardContent>
+          </Card>
         </motion.div>
       </fieldset>
 

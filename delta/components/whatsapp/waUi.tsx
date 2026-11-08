@@ -62,7 +62,7 @@ function sentLine(m: WAMessage, out: boolean): string {
   if (m.pending === "sending") return "Sending… · ";
   if (m.pending === "failed") return `Not sent — ${m.failedReason || "try again"} · `;
   if (m.auto) return m.auto.kind === "first_reply" ? `Auto first reply · ${m.auto.step} of ${m.auto.of} · ` : `Auto follow-up · step ${m.auto.step} of ${m.auto.of} · `;
-  const saved = m.saved ? (m.saved.kind === "first_reply" ? `First reply ${m.saved.step} (saved) · ` : `Follow-up ${m.saved.step} (saved) · `) : "";
+  const saved = m.saved ? (m.saved.kind === "library" ? `${m.saved.title || "Saved message"} (saved) · ` : m.saved.kind === "first_reply" ? `First reply ${m.saved.step} (saved) · ` : `Follow-up ${m.saved.step} (saved) · `) : "";
   return saved + (out && m.sentByName ? `${m.sentByName} · ` : "");
 }
 

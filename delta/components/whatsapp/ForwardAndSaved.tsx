@@ -127,9 +127,10 @@ function FileIcon({ m }: { m: WASavedMessage }) {
 }
 
 /**
- * The saved messages, grouped (the owner, 2026-10-28): the first reply — the whole of it at once, or one part — and
- * each follow-up step; picked, it is sent to this chat now with {name} filled in. A person's message: the automatic
- * follow-ups carry on as if it was typed.
+ * The saved messages, grouped (the owner, 2026-10-28): the team's own saved messages, group by group (2026-11-08 — one,
+ * or a whole group in order), the first reply — the whole of it at once, or one part — and each follow-up step; picked,
+ * it is sent to this chat now with {name} filled in. A person's message: the automatic follow-ups carry on as if it was
+ * typed. A search box finds one by its title or words.
  */
 export function SavedMessagesButton({ chat, disabled = false, onSent }: { chat: string; disabled?: boolean; onSent?: (chat: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -144,8 +145,20 @@ export function SavedMessagesButton({ chat, disabled = false, onSent }: { chat: 
       onSettled: () => setSending(""),
     });
   };
-  const first = (list ?? []).filter((m) => m.kind === "first_reply");
-  const steps = (list ?? []).filter((m) => m.kind === "followup");
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const matches = (m: WASavedMessage) => !needle || [m.label, m.text, m.group?.name, m.file?.name].some((v) => String(v ?? "").toLowerCase().includes(needle));
+  const all = (list ?? []).filter(matches);
+  const first = all.filter((m) => m.kind === "first_reply");
+  const steps = all.filter((m) => m.kind === "followup");
+  // The team's saved messages, by group, in their order.
+  const groups: { id: string; name: string; items: WASavedMessage[]; total: number }[] = [];
+  for (const m of (list ?? []).filter((x) => x.kind === "library")) {
+    let g = groups.find((x) => x.id === m.group!.id);
+    if (!g) { g = { id: m.group!.id, name: m.group!.name, items: [], total: 0 }; groups.push(g); }
+    g.total++;
+    if (matches(m)) g.items.push(m);
+  }
   const row = (m: WASavedMessage, label: string) => (
     <button key={m.id} type="button" onClick={() => pick(m.id, m.label)} disabled={!!sending}
       className="block w-full border-b py-2 pl-5 pr-3 text-left last:border-0 hover:bg-muted disabled:opacity-60">
@@ -168,14 +181,35 @@ export function SavedMessagesButton({ chat, disabled = false, onSent }: { chat: 
       </PopoverTrigger>
       <PopoverContent side="top" align="start" className="w-[22rem] max-w-[calc(100vw-2rem)] p-0">
         <p className="border-b px-3 py-2 text-xs font-semibold">Saved messages · sent now from your WhatsApp</p>
+        {(list?.length ?? 0) > 6 && (
+          <div className="relative border-b p-2">
+            <Search className="absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a saved message" className="h-8 pl-7 text-sm" />
+          </div>
+        )}
         <div className="max-h-96 overflow-y-auto">
+          {needle && !all.length && <p className="p-4 text-center text-sm text-muted-foreground">No saved message matches</p>}
+          {groups.filter((g) => g.items.length).map((g) => (
+            <div key={g.id}>
+              {heading(g.name)}
+              {/* The whole group, in order, a few seconds apart */}
+              {g.total > 1 && !needle && (
+                <button type="button" onClick={() => pick(`group:${g.id}`, `all of ${g.name}`)} disabled={!!sending}
+                  className="flex w-full items-center gap-2 border-b bg-emerald-50 px-3 py-2 text-left text-sm font-semibold hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/70">
+                  {sending === `group:${g.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />}
+                  <span className="flex-1">Send the whole group <span className="font-normal text-muted-foreground">· all {g.total}, in order</span></span>
+                </button>
+              )}
+              {g.items.map((m) => row(m, m.label))}
+            </div>
+          ))}
           {isLoading && <p className="p-4 text-center text-sm text-muted-foreground">Loading…</p>}
-          {!isLoading && !list?.length && <p className="p-4 text-center text-sm text-muted-foreground">No saved messages yet — a Super Admin sets them in WhatsApp follow-ups.</p>}
+          {!isLoading && !list?.length && <p className="p-4 text-center text-sm text-muted-foreground">No saved messages yet — your team&apos;s leader adds them on the team&apos;s WhatsApp tab.</p>}
           {first.length > 0 && (
             <>
               {heading("First reply")}
               {/* The whole of it, in order, a few seconds apart — as the automatic first reply goes */}
-              {first.length > 1 && (
+              {first.length > 1 && !needle && (
                 <button type="button" onClick={() => pick("first_reply:all", "the whole first reply")} disabled={!!sending}
                   className="flex w-full items-center gap-2 border-b bg-emerald-50 px-3 py-2.5 text-left text-sm font-semibold hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/70">
                   {sending === "first_reply:all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />}

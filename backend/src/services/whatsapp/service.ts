@@ -588,7 +588,7 @@ export type SendOpts = {
   auto?: { kind: "followup" | "first_reply"; step: number; of: number };
   /** By a person: Forward from another chat, or one of the saved messages picked — a person's message, not automatic. */
   forwarded?: boolean;
-  saved?: { kind: "followup" | "first_reply"; step: number };
+  saved?: { kind: "followup" | "first_reply" | "library"; step: number; title?: string };
   /** Who sent it, when not the WhatsApp's owner: someone it is shared with (sharing.ts) — named on the message. */
   by?: Owner;
 };

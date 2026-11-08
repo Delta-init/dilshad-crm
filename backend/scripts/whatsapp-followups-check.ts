@@ -21,6 +21,8 @@
  *   - Case 11: none to a student (marked) or a closed lead — no follow-up step, no first reply; others still get them.
  *   - Case 12: another team's own settings — its first reply on its own switch (follow-ups off), its follow-up steps
  *     for its leads once on (Titans keeps its own), its people's saved messages; switched off, nothing.
+ *   - Case 13: a team's saved messages in groups (2026-11-08) — set with its settings, checked, kept with their ids;
+ *     its people see them (not another team's); one sent, or a whole group in order, {name} filled, marked.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -554,6 +556,43 @@ try {
   check("its first reply off: none for Omar's WhatsApp", r.status === 200 && (await firsts().findOne({ key: "554000003" }))?.status === "off", j(await firsts().findOne({ key: "554000003" })));
   r = await call("GET", "/whatsapp/followups/summary", "Omar");
   check("Omar's summary: his team's settings, not his to change", r.body.data?.teamId === String(others) && r.body.data.canEdit === false && r.body.data.steps?.[0]?.text === "Others step 1 for {name}", j(r.body.data));
+
+  section("Case 13 — a team's saved messages, in groups");
+  const base13 = (await call("GET", `/whatsapp/followups/team/${titans}`, "Lina")).body.data;
+  const keep = { enabled: base13.enabled, dailyLimit: base13.dailyLimit, steps: base13.steps, firstReply: { enabled: base13.firstReply.enabled, items: base13.firstReply.items } };
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", { ...keep, savedGroups: [{ name: "  ", items: [] }] });
+  check("a group with no name: refused", r.status === 400 && /give it a name/.test(r.body.message ?? ""), j(r.body));
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", { ...keep, savedGroups: [{ name: "Fees", items: [{ title: "", text: "" }] }] });
+  check("a message with no words and no file: refused", r.status === 400 && /words or a file/.test(r.body.message ?? ""), j(r.body));
+  const groups = [
+    { name: "Fees & payment", items: [{ title: "Price", text: "Hi {name}, the course is AED 2,250." }, { text: "We take card, Tabby and bank transfer.\nAsk me anything." }] },
+    { name: "Location", items: [{ title: "Address", text: "We're at Business Bay, Dubai." }] },
+  ];
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", { ...keep, savedGroups: groups });
+  const g13 = r.body.data?.savedGroups ?? [];
+  check("Titans' leader saves two groups: names, ids, a title made from the first words when none", r.status === 200 && g13.length === 2 && g13[0].name === "Fees & payment"
+    && g13[0].items.length === 2 && /^[a-f0-9]{24}$/.test(g13[0].items[0].id) && g13[0].items[1].title === "We take card, Tabby and bank transfer.", j(g13));
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", { ...keep, savedGroups: g13.map((g: any) => ({ ...g, items: g.items.map((i: any) => ({ ...i, text: i.text + " " })) })) });
+  check("…saved again: each keeps its id", r.body.data?.savedGroups?.[0]?.items?.[0]?.id === g13[0].items[0].id, j(r.body.data?.savedGroups?.[0]?.items?.[0]));
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Lina", keep);
+  check("…a save that doesn't send them keeps them", (r.body.data?.savedGroups ?? []).length === 2, j(r.body.data?.savedGroups?.length));
+  r = await call("PUT", `/whatsapp/followups/team/${titans}`, "Sam", { ...keep, savedGroups: [] });
+  check("a member can't change them", r.status === 403);
+  const samList = (await call("GET", "/whatsapp/saved-messages", "Sam")).body.data ?? [];
+  const price = samList.find((m: any) => m.label === "Price");
+  check("Sam's saved messages: his team's groups first, each with its group", price?.kind === "library" && price.group?.name === "Fees & payment" && samList[0]?.kind === "library" && samList.filter((m: any) => m.kind === "library").length === 3, j(samList.slice(0, 4)));
+  const omarList = (await call("GET", "/whatsapp/saved-messages", "Omar")).body.data ?? [];
+  check("…not Omar's (another team)", !omarList.some((m: any) => m.kind === "library"), j(omarList.map((m: any) => m.label)));
+  link("Sam");
+  await lead("Gina Fees", "+971 55 500 0001", "Sam", titans);
+  r = await call("POST", "/whatsapp/send-saved", "Sam", { chat: "971555000001", id: price.id });
+  const sent13 = await db.collection("whatsapp_messages").findOne({ owner: P("Sam"), key: "555000001", direction: "out" }, { sort: { at: -1 } });
+  check("one sent: {name} filled, marked as the saved message by its title", r.status === 200 && textOf(outbox.Sam!.at(-1)) === "Hi Gina, the course is AED 2,250." && sent13?.saved?.kind === "library" && sent13.saved.title === "Price", j({ s: r.status, t: textOf(outbox.Sam!.at(-1)), m: sent13?.saved }));
+  const n13 = outbox.Sam!.length;
+  r = await call("POST", "/whatsapp/send-saved", "Sam", { chat: "971555000001", id: `group:${g13[0].id}` });
+  check("a whole group: its messages in order", r.status === 200 && r.body.data?.parts === 2 && outbox.Sam!.length === n13 + 2 && /^Hi Gina/.test(textOf(outbox.Sam![n13])) && /^We take card/.test(textOf(outbox.Sam![n13 + 1])), j({ p: r.body.data, t: outbox.Sam!.slice(n13).map(textOf) }));
+  r = await call("POST", "/whatsapp/send-saved", "Omar", { chat: "971555000001", id: price.id });
+  check("another team's saved message: not there for Omar", r.status === 404, j(r.body));
 } finally {
   server.close();
   await mongoose.disconnect();

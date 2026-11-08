@@ -31,8 +31,11 @@ export interface IWhatsAppMessage {
   auto?: { kind: "followup" | "first_reply"; step: number; of: number } | null;
   /** Sent by a person from another chat's message (Forward, 2026-10-28). */
   forwarded?: boolean;
-  /** Sent by a person from the saved messages — which one (the first reply's part, or a follow-up step). Not automatic. */
-  saved?: { kind: "followup" | "first_reply"; step: number } | null;
+  /**
+   * Sent by a person from the saved messages — which one (the first reply's part, a follow-up step, or one of the team's
+   * saved messages: "library", its title — 2026-11-08). Not automatic.
+   */
+  saved?: { kind: "followup" | "first_reply" | "library"; step: number; title?: string } | null;
   /** From before the WhatsApp was linked (WhatsApp's copy of past chats, handed over at linking — 2026-10-27). */
   history?: boolean;
   at: Date;
@@ -76,8 +79,9 @@ const whatsAppMessageSchema = new Schema<IWhatsAppMessage>(
     forwarded: { type: Boolean, default: undefined },
     saved: {
       type: new Schema({
-        kind: { type: String, enum: ["followup", "first_reply"], required: true },
+        kind: { type: String, enum: ["followup", "first_reply", "library"], required: true },
         step: { type: Number, required: true },
+        title: { type: String, default: undefined },
       }, { _id: false }),
       default: undefined,
     },
