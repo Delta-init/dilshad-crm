@@ -2,10 +2,10 @@
  * Checks the Root portal's Sales TV feed — GET /api/v1/service/sales-tv (2026-10-20) — on a scratch database:
  *
  *   - the shape, exactly the Sales CRM's: { crm: "remote", generatedAt, month, onBreak, closes, people };
- *   - people: only the sales staff — members and leaders of an active team, active — a Super Admin only when in a team (sent again
- *     2026-10-23: Root hides them on its Sales TV, shows them on its Manager TV); not someone
- *     in no team, not a deactivated person, not someone in an inactive team only, not the commission plan's excluded;
- *     their team; closings this month and today (the Dubai day; a dropped one and last month's left out); revenue this
+ *   - people: only the sales staff — members and leaders of a team (an inactive team's too since 2026-11-08), active — a
+ *     Super Admin only when in a team (sent again 2026-10-23: Root hides them on its Sales TV, shows them on its Manager
+ *     TV); not someone in no team, not a deactivated person, not the commission plan's excluded;
+ *     their team (an active one before an inactive one); closings this month and today (the Dubai day; a dropped one and last month's left out); revenue this
  *     month; today's 3CX calls, connected and talk time (yesterday's left out);
  *   - onBreak: who pressed "Take break" today, since when, what for — a break left on from yesterday not shown;
  *   - closes: the last two hours by default, after `after` when given (never more than a day back), newest first, at
@@ -96,7 +96,7 @@ await person("Cal", role.staff);
 await person("Nora", role.staff); // in no team
 await person("Olly", role.staff, { status: "inactive" }); // deactivated, still in a team
 await person("Exa", role.staff); // excluded from commission
-await person("Dee", role.staff); // only in an inactive team
+await person("Dee", role.staff); // only in an inactive team: on the TV all the same (2026-11-08)
 const team = { Alpha: new Types.ObjectId(), Beta: new Types.ObjectId(), Dead: new Types.ObjectId() };
 const teamDoc = (_id: Types.ObjectId, name: string, leaders: string[], members: string[], status = "active") => ({
   _id, name, leaders: leaders.map((n) => ids[n]), members: members.map((n) => ids[n]), inactiveMembers: [], absentToday: [], status,
@@ -105,7 +105,8 @@ const teamDoc = (_id: Types.ObjectId, name: string, leaders: string[], members: 
 await db.collection("teams").insertMany([
   teamDoc(team.Alpha, "Alpha", ["Admin"], ["Ann", "Olly", "Exa"]),
   teamDoc(team.Beta, "Beta", ["Ben"], ["Cal"]),
-  teamDoc(team.Dead, "Dead", [], ["Dee"], "inactive"),
+  // Named to sort before Beta: Cal, in both, keeps his active team's name all the same.
+  teamDoc(team.Dead, "Asleep", [], ["Dee", "Cal"], "inactive"),
 ]);
 await db.collection("commissionsettings").insertOne({ excludedUsers: [ids.Exa], createdAt: new Date(), updatedAt: new Date() });
 
@@ -173,14 +174,14 @@ same("a close's keys", Object.keys(d.closes[0] ?? {}).sort(), ["academy", "amoun
 
 section("People — only the sales staff");
 const names = (d.people ?? []).map((p) => p.name).sort();
-same("Admin (a Super Admin leading a team — dilshad, sent again 2026-10-23), Ann, Ben, Cal — not the Super Admin in no team, nobody in no team, nobody deactivated, nobody in an inactive team only, not the excluded", names, ["Admin", "Ann", "Ben", "Cal"]);
+same("Admin (a Super Admin leading a team — dilshad, sent again 2026-10-23), Ann, Ben, Cal, and Dee of an inactive team — not the Super Admin in no team, nobody in no team, nobody deactivated, not the excluded", names, ["Admin", "Ann", "Ben", "Cal", "Dee"]);
 {
   const { LeaderboardService } = await import("../src/services/leaderboardService.js");
   const own = (await new LeaderboardService().getLeaderboard()).rows.map((r) => r.name);
   same("the CRM's own leaderboard still leaves every Super Admin out", own.filter((n) => n === "Admin" || n === "Root"), []);
 }
 const P = (n: string) => (d.people ?? []).find((p) => p.name === n);
-check("each with their team and email", P("Ann")?.team === "Alpha" && P("Ben")?.team === "Beta" && P("Cal")?.team === "Beta" && P("Ann")?.email === "ann@test.local", d.people);
+check("each with their team and email — Dee her inactive team, Cal (in both) his active one", P("Ann")?.team === "Alpha" && P("Ben")?.team === "Beta" && P("Cal")?.team === "Beta" && P("Dee")?.team === "Asleep" && P("Ann")?.email === "ann@test.local", d.people);
 check("each with their id", P("Ann")?.id === String(ids.Ann), P("Ann"));
 // Ann: old3h, c10 today (dropped not, last month not), and the earlier-this-month one when the month has one.
 same("Ann's closings: this month and today (a dropped one and last month's left out)", [P("Ann")?.closingsMonth, P("Ann")?.closingsToday], [EARLIER ? 3 : 2, 2]);
@@ -269,7 +270,8 @@ section("A past month (the Manager TV's month switch)");
   const prev = prevStart.toISOString().slice(0, 7);
   const mid = new Date(Date.UTC(prevStart.getUTCFullYear(), prevStart.getUTCMonth(), 15, 8));
   const src: any = await db.collection("students").findOne({ status: { $ne: "dropped" }, assignedTo: { $ne: null } });
-  await db.collection("students").insertOne({ ...src, _id: new Types.ObjectId(), name: "Past Student", email: "past@s.local", enrollmentDate: mid, createdAt: mid, updatedAt: mid });
+  // Its own enrolment number: the students collection keeps them unique.
+  await db.collection("students").insertOne({ ...src, _id: new Types.ObjectId(), enrollmentNumber: "ENR-PAST", name: "Past Student", email: "past@s.local", enrollmentDate: mid, createdAt: mid, updatedAt: mid });
   const past: any = await tv(`?month=${prev}`);
   const pd: any = past.body.data ?? {};
   const closer = (pd.people ?? []).find((p: any) => p.id === String(src.assignedTo));
