@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { Plus, Search, Pencil, Trash2, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, ExternalLink, Eye } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, X, ExternalLink, Eye, ArrowRightLeft, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,9 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { UserDialog } from "@/components/users/UserDialog";
 import { DeleteUserDialog } from "@/components/users/DeleteUserDialog";
+import { TransferLeadsDialog } from "@/components/users/TransferLeadsDialog";
+import { RecentTransfersDialog } from "@/components/users/RecentTransfersDialog";
+import { useMayTransfer } from "@/hooks/useLeadTransfer";
 import { useUsers, useImpersonate } from "@/hooks/useUsers";
 import { useRolesSimple } from "@/hooks/useRoles";
 import { useTeams } from "@/hooks/useTeams";
@@ -50,6 +53,10 @@ function UsersPageContent() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Transfer a person's open leads, and the recent transfers with Undo (2026-11-10).
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(false);
+  const { data: mayTransfer } = useMayTransfer();
 
   const params = useMemo(() => {
     const p: Record<string, string> = {
@@ -105,6 +112,11 @@ function UsersPageContent() {
     setDeleteOpen(true);
   };
 
+  const handleTransfer = (user: User) => {
+    setSelectedUser(user);
+    setTransferOpen(true);
+  };
+
   const canCreate = hasPermission("users", "create");
   const canEdit = hasPermission("users", "edit");
   const canDelete = hasPermission("users", "delete");
@@ -123,12 +135,20 @@ function UsersPageContent() {
             Manage team members and their roles
           </p>
         </div>
-        {canCreate && (
-          <Button onClick={handleCreate} className="w-full sm:w-auto">
-            <Plus className="h-4 w-4" />
-            Add User
-          </Button>
-        )}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {mayTransfer && (
+            <Button variant="outline" onClick={() => setRecentOpen(true)} className="w-full sm:w-auto">
+              <History className="h-4 w-4" />
+              Recent transfers
+            </Button>
+          )}
+          {canCreate && (
+            <Button onClick={handleCreate} className="w-full sm:w-auto">
+              <Plus className="h-4 w-4" />
+              Add User
+            </Button>
+          )}
+        </div>
       </motion.div>
 
       {/* Search + Table */}
@@ -248,7 +268,7 @@ function UsersPageContent() {
                       <th className="px-6 py-3 text-left hidden xl:table-cell">Ext.</th>
                       <th className="px-6 py-3 text-left">Status</th>
                       <th className="px-6 py-3 text-left hidden xl:table-cell">Created</th>
-                      {(canEdit || canDelete) && (
+                      {(canEdit || canDelete || mayTransfer) && (
                         <th className="px-6 py-3 text-right">Actions</th>
                       )}
                     </tr>
@@ -343,6 +363,18 @@ function UsersPageContent() {
                                   )}
                                 </Button>
                               )}
+                              {mayTransfer && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 md:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                                  title={`Transfer ${user.name}'s leads`}
+                                  aria-label={`Transfer ${user.name}'s leads`}
+                                  onClick={() => handleTransfer(user)}
+                                >
+                                  <ArrowRightLeft className="h-4 w-4" />
+                                </Button>
+                              )}
                               {canEdit && (
                                 <Button
                                   variant="ghost"
@@ -419,6 +451,12 @@ function UsersPageContent() {
         onOpenChange={setDeleteOpen}
         user={selectedUser}
       />
+      <TransferLeadsDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        user={selectedUser}
+      />
+      <RecentTransfersDialog open={recentOpen} onOpenChange={setRecentOpen} />
     </div>
   );
 }

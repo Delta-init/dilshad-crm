@@ -402,7 +402,8 @@ export type ActivityAction =
   | "repeat_enquiry"
   | "repeat_verified"
   | "whatsapp_followup"
-  | "call_logged";
+  | "call_logged"
+  | "lead_transferred";
 
 export interface ILeadNote {
   _id: Types.ObjectId;

@@ -91,12 +91,11 @@ export const useImpersonate = () => {
 export const useDeleteUser = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await api.delete(`/users/${id}`);
-    },
-    onSuccess: () => {
+    // The server says what happened: deleted, or deactivated and kept for their history (2026-11-10).
+    mutationFn: async (id: string) => (await api.delete<{ message?: string }>(`/users/${id}`)).data?.message ?? "User deleted successfully",
+    onSuccess: (message: string) => {
       queryClient.invalidateQueries({ queryKey: USERS_KEY });
-      toast.success("User deleted successfully");
+      toast.success(message);
     },
     onError: (error: unknown) => {
       const msg =

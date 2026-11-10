@@ -148,7 +148,29 @@ export class UserService {
       throw Object.assign(new Error("Super Admin user cannot be deleted"), { statusCode: 403 });
     }
 
+    /*
+     * Leads first (2026-11-10): someone still holding open leads can't be removed — transfer them first (the Users
+     * page asks where they go). Someone with any history — leads closed or lost, commission — is deactivated rather
+     * than erased, so their name stays on it all; only someone with none is deleted.
+     */
+    const { openLeadCount } = await import("./leadTransferService.js");
+    const open = await openLeadCount(id);
+    if (open > 0) {
+      throw Object.assign(new Error(`${user.name} still has ${open} open lead${open === 1 ? "" : "s"} — transfer them first`), { statusCode: 409, openLeads: open });
+    }
+    const { Lead } = await import("../models/Lead.js");
+    const { CommissionSale } = await import("../models/CommissionSale.js");
+    const history = (await Lead.exists({ assignedTo: id })) || (await CommissionSale.exists({ $or: [{ user: id }, { closer: id }] }));
+    if (history) {
+      if (user.status !== "inactive") {
+        user.status = "inactive";
+        await user.save();
+      }
+      return { message: `${user.name} was deactivated, not deleted — kept for their closed and lost leads and commission`, deactivated: true };
+    }
+    const { Team } = await import("../models/Team.js");
+    await Team.updateMany({}, { $pull: { members: user._id, leaders: user._id } });
     await User.findByIdAndDelete(id);
-    return { message: "User deleted successfully" };
+    return { message: "User deleted successfully", deactivated: false };
   }
 }

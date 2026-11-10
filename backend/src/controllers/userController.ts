@@ -58,6 +58,19 @@ export const updateUser = async (req: AuthenticatedRequest, res: Response, next:
       return;
     }
 
+    // Deactivating someone who still holds open leads (2026-11-10): transfer them first — the Users page asks where.
+    if ((parsed.data as { status?: string }).status === "inactive") {
+      const { User } = await import("../models/User.js");
+      const current = await User.findById(req.params.id).select("name status").lean<{ name: string; status: string } | null>();
+      if (current && current.status !== "inactive") {
+        const { openLeadCount } = await import("../services/leadTransferService.js");
+        const open = await openLeadCount(req.params.id);
+        if (open > 0) {
+          sendError(res, `${current.name} still has ${open} open lead${open === 1 ? "" : "s"} — transfer them first (Transfer leads)`, 409);
+          return;
+        }
+      }
+    }
     const user = await userService.updateUser(req.params.id, parsed.data);
     sendSuccess(res, "User updated successfully", user);
   } catch (error) {
