@@ -26,6 +26,8 @@
  *   - Case 14: keyword replies (2026-11-08) — checked; a word or phrase, whole, any case, gets its saved message (or
  *     group) a minute on, marked; not twice in the rule's days, not when a person answered, not on a first message
  *     (the first reply's), not to a student; no match, no reply; another team's rules not used; not a follow-up step.
+ *   - Case 15: whose team's follow-ups (2026-11-11) — the WhatsApp owner's, not the team the lead is filed under: a
+ *     lead filed under Titans (on) held by Omar (Others, off) gets none, and its card says off.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -667,6 +669,22 @@ try {
   check("no keyword, or another team's (no rules there): nothing noted", (await hits().countDocuments({ key: "556000001" })) === 3 && !(await hitIn("556000009")));
   const card14 = await call("GET", `/whatsapp/lead/${(await db.collection("leads").findOne({ name: "Kim Keyword" }))!._id}`, "Sam");
   check("a keyword reply isn't counted as a follow-up step (the chain starts again from it)", card14.body.data?.followup?.state !== "done" && (card14.body.data?.followup?.step ?? 1) === 1, j(card14.body.data?.followup));
+
+  section("Case 15 — the follow-ups of the WhatsApp owner's team, not the lead's");
+  // Others' follow-ups off; Titans' on (Case 1). A lead filed under Titans, held by Omar.
+  r = await call("PUT", `/whatsapp/followups/team/${others}`, "Root", { enabled: false, dailyLimit: 60, steps: [{ waitMinutes: 240, text: "Others step 1 for {name}" }], firstReply: { enabled: false, items: [] } });
+  check("Others' follow-ups switched off", r.status === 200 && r.body.data.enabled === false, j(r.body));
+  const t15 = work(Date.now() + 40 * 60_000);
+  await db.collection("whatsapp_team_settings").updateOne({ team: titans }, { $set: { enabled: true, startedAt: new Date(t15.getTime() - 10 * D) } });
+  F.resetFollowupPacingForCheck();
+  link("Omar");
+  const filed = await lead("Filed Under Titans", "+971 55 700 0001", "Omar", titans);
+  await msg("Omar", "971557000001", "out", new Date(t15.getTime() - 5 * H));
+  const omar15 = outbox.Omar!.length;
+  for (let k = 0; k < 3; k++) await run(new Date(t15.getTime() + k * 3 * 60_000));
+  check("from Omar's WhatsApp (his team off): nothing — though the lead is filed under Titans (on)", outbox.Omar!.length === omar15, j(outbox.Omar!.slice(omar15).map(textOf)));
+  const card15 = await call("GET", `/whatsapp/lead/${filed}`, "Omar");
+  check("…its lead card says off", card15.body.data?.followup?.state === "off" && card15.body.data.followup.on === false, j(card15.body.data?.followup));
 } finally {
   server.close();
   await mongoose.disconnect();

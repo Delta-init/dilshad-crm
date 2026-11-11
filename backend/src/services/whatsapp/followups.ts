@@ -333,7 +333,7 @@ export const fillText = (text: string, leadName: unknown, ownerName: unknown) =>
 /* ── The lead page: where its follow-ups stand ──────────────────────────── */
 
 export type LeadFollowup = {
-  on: boolean;                 // switched on for this lead's team
+  on: boolean;                 // switched on for the team of the person whose WhatsApp it is
   state: "off" | "ended" | "student" | "no_chat" | ChainState["state"];
   step?: number; of?: number; nextAt?: string; sent?: number; byName?: string;
   ownerName?: string; linked?: boolean;
@@ -343,8 +343,9 @@ export async function leadFollowup(leadId: string): Promise<LeadFollowup> {
   const lead = await Lead.findById(leadId).select("phone status team assignedTo waFollowupStoppedAt waFollowupStoppedByName")
     .lean<{ phone?: string; status?: string; team?: Types.ObjectId | null; assignedTo?: Types.ObjectId | null; waFollowupStoppedAt?: Date | null; waFollowupStoppedByName?: string } | null>();
   if (!lead) return { on: false, state: "off" };
-  // The lead's team's follow-ups (2026-11-08).
-  const settings = await teamWa(lead.team);
+  // The follow-ups of the team of the person whose WhatsApp it is — its holder's (2026-11-11: a lead filed under
+  // another team went on getting that team's follow-ups from someone whose own team had them off).
+  const settings = lead.assignedTo ? await teamWaOfPerson(String(lead.assignedTo)) : null;
   const on = !!settings?.enabled;
   if (!on) return { on, state: "off" };
   if (ENDED.has(String(lead.status))) return { on, state: "ended" };
@@ -360,7 +361,7 @@ export async function leadFollowup(leadId: string): Promise<LeadFollowup> {
     if (msgs[0] && (!best[0] || msgs[0].at > best[0].at)) best = msgs;
   }
   const base = { on, ownerName: String(owner?.name ?? ""), linked: isConnected(String(lead.assignedTo)) };
-  // The lead's team's steps (its own, else the Default).
+  // That team's steps.
   const chain = chainOf(best, settings!, { at: lead.waFollowupStoppedAt ?? null, byName: lead.waFollowupStoppedByName ?? "" });
   if (!chain) return { ...base, state: "no_chat" };
   if (chain.state === "waiting") return { ...base, state: "waiting", step: chain.step, of: chain.of, nextAt: (await nextWorkingMoment(chain.dueAt)).toISOString() };
@@ -420,13 +421,21 @@ export async function runFollowups(now = new Date()): Promise<RunResult> {
 
     type Due = { owner: string; key: string; lead: NonNullable<ReturnType<typeof leads.get>>; chain: Extract<ChainState, { state: "waiting" }>; steps: IFollowupStep[]; limit: number };
     const due: Due[] = [];
+    // Each WhatsApp's owner's team (one they lead first): its follow-ups, whatever team the lead is filed under
+    // (2026-11-11 — the first reply and the keyword replies go by it already).
+    const homeOf = new Map<string, string | null>();
+    const homeTeam = async (owner: string) => {
+      if (!homeOf.has(owner)) homeOf.set(owner, (await teamsOf(owner)).home?.toString() ?? null);
+      return homeOf.get(owner)!;
+    };
     for (const c of live) {
       const owner = String(c._id.owner);
       const lead = leads.get(String(byKey.get(c._id.key) ?? ""));
-      // The lead's own salesperson, on a team switched on, and not over.
-      const settings = lead?.team ? teams.get(String(lead.team)) : undefined;
-      if (!lead || String(lead.assignedTo ?? "") !== owner || !settings || ENDED.has(String(lead.status))) continue;
-      // The lead's team's own steps, else the Default (2026-11-03).
+      // The lead's own salesperson, their team's follow-ups switched on, and not over.
+      if (!lead || String(lead.assignedTo ?? "") !== owner || ENDED.has(String(lead.status))) continue;
+      const home = await homeTeam(owner);
+      const settings = home ? teams.get(home) : undefined;
+      if (!settings) continue;
       const steps = settings.steps;
       const chain = chainOf(await recent(owner, c._id.key), settings, { at: lead.waFollowupStoppedAt ?? null, byName: lead.waFollowupStoppedByName ?? "" });
       if (chain?.state !== "waiting" || chain.dueAt > now) continue;
