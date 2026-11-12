@@ -28,6 +28,8 @@
  *     (the first reply's), not to a student; no match, no reply; another team's rules not used; not a follow-up step.
  *   - Case 15: whose team's follow-ups (2026-11-11) — the WhatsApp owner's, not the team the lead is filed under: a
  *     lead filed under Titans (on) held by Omar (Others, off) gets none, and its card says off.
+ *   - Case 16: only Assigned and Follow-up leads get follow-ups (2026-11-11) — a Call back lead none, its card says
+ *     why; a Follow-up lead gets them.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -653,9 +655,15 @@ try {
   k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
   check("a person answered within the minute: none", (await hitIn("556000002"))?.status === "answered", j(await hitIn("556000002")));
   // A first message ever: the first reply's, not this.
+  // A first message ever with a keyword (2026-11-11): the first reply goes, then the keyword reply after it.
   await first("Sam", "971556000003", "KW-5", "Hello, price please", "New");
   k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
-  check("someone's first message ever: left to the first reply", (await hitIn("556000003"))?.status === "first_reply", j(await hitIn("556000003")));
+  check("someone's first message ever: the keyword reply waits while the first reply is due", (await hitIn("556000003"))?.status === "waiting" && k14.sent === 0, j(await hitIn("556000003")));
+  const nF = outbox.Sam!.length;
+  await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  check("…the first reply goes", (await firsts().findOne({ key: "556000003" }))?.status === "sent" && outbox.Sam!.length > nF, j(await firsts().findOne({ key: "556000003" })));
+  k14 = await M.runKeywordReplies(new Date(Date.now() + 61_000), () => 0);
+  check("…then the keyword reply, after it (the first reply's messages aren't a person answering)", (await hitIn("556000003"))?.status === "sent" && textOf(outbox.Sam!.at(-1)) === "Hi New, the course is AED 2,250.", j({ h: await hitIn("556000003"), t: textOf(outbox.Sam!.at(-1)) }));
   // A student.
   await msg("Sam", "971556000004", "in", new Date(Date.now() - 3 * H));
   await db.collection("whatsapp_tags").insertOne({ key: "556000004", student: true, byName: "Sam", by: P("Sam"), at: new Date() });
@@ -685,6 +693,22 @@ try {
   check("from Omar's WhatsApp (his team off): nothing — though the lead is filed under Titans (on)", outbox.Omar!.length === omar15, j(outbox.Omar!.slice(omar15).map(textOf)));
   const card15 = await call("GET", `/whatsapp/lead/${filed}`, "Omar");
   check("…its lead card says off", card15.body.data?.followup?.state === "off" && card15.body.data.followup.on === false, j(card15.body.data?.followup));
+
+  section("Case 16 — only Assigned and Follow-up leads get follow-ups");
+  const t16 = work(Date.now() + 60 * 60_000);
+  await db.collection("whatsapp_team_settings").updateOne({ team: titans }, { $set: { enabled: true, startedAt: new Date(t16.getTime() - 10 * D) } });
+  F.resetFollowupPacingForCheck();
+  link("Sally");
+  const cb = await lead("Call Back Carl", "+971 55 800 0001", "Sally", titans, "callback");
+  await lead("Follow Up Fia", "+971 55 800 0002", "Sally", titans, "followup");
+  await msg("Sally", "971558000001", "out", new Date(t16.getTime() - 5 * H));
+  await msg("Sally", "971558000002", "out", new Date(t16.getTime() - 5 * H));
+  const sally16 = outbox.Sally!.length;
+  for (let k = 0; k < 4; k++) await run(new Date(t16.getTime() + k * 3 * 60_000));
+  const sent16 = outbox.Sally!.slice(sally16);
+  check("a Follow-up lead gets its step; a Call back lead none", sent16.some((x) => /^Hi Follow,/.test(textOf(x))) && !sent16.some((x) => /^Hi Call,/.test(textOf(x))), j(sent16.map(textOf)));
+  const card16 = await call("GET", `/whatsapp/lead/${cb}`, "Sally");
+  check("…the Call back lead's card says why", card16.body.data?.followup?.state === "status", j(card16.body.data?.followup));
 } finally {
   server.close();
   await mongoose.disconnect();

@@ -55,6 +55,8 @@ export const DEFAULT_STEPS: IFollowupStep[] = [
 ];
 /** Leads in these never get one. */
 const ENDED = new Set(["closed", "lost", "repeated"]);
+/** Follow-ups only for leads in these (the owner, 2026-11-11: "only assigned and follow-up get the follow-up message"). */
+const FOLLOWED_UP = new Set(["assigned", "followup"]);
 /** How far back a chat may have gone quiet and still be followed up: the whole default chain and then some. */
 const LOOK_BACK_DAYS = 45;
 const DEFAULT_DAILY_LIMIT = 60;
@@ -334,7 +336,8 @@ export const fillText = (text: string, leadName: unknown, ownerName: unknown) =>
 
 export type LeadFollowup = {
   on: boolean;                 // switched on for the team of the person whose WhatsApp it is
-  state: "off" | "ended" | "student" | "no_chat" | ChainState["state"];
+  // "status": in a status that gets none — only Assigned and Follow-up do (2026-11-11).
+  state: "off" | "ended" | "status" | "student" | "no_chat" | ChainState["state"];
   step?: number; of?: number; nextAt?: string; sent?: number; byName?: string;
   ownerName?: string; linked?: boolean;
 };
@@ -349,6 +352,7 @@ export async function leadFollowup(leadId: string): Promise<LeadFollowup> {
   const on = !!settings?.enabled;
   if (!on) return { on, state: "off" };
   if (ENDED.has(String(lead.status))) return { on, state: "ended" };
+  if (!FOLLOWED_UP.has(String(lead.status))) return { on, state: "status" };
   // A student — marked so in a chat, or enrolled — gets none (2026-10-30).
   if ((await studentKeys(phoneKeys(lead.phone))).size) return { on, state: "student" };
   if (!lead.assignedTo) return { on, state: "no_chat" };
@@ -432,7 +436,7 @@ export async function runFollowups(now = new Date()): Promise<RunResult> {
       const owner = String(c._id.owner);
       const lead = leads.get(String(byKey.get(c._id.key) ?? ""));
       // The lead's own salesperson, their team's follow-ups switched on, and not over.
-      if (!lead || String(lead.assignedTo ?? "") !== owner || ENDED.has(String(lead.status))) continue;
+      if (!lead || String(lead.assignedTo ?? "") !== owner || !FOLLOWED_UP.has(String(lead.status))) continue;
       const home = await homeTeam(owner);
       const settings = home ? teams.get(home) : undefined;
       if (!settings) continue;
@@ -666,10 +670,12 @@ export async function runKeywordReplies(now = new Date(), gapMs = () => 3000 + M
       const team = await teamWaOfPerson(owner);
       const rule = team?.keywordReplies.enabled ? team.keywordReplies.rules.find((r) => r.id === d.rule) : undefined;
       if (!team || !rule) { await close("off"); continue; }
-      if (await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at } })) { await close("answered"); continue; }
-      // Their first message ever: the first reply answers it, not this.
-      const first = await WhatsAppMessage.db.collection(FIRST).findOne({ _id: `${owner}|${d.key}` as never, status: { $in: ["waiting", "sending", "sent"] } });
-      if (first && Math.abs(new Date(first.at).getTime() - d.at.getTime()) < 10 * MIN) { await close("first_reply"); continue; }
+      // The first reply going out to them still: this waits for it, then goes after it (2026-11-11 — the first reply
+      // doesn't say what they asked; before, the keyword reply was dropped for it).
+      const first = await WhatsAppMessage.db.collection(FIRST).findOne({ _id: `${owner}|${d.key}` as never, status: { $in: ["waiting", "sending"] } });
+      if (first) continue;
+      // A person answered (an automatic message — the first reply, a follow-up — doesn't count).
+      if (await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at }, $or: [{ auto: null }, { auto: { $exists: false } }] })) { await close("answered"); continue; }
       if (await isStudentKey(d.key)) { await close("student"); continue; }
       const leadId = (await leadsByKey()).get(d.key);
       const leadDoc = leadId ? await Lead.findById(leadId).select("name status").lean<{ name?: string; status?: string } | null>() : null;

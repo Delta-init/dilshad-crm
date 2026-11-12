@@ -49,7 +49,7 @@ export interface WAStatusAnswer {
 /** Where a lead's automatic follow-ups stand (api services/whatsapp/followups.ts). */
 export interface WAFollowup {
   on: boolean;
-  state: "off" | "ended" | "student" | "no_chat" | "replied" | "before" | "stopped" | "done" | "waiting";
+  state: "off" | "ended" | "status" | "student" | "no_chat" | "replied" | "before" | "stopped" | "done" | "waiting";
   step?: number; of?: number; nextAt?: string; sent?: number; byName?: string; ownerName?: string; linked?: boolean;
 }
 /** `url`: to look at or listen to it (Settings only, a short-lived link). */
