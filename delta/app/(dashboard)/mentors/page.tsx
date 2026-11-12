@@ -103,11 +103,11 @@ interface Schedule {
   mentors: Mentor[];
 }
 
-/** Midnight on the Sunday of whatever week this date falls in. */
-const weekStart = (d: Date) => {
+/** Midnight at the start of this date. The calendar shows seven days from today (the user, 2026-11-12: "show from
+ *  the day today"), not a Sunday-to-Saturday week; the arrows step seven days at a time, back as well as forward. */
+const dayStart = (d: Date) => {
   const start = new Date(d);
   start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - start.getDay());
   return start;
 };
 
@@ -124,11 +124,11 @@ export default function MentorsPage() {
   /* Which day the phone is showing. Seven columns do not fit on a phone and
      shrinking them to where they do makes every one of them unreadable, so the
      narrow view is one day at a time and this is which. Index into `days`, so
-     stepping the week keeps it pointing at the same weekday. */
-  const [dayIndex, setDayIndex] = useState(() => (new Date().getDay() + 6) % 7);
+     stepping seven days keeps it pointing at the same weekday. Today is the first column. */
+  const [dayIndex, setDayIndex] = useState(0);
 
   const { from, to, days } = useMemo(() => {
-    const start = weekStart(new Date());
+    const start = dayStart(new Date());
     start.setDate(start.getDate() + offset * 7);
     const end = new Date(start);
     end.setDate(end.getDate() + 7);
@@ -659,10 +659,10 @@ export default function MentorsPage() {
             variant="outline"
             size="sm"
             className="min-w-28 gap-1.5"
-            onClick={() => setOffset(0)}
+            onClick={() => { setOffset(0); setDayIndex(0); }}
           >
             <CalendarDays className="h-3.5 w-3.5" />
-            {offset === 0 ? "This week" : days[0]!.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+            {offset === 0 ? "From today" : days[0]!.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
           </Button>
           <Button variant="outline" size="icon" onClick={() => setOffset((o) => o + 1)}>
             <ChevronRight className="h-4 w-4" />
@@ -727,7 +727,7 @@ export default function MentorsPage() {
           */}
           {query.trim() || filtering ? (
             <>
-              <p className="mt-3 text-sm font-medium">{filtering ? "Nothing this week matches" : "Nobody matches that"}</p>
+              <p className="mt-3 text-sm font-medium">{filtering ? "Nothing in these 7 days matches" : "Nobody matches that"}</p>
               <button
                 onClick={() => { setQuery(""); setFind(""); setCourse(""); setMod(""); }}
                 className="mt-2 text-xs text-primary hover:underline"
