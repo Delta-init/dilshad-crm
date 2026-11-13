@@ -16,6 +16,10 @@
  *     course's Bangalore price, item and LMS courses, cash in AED carried as
  *     finance's `original` against the INR; Dubai as it was; what a Bangalore
  *     close is refused for;
+ *   - Case 5c: POS and Razorpay (the owner, 2026-11-13) — a close with a POS
+ *     payment and a Razorpay one typed in rupees with its rate: both kept,
+ *     both sent to finance under those names, the Razorpay one with its rupee
+ *     `original`, and the rows the close dialog puts on the lead taken so;
  *   - Case 6: the client's email at the close (2026-10-10) — refused without
  *     one finance can take (its own check: a@b.c too), nothing saved; kept on
  *     the enrolment and on a lead that had none, with an activity entry; a
@@ -301,6 +305,36 @@ section("Case 5b — INR Transfer (2026-10-13): the method, rupees at 1 AED = 22
     payload?.payments?.[0]?.method === "inr_bank_account" && payload?.payments?.[0]?.amountMinor === 225_000 && payload?.payments?.[0]?.original?.currency === "INR"
       && payload?.payments?.[0]?.original?.amountMinor === 5_118_750 && Math.abs(payload?.payments?.[0]?.original?.rate - 1 / 22.75) < 1e-9,
     JSON.stringify(payload?.payments));
+}
+
+section("Case 5c — POS and Razorpay (2026-11-13): a POS payment, and a Razorpay one in rupees with its rate");
+{
+  // 500: 300 on the card machine, and ₹4,550 through Razorpay at 1 AED = 22.75 INR → AED 200.
+  const perInr = Number((1 / 22.75).toPrecision(12));
+  const x = await close({ paidAmount: 500, payments: [pay("pos", 300, "pos-a"), pay("razorpay", 200, "razorpay-b", { currency: "INR", amountInCurrency: 4550, exchangeRate: perInr })] });
+  const st = x.status === 201 ? await studentOf(x) : null;
+  check("closed: 201, both kept under their own method", x.status === 201 && st?.payments?.map((p) => `${p.method}:${p.amount}`).join(",") === "pos:300,razorpay:200", `${x.status} ${x.body.message} ${JSON.stringify(st?.payments)}`);
+  check("…the Razorpay one keeps its rupees and rate, its amount the AED; the POS one is plain AED",
+    st?.payments?.[1]?.currency === "INR" && st?.payments?.[1]?.amountInCurrency === 4550 && st?.payments?.[1]?.exchangeRate === perInr
+      && st?.payments?.[0]?.currency === undefined && st?.payments?.[0]?.amountInCurrency === undefined, JSON.stringify(st?.payments));
+  const sent = st ? await service.buildHandoverPayload(String(st._id)) as Record<string, any> : null;
+  check("finance is sent both by name — pos, razorpay — in fils, with its receipt",
+    sent?.payments?.map((p: any) => `${p.method}:${p.amountMinor}:${p.receipt?.key}`).join(",") === "pos:30000:receipts/pos-a.jpg,razorpay:20000:receipts/razorpay-b.jpg"
+      && sent?.declaredPaymentMethod === "pos" && sent?.declaredPaidMinor === 50000, JSON.stringify(sent?.payments));
+  check("…the Razorpay one with its rupees as `original` — ₹4,550 (455000 paise) at 1 INR = 1/22.75 AED — and the POS one without",
+    sent?.payments?.[1]?.original?.currency === "INR" && sent?.payments?.[1]?.original?.amountMinor === 455_000
+      && Math.abs(Number(sent?.payments?.[1]?.original?.rate) - 1 / 22.75) < 1e-9 && sent?.payments?.[0]?.original === undefined, JSON.stringify(sent?.payments));
+  // The rows the close dialog puts on the lead, one per payment, each saying how it was paid. (A lead as the app
+  // keeps one has its reporter; the bare ones here have none, and the lead would not save.)
+  await db.collection("leads").updateOne({ _id: new Types.ObjectId(x.leadId) }, { $set: { reporter: people.Theertha!.id } });
+  const row = (amount: number, method: string, said: string) => call("POST", `/leads/${x.leadId}/payments`, "Theertha", { amount, paidAt: "2026-10-05T00:00:00.000Z", method, note: `Collected at enrolment — COURSE 500 · ${said}` });
+  const rows = [await row(300, "pos", "POS"), await row(200, "razorpay", "Razorpay · INR 4,550 at 1 AED = 22.75 INR")];
+  const onLead = (await db.collection("leads").findOne({ _id: new Types.ObjectId(x.leadId) }))?.payments as { amount: number; method?: string }[] | undefined;
+  check("…and the lead takes its rows by those methods", rows.every((a) => a.status === 201) && onLead?.map((p) => `${p.amount}:${p.method}`).join(",") === "300:pos,200:razorpay", `${rows.map((a) => `${a.status} ${a.body.message}`).join(" / ")} ${JSON.stringify(onLead)}`);
+  // Razorpay with no rupees typed is taken too, as INR Transfer is: the dialog asks them, the server never did.
+  const plain = await close({ paidAmount: 500, payments: [pay("razorpay", 500, "razorpay-plain")] });
+  check("Razorpay with no rupees typed: taken as INR Transfer is (201)", plain.status === 201 && (await studentOf(plain))?.payments?.[0]?.method === "razorpay", `${plain.status} ${plain.body.message}`);
+  await refused("Razorpay rupees that don't come to the AED: 422", { paidAmount: 500, payments: [pay("pos", 300), pay("razorpay", 200, "razorpay-bad", { currency: "INR", amountInCurrency: 4000, exchangeRate: perInr })] }, /comes to 175\.82 AED, not 200/);
 }
 
 section("Case 6 — the client's email at the close (2026-10-10): finance refuses an enrolment without one");

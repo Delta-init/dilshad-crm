@@ -641,25 +641,40 @@ export const ENROLMENT_PAYMENT_METHODS = [
   "bank_transfer",
   "cheque",
   "card",
+  // The card machine (the owner, 2026-11-13) — beside Card, and taken as Card is.
+  "pos",
   "easebuzz_emi",
   "tabby",
   "tamara",
   "billexpro",
   // Rupees into the INR account (the user, 2026-10-13) — finance's "INR Bank Account".
   "inr_bank_account",
+  // Razorpay pays out in rupees (the owner, 2026-11-13) — taken as INR Transfer is: see RUPEE_METHODS.
+  "razorpay",
 ] as const;
 export type EnrolmentPaymentMethod = (typeof ENROLMENT_PAYMENT_METHODS)[number];
+
+/**
+ * The methods that are rupees (2026-11-13): INR Transfer, and Razorpay, which pays out in rupees. Wherever a payment
+ * is told to be rupees by its method — the commission's rupee share (utils/enrolmentCollections.ts), by the method on
+ * the payment or named in its note — it is asked of this one list, so Razorpay is taken exactly as INR Transfer is
+ * and the two never drift apart.
+ */
+export const RUPEE_METHODS: readonly EnrolmentPaymentMethod[] = ["inr_bank_account", "razorpay"];
+export const isRupeeMethod = (method?: string | null): boolean => (RUPEE_METHODS as readonly string[]).includes(method ?? "");
 
 export const PAYMENT_METHOD_LABELS: Record<EnrolmentPaymentMethod, string> = {
   cash: "Cash",
   bank_transfer: "Bank Transfer",
   cheque: "Cheque",
   card: "Card",
+  pos: "POS",
   easebuzz_emi: "Easebuzz EMI",
   tabby: "Tabby",
   tamara: "Tamara",
   billexpro: "BillExPro",
   inr_bank_account: "INR Transfer",
+  razorpay: "Razorpay",
 };
 
 /**

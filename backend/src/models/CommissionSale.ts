@@ -65,7 +65,7 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
      * month (the user, 2026-10-31: "that month collected payment only count"). Absent: not followed yet.
      */
     collections: {
-      // `inr`: handed over in rupees (2026-11-13) — INR Transfer, or typed in INR with its rate. Absent: dirhams.
+      // `inr`: handed over in rupees (2026-11-13) — INR Transfer or Razorpay, or typed in INR with its rate. Absent: dirhams.
       type: [new Schema({ paidAt: { type: Date, required: true }, share: { type: Number, required: true }, inr: { type: Boolean } }, { _id: false })],
       default: undefined,
     },

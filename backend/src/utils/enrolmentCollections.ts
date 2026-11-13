@@ -1,4 +1,5 @@
 import { Lead } from "../models/Lead.js";
+import { PAYMENT_METHOD_LABELS, RUPEE_METHODS, isRupeeMethod } from "../types/index.js";
 
 /*
  * The money actually received on each enrolment, payment by payment, with the day it came in (the user, 2026-10-31:
@@ -20,11 +21,16 @@ import { Lead } from "../models/Lead.js";
  * Only where that was said: INR Transfer as the method, or a payment typed in INR with its rate at the close; never
  * guessed, and never for another currency the close takes (USD, EUR…) — that stays in AED. A Bangalore close's
  * payments are rupees unless taken in AED cash.
+ *
+ * Razorpay pays out in rupees (the owner, 2026-11-13): wherever INR Transfer is named here — as a payment's method
+ * or in its note — Razorpay is taken the same, both asked of RUPEE_METHODS (types/index.ts).
  */
 export type Collection = { paidAt: Date; amount: number; inr?: boolean };
 
-/** "INR Transfer" — a payment into the rupee account. */
-const RUPEE_METHOD = "inr_bank_account";
+/** The rupee methods as a note names them: "INR Transfer", "Razorpay". */
+const RUPEE_LABELS = RUPEE_METHODS.map((m) => PAYMENT_METHOD_LABELS[m]);
+/** A note that names one between its dots: "… · INR Transfer", "… · Razorpay · INR 12,800 at …". */
+const namesRupeeMethod = (note: string) => note.split("·").slice(1).some((part) => RUPEE_LABELS.includes(part.trim()));
 
 type StudentLike = {
   _id: unknown;
@@ -45,9 +51,10 @@ const fromTheClose = (p: LeadPayment) => /^Collected at enrolment\b/.test(p.note
 /**
  * …whose note says rupees: "· INR Transfer" as its method, or what was handed over in rupees after it — "· INR 12,800
  * at 1 AED = 25.6 INR" as the close dialog writes it, "· INR 12,800 at 1 INR = 0.039 AED" as a correction does. A
- * note in another currency ("· USD 500 at 1 USD = 3.67 AED") says nothing of rupees.
+ * note in another currency ("· USD 500 at 1 USD = 3.67 AED") says nothing of rupees. "· Razorpay" says rupees as
+ * "· INR Transfer" does (2026-11-13).
  */
-const noteSaysRupees = (p: LeadPayment) => /·\s*INR Transfer\s*(·|$)/.test(p.note ?? "") || /·\s*INR [\d,.]+ at 1 (INR|AED) = /.test(p.note ?? "");
+const noteSaysRupees = (p: LeadPayment) => namesRupeeMethod(p.note ?? "") || /·\s*INR [\d,.]+ at 1 (INR|AED) = /.test(p.note ?? "");
 
 /**
  * Which of a Dubai enrolment's payments on the lead were rupees. A balance payment, or one added on the lead, says so
@@ -60,7 +67,7 @@ const noteSaysRupees = (p: LeadPayment) => /·\s*INR Transfer\s*(·|$)/.test(p.n
  */
 function rupeeRows(s: StudentLike, pays: LeadPayment[]): Set<LeadPayment> {
   const left = (s.payments ?? [])
-    .filter((p) => !p.collectedBefore && (p.method === RUPEE_METHOD || p.currency === "INR"))
+    .filter((p) => !p.collectedBefore && (isRupeeMethod(p.method) || p.currency === "INR"))
     .map((p) => ({ amount: p.amount ?? 0, method: p.method }));
   const take = (p: LeadPayment) => {
     const i = left.findIndex((c) => Math.abs(c.amount - p.amount) < 0.005 && (!p.method || p.method === c.method));
@@ -70,7 +77,7 @@ function rupeeRows(s: StudentLike, pays: LeadPayment[]): Set<LeadPayment> {
   const rupees = new Set<LeadPayment>();
   for (const p of pays) {
     const close = fromTheClose(p);
-    if (p.method === RUPEE_METHOD || p.finance?.method === RUPEE_METHOD || (close && noteSaysRupees(p))) {
+    if (isRupeeMethod(p.method) || isRupeeMethod(p.finance?.method) || (close && noteSaysRupees(p))) {
       rupees.add(p);
       if (close) take(p);
     }

@@ -17,6 +17,7 @@
  *   6. paid in rupees, earned in rupees (2026-11-13): which payments are marked as rupees — INR Transfer or typed in
  *      INR at the close, a balance payment or a lead payment by INR Transfer, a Bangalore close's rupees — and never
  *      cash, card, another currency or a guess; the rupee share earns the course's rupee amount, the rest AED.
+ *      Razorpay is rupees wherever INR Transfer is; POS, a card machine, never (2026-11-13).
  *
  * Run by collected-commission-check.sh. Scratch database only.
  */
@@ -360,6 +361,23 @@ const mBlr = await sale("Bea", T1, { date: "2027-01-10T08:00:00Z", fee: 60000, c
   pays: [{ amount: 1000, paidAt: "2027-01-10T08:00:00Z", method: "cash", note: atClose("Cash · Bangalore · AED 1,000 at 1 AED = 22.75 INR") },
     { amount: 10000, paidAt: "2027-01-20T08:00:00Z", currency: "INR", finance: approvedBp("bp-blr") }, { amount: 5000, paidAt: "2027-01-21T08:00:00Z", currency: "INR", finance: { ...approvedBp("bp-blr-2"), state: "pending" } }] });
 check("a Bangalore close: rupees at the close and an approved balance payment are rupees, cash taken in AED is not", (await paidIn(mBlr)) === "20000₹ 22750 7250₹ 10000₹", await paidIn(mBlr));
+// Razorpay pays out in rupees, as INR Transfer does (the owner, 2026-11-13); POS is a card machine — dirhams. At the
+// close: POS and Razorpay of the same amount, each row with its method; then the balance by Razorpay — approved.
+const mRzp = await sale("Bea", T1, { date: "2027-01-11T08:00:00Z", fee: 1000, counted: false,
+  close: [{ amount: 250, method: "pos" }, { amount: 250, method: "razorpay" }],
+  pays: [{ amount: 250, paidAt: "2027-01-11T08:00:00Z", method: "pos", note: atClose("POS") }, { amount: 250, paidAt: "2027-01-11T09:00:00Z", method: "razorpay", note: atClose("Razorpay") },
+    { amount: 500, paidAt: "2027-01-15T08:00:00Z", finance: { ...approvedBp("bp-razorpay"), method: "razorpay" } }] });
+check("Razorpay is rupees as INR Transfer is: at the close, and a balance payment by Razorpay — POS of the same amount beside it is not",
+  (await paidIn(mRzp)) === "250 250₹ 500₹", await paidIn(mRzp));
+// After a correction (no method on the rows), the POS row first: only the row whose note names Razorpay is rupees —
+// with what was handed over after it, or alone. A balance payment by POS is not.
+const mRzpNote = await sale("Bea", T1, { date: "2027-01-12T08:00:00Z", fee: 1500, counted: false,
+  close: [{ amount: 400, method: "pos" }, { amount: 400, method: "razorpay" }, { amount: 300, method: "razorpay", currency: "INR", amountInCurrency: 7680, exchangeRate: 0.0390625 }],
+  pays: [{ amount: 400, paidAt: "2027-01-12T08:00:00Z", note: atClose("POS") }, { amount: 400, paidAt: "2027-01-12T09:00:00Z", note: atClose("Razorpay") },
+    { amount: 300, paidAt: "2027-01-12T10:00:00Z", note: atClose("Razorpay · INR 7,680 at 1 INR = 0.0390625 AED") },
+    { amount: 400, paidAt: "2027-01-16T08:00:00Z", finance: { ...approvedBp("bp-pos"), method: "pos" } }] });
+check("…a close row that names Razorpay in its note is rupees; one naming POS, and a balance payment by POS, are not",
+  (await paidIn(mRzpNote)) === "400 400₹ 300₹ 400", await paidIn(mRzpNote));
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 await mongoose.disconnect();
