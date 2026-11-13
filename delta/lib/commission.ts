@@ -6,6 +6,16 @@ import type { CommissionRole, CommissionSaleState } from "@/types/commission";
  * rather than borrowing the display currency's symbol.
  */
 export const aed = (n: number) => `AED ${n.toLocaleString("en-AE", { maximumFractionDigits: 2 })}`;
+
+/**
+ * Commission in rupees (the user, 2026-11-13: "INR payment only gets commission in INR"): the part of a sale the
+ * client paid in rupees earns the course's own rupee amount from Root's plan — shown beside the AED part, never
+ * added to it. Whole rupees, as they are paid.
+ */
+export const inr = (n: number) => `INR ${Math.round(n).toLocaleString("en-IN")}`;
+/** An AED figure with its rupee part after it when there is one: "AED 172.50 + INR 1,250". */
+export const aedPlusInr = (aedAmount: number, inrAmount?: number | null) =>
+  inrAmount && inrAmount > 0 ? (aedAmount > 0 ? `${aed(aedAmount)} + ${inr(inrAmount)}` : inr(inrAmount)) : aed(aedAmount);
 export const usd = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} USD`;
 /** A target on a slab's bar, short: 15K, 132K, 1.2M. */
 export const aedShort = (n: number) =>

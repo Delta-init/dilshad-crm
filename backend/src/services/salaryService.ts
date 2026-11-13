@@ -4,7 +4,7 @@ import { FinanceHandover } from "../models/FinanceHandover.js";
 import { Student } from "../models/Student.js";
 import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
-import { COUNT_FROM, commissionScope, feeOf, idOf, monthRange, earnedShareBetween, waitingShareOf, partOf, shareBetween, isSuperAdmin, loadConfig, slabsForScope, uaeMonthOf } from "./commissionService.js";
+import { COUNT_FROM, commissionScope, feeOf, idOf, monthRange, earnedShareBetween, waitingShareOf, partOf, shareBetween, isSuperAdmin, loadConfig, slabsForScope, uaeMonthOf, rupeeShareOf, splitByCurrency } from "./commissionService.js";
 import { slabsFor, TL_SLAB } from "./salarySlabs.js";
 import type { CommissionSaleState, IRole, ISlabRow, ISlabs, SlabRole } from "../types/index.js";
 import { fetchCommissionPayouts, type CommissionPayout } from "./financeClient.js";
@@ -66,6 +66,13 @@ export interface PayRow {
     payable: number;
     /** Sales still finishing their steps: their commission is added once they're counted. */
     notCountedYet: number;
+    /**
+     * In rupees (the user, 2026-11-13: "INR payment only gets commission in INR"): earned on what clients paid in
+     * rupees, at the courses' rupee amounts — and what the level pays of it. Apart from `earned` / `payable`, which
+     * are AED only. Absent from a Root before them.
+     */
+    earnedInr?: number;
+    payableInr?: number;
   };
   total: number;
 }
@@ -91,7 +98,7 @@ type Fact = {
   inMonth: boolean;
   approved: boolean;
   state: CommissionSaleState;
-  lines: { user: string; amount: number; balance: number }[];
+  lines: { user: string; amount: number; inr: number; balance: number }[];
 };
 
 type TeamLite = { _id: Types.ObjectId; name: string; status?: string; leaders?: unknown[]; members?: unknown[] };
@@ -140,7 +147,12 @@ async function monthFacts(month: string, activeTeams: TeamLite[]): Promise<Fact[
       approved: s.state === "counted" || s.state === "waiting" || approvedInFinance.has(String(s.student)),
       state: s.state,
       lines: s.state === "counted"
-        ? s.lines.map((l) => ({ user: idOf(l.user), amount: partOf(l.amount, earnedShareBetween(s, from, to)), balance: partOf(l.amount, waitingShareOf(s)) }))
+        ? s.lines.map((l) => {
+          // Earned whole in the month the client finished paying — split then by how they paid (2026-11-13).
+          const earned = earnedShareBetween(s, from, to);
+          const by = splitByCurrency(l.amount, l.amountInr, rupeeShareOf(s));
+          return { user: idOf(l.user), amount: partOf(by.aed, earned), inr: partOf(by.inr, earned), balance: partOf(l.amount, waitingShareOf(s)) };
+        })
         : [],
     };
   });
@@ -192,12 +204,14 @@ export async function payRows(month: string, slabs: ISlabs): Promise<PayRow[]> {
     const awaiting = mine.filter((f) => !f.approved && f.inMonth);
     const earned = round2(facts.reduce((sum, f) => sum + f.lines.filter((l) => l.user === user).reduce((s, l) => s + l.amount, 0), 0));
     const balance = round2(facts.reduce((sum, f) => sum + f.lines.filter((l) => l.user === user).reduce((s, l) => s + l.balance, 0), 0));
+    const earnedInr = round2(facts.reduce((sum, f) => sum + f.lines.filter((l) => l.user === user).reduce((s, l) => s + l.inr, 0), 0));
     // Nothing this month, and no longer here: not on the list.
-    if (u.status !== "active" && !mine.length && !earned) continue;
+    if (u.status !== "active" && !mine.length && !earned && !earnedInr) continue;
 
     const value = round2(approved.reduce((s, f) => s + f.collected, 0));
     const { level, next } = levelOf(slabs[role], value);
     const payable = round2((earned * level.percent) / 100);
+    const payableInr = round2((earnedInr * level.percent) / 100);
     rows.push({
       user,
       name: u.name ?? "",
@@ -214,6 +228,8 @@ export async function payRows(month: string, slabs: ISlabs): Promise<PayRow[]> {
         balance,
         payable,
         notCountedYet: mine.filter((f) => f.inMonth && (f.state === "progress" || f.state === "waiting")).length,
+        earnedInr,
+        payableInr,
       },
       total: round2(level.salary + payable),
     });
@@ -271,6 +287,7 @@ export class SalaryService {
             people: people.length,
             salary: round2(people.reduce((s, r) => s + r.salary, 0)),
             payable: round2(people.reduce((s, r) => s + r.commission.payable, 0)),
+            payableInr: round2(people.reduce((s, r) => s + (r.commission.payableInr ?? 0), 0)),
             total: round2(people.reduce((s, r) => s + r.total, 0)),
           }
         : null,

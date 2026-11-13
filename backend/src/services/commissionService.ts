@@ -67,14 +67,17 @@ export function isSuperAdmin(role?: IRole | null): boolean {
   return Boolean(role?.isSystemRole && role.roleName === "Super Admin");
 }
 
-export type Plan = { sales: number; tl: number; sm: number; creditUsd: number };
+/** `…Inr`: the course's rupee amounts in Root's plan (2026-11-13); absent here when this CRM works the sale out itself. */
+export type Plan = { sales: number; tl: number; sm: number; creditUsd: number; salesInr?: number; tlInr?: number; smInr?: number };
 
 const amount = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
 
 /** A course's plan row; zeros for a course nobody has set one on. */
 export function planOf(course?: { commission?: Partial<Plan> | null } | null): Plan {
   const c = course?.commission;
-  return { sales: amount(c?.sales), tl: amount(c?.tl), sm: amount(c?.sm), creditUsd: amount(c?.creditUsd) };
+  // The rupee amounts where the row has any (a held sale's own plan, 2026-11-13): it settles at those it was held at.
+  const inr = { salesInr: amount(c?.salesInr), tlInr: amount(c?.tlInr), smInr: amount(c?.smInr) };
+  return { sales: amount(c?.sales), tl: amount(c?.tl), sm: amount(c?.sm), creditUsd: amount(c?.creditUsd), ...(inr.salesInr + inr.tlInr + inr.smInr > 0 ? inr : {}) };
 }
 
 export const idOf = (v: unknown): string => {
@@ -110,8 +113,31 @@ type ShareSale = {
   saleDate?: Date;
   paidShare?: number | null;
   owedShare?: number | null;
-  collections?: { paidAt: Date; share: number }[] | null;
+  collections?: { paidAt: Date; share: number; inr?: boolean }[] | null;
 };
+
+/*
+ * Paid in rupees, earned in rupees (the user, 2026-11-13: "INR payment only gets commission in INR… separate INR
+ * commission for each course, same plan but the INR pay will be different"). A line carries the course's own rupee
+ * amount from Root's plan (`amountInr`) beside its AED one; once the client has paid in full, the share of what they
+ * paid that came in rupees (`collections[].inr`) is earned at the rupee amount, the rest at the AED one. No rupee
+ * amount on the course, or nothing paid in rupees: all in AED as before. The same rule as Root's commissionEngine.
+ */
+
+/** The share of what a sale has received that came in rupees, 0–1; a sale not followed payment by payment: none. */
+export function rupeeShareOf(sale: ShareSale): number {
+  const list = Array.isArray(sale.collections) ? sale.collections.filter((c) => c.share > 0) : [];
+  const all = list.reduce((s, c) => s + c.share, 0);
+  if (!(all > 0)) return 0;
+  return Math.min(1, round4(list.filter((c) => c.inr === true).reduce((s, c) => s + c.share, 0) / all));
+}
+
+/** A line's amount by how the client paid: the rupee share at its rupee amount (INR), the rest in AED. */
+export function splitByCurrency(amount: number, amountInr: number | undefined | null, rupeeShare: number): { aed: number; inr: number } {
+  const inr = typeof amountInr === "number" && amountInr > 0 ? amountInr : 0;
+  if (!(inr > 0) || !(rupeeShare > 0)) return { aed: amount, inr: 0 };
+  return { aed: round2(amount * (1 - rupeeShare)), inr: round2(inr * rupeeShare) };
+}
 
 /** A UAE month as two instants, inclusive. */
 export function monthRange(month: string): { from: Date; to: Date } {
@@ -648,7 +674,7 @@ export async function refreshPaidShares(): Promise<number> {
   if (!sales.length) return 0;
   const students = await Student.find({ _id: { $in: sales.map((s) => s.student) } })
     .select("leadId academy enrollmentDate payments totalFee pendingAmount")
-    .lean<{ _id: unknown; leadId?: unknown; academy?: string; enrollmentDate?: Date; payments?: { amount?: number; paidAt?: Date; collectedBefore?: boolean }[]; totalFee?: number; pendingAmount?: number }[]>();
+    .lean<{ _id: unknown; leadId?: unknown; academy?: string; enrollmentDate?: Date; payments?: { amount?: number; paidAt?: Date; collectedBefore?: boolean; method?: string; currency?: string; amountInCurrency?: number }[]; totalFee?: number; pendingAmount?: number }[]>();
   const studentOf = new Map(students.map((s) => [String(s._id), s]));
   const received = await collectionsOf(students);
   let changed = 0;
@@ -656,7 +682,7 @@ export async function refreshPaidShares(): Promise<number> {
     const st = studentOf.get(String(sale.student));
     if (!st) continue;                                    // a deleted enrolment keeps what it had
     const fee = st.totalFee ?? 0;
-    let collections: { paidAt: Date; share: number }[] = [];
+    let collections: { paidAt: Date; share: number; inr?: boolean }[] = [];
     let owedShare = 0;
     if (!(fee > 0)) {
       collections = [{ paidAt: new Date(st.enrollmentDate ?? sale.saleDate), share: 1 }];
@@ -665,7 +691,8 @@ export async function refreshPaidShares(): Promise<number> {
       for (const c of received.get(String(st._id)) ?? []) {
         if (c.paidAt < COUNT_FROM || left <= 0) continue;
         const share = round4(Math.min(left, c.amount / fee));
-        if (share > 0) collections.push({ paidAt: c.paidAt, share });
+        // `inr`: handed over in rupees (2026-11-13) — that share of each line is earned at its rupee amount.
+        if (share > 0) collections.push({ paidAt: c.paidAt, share, ...(c.inr ? { inr: true } : {}) });
         left = round4(left - share);
       }
       owedShare = round4(Math.min(1, Math.max(0, (st.pendingAmount ?? 0) / fee)));
@@ -674,8 +701,8 @@ export async function refreshPaidShares(): Promise<number> {
     const same =
       sale.paidShare === paidShare &&
       sale.owedShare === owedShare &&
-      JSON.stringify((sale.collections ?? []).map((c) => [new Date(c.paidAt).getTime(), c.share])) ===
-        JSON.stringify(collections.map((c) => [c.paidAt.getTime(), c.share]));
+      JSON.stringify((sale.collections ?? []).map((c) => [new Date(c.paidAt).getTime(), c.share, c.inr === true])) ===
+        JSON.stringify(collections.map((c) => [c.paidAt.getTime(), c.share, c.inr === true]));
     if (same && Array.isArray(sale.collections)) continue;
     await CommissionSale.updateOne({ _id: sale._id }, { $set: { paidShare, owedShare, collections } });
     changed++;
@@ -889,30 +916,39 @@ export class CommissionService {
 
     // Earned: all of a line once the client paid in full, in the month of the last payment. Balance: all of it while
     // the client still owes — it waits for the full payment.
-    type Tally = { count: number; amount: number; balance: number };
-    const people = new Map<string, { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number; balance: number }>();
+    // In rupees (2026-11-13): the share the client paid in rupees, at the line's rupee amount — `amountInr`, apart
+    // from `amount`, which is then only the rest. The balance stays in AED until they have paid: how they pay the
+    // rest decides the split.
+    type Tally = { count: number; amount: number; balance: number; amountInr: number };
+    const people = new Map<string, { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number; balance: number; totalInr: number }>();
     for (const sale of sales) {
       if (sale.state !== "counted") continue;
       const share = earnedShareBetween(sale, from, to);
       const owed = waitingShareOf(sale);
+      const rupees = rupeeShareOf(sale);
       for (const l of visible(sale)) {
-        const earned = partOf(l.amount, share);
+        const by = splitByCurrency(l.amount, l.amountInr, rupees);
+        const earned = partOf(by.aed, share);
+        const earnedInr = partOf(by.inr, share);
         const balance = partOf(l.amount, owed);
-        if (earned <= 0 && balance <= 0) continue;
+        if (earned <= 0 && earnedInr <= 0 && balance <= 0) continue;
         const key = String(l.user);
         const p = people.get(key) ?? {
           _id: key,
           name: l.userName,
-          sales: { count: 0, amount: 0, balance: 0 },
-          tl: { count: 0, amount: 0, balance: 0 },
-          sm: { count: 0, amount: 0, balance: 0 },
+          sales: { count: 0, amount: 0, balance: 0, amountInr: 0 },
+          tl: { count: 0, amount: 0, balance: 0, amountInr: 0 },
+          sm: { count: 0, amount: 0, balance: 0, amountInr: 0 },
           total: 0,
           balance: 0,
+          totalInr: 0,
         };
-        if (earned > 0) p[l.role].count++;
+        if (earned > 0 || earnedInr > 0) p[l.role].count++;
         p[l.role].amount = round2(p[l.role].amount + earned);
+        p[l.role].amountInr = round2(p[l.role].amountInr + earnedInr);
         p[l.role].balance = round2(p[l.role].balance + balance);
         p.total = round2(p.total + earned);
+        p.totalInr = round2(p.totalInr + earnedInr);
         p.balance = round2(p.balance + balance);
         people.set(key, p);
       }
@@ -937,20 +973,27 @@ export class CommissionService {
       monthShare: shareBetween(s, from, to),
       /** When the client finished paying — the commission is earned then; null while they owe. */
       paidInFullAt: paidInFullAt(s),
-      lines: visible(s).map((l) => ({
-        role: l.role, user: String(l.user), userName: l.userName, amount: l.amount,
-        earned: partOf(l.amount, earnedShareBetween(s, from, to)), balance: partOf(l.amount, waitingShareOf(s)), note: l.note ?? "",
-      })),
+      /** The share of what the client paid that came in rupees (2026-11-13) — earned at the lines' rupee amounts. */
+      rupeeShare: rupeeShareOf(s),
+      lines: visible(s).map((l) => {
+        const by = splitByCurrency(l.amount, l.amountInr, rupeeShareOf(s));
+        const share = earnedShareBetween(s, from, to);
+        return {
+          role: l.role, user: String(l.user), userName: l.userName, amount: l.amount, amountInr: l.amountInr ?? 0,
+          earned: partOf(by.aed, share), earnedInr: partOf(by.inr, share), balance: partOf(l.amount, waitingShareOf(s)), note: l.note ?? "",
+        };
+      }),
     }));
 
     return {
       month,
       scope,
       tlRule: TL_RULE,
-      people: [...people.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name)),
+      people: [...people.values()].sort((a, b) => b.total - a.total || b.totalInr - a.totalInr || a.name.localeCompare(b.name)),
       sales: list,
       totals: {
         amount: round2([...people.values()].reduce((s, p) => s + p.total, 0)),
+        amountInr: round2([...people.values()].reduce((s, p) => s + p.totalInr, 0)),
         balance: round2([...people.values()].reduce((s, p) => s + p.balance, 0)),
         counted: count("counted"),
         waiting: count("waiting"),
@@ -980,7 +1023,7 @@ export class CommissionService {
       resolved.state === "counted"
         ? resolved.lines.filter((l) => String(l.user) === closer)
         : resolved.state === "waiting" && Types.ObjectId.isValid(closer)
-          ? [{ role: "sales" as const, user: new Types.ObjectId(closer), userName: await names.of(closer), amount: plan.sales }]
+          ? [{ role: "sales" as const, user: new Types.ObjectId(closer), userName: await names.of(closer), amount: plan.sales, ...(plan.salesInr ? { amountInr: plan.salesInr } : {}) }]
           : [];
 
     // Only what the viewer may see (2026-10-23): their own line(s), a team leader's team's lines but the SM's — it used
@@ -995,11 +1038,14 @@ export class CommissionService {
       teamName: resolved.teamName,
       closerName: closer ? await names.of(closer) : "",
       closerTotal: closerLines.filter(visible).reduce((s, l) => s + l.amount, 0),
+      // In rupees (2026-11-13): what the same lines pay for the part of the fee the client pays in rupees; 0 = none set.
+      closerTotalInr: closerLines.filter(visible).reduce((s, l) => s + (l.amountInr ?? 0), 0),
       lines: (resolved.state === "counted" ? resolved.lines : closerLines).filter(visible).map((l) => ({
         role: l.role,
         user: String(l.user),
         userName: l.userName,
         amount: l.amount,
+        amountInr: l.amountInr ?? 0,
         note: l.note ?? "",
       })),
     };

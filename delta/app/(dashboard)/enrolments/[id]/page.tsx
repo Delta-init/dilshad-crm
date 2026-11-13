@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { fmtAcademy } from "@/lib/currency";
 import { AcademyBadge } from "@/components/students/AcademyBadge";
-import { aed, ROLE_LABEL, STATE_LABEL, monthLabel } from "@/lib/commission";
+import { aed, inr, ROLE_LABEL, STATE_LABEL, monthLabel } from "@/lib/commission";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useEnrolment, useRequestInvoice, sendBackState, uaeTime, type EnrolmentDetail } from "@/hooks/useEnrolments";
 import { EnrolmentStepsList } from "@/components/students/EnrolmentSteps";
@@ -162,6 +162,12 @@ function CommissionCard({ e }: { e: EnrolmentDetail }) {
                   <span className="text-muted-foreground">{ROLE_LABEL[l.role]} · {l.userName}{l.note ? ` — ${l.note}` : ""}</span>
                   <span className="text-right">
                     <span className="font-semibold tabular-nums">{aed(l.earned ?? l.amount)}</span>
+                    {/* Paid in rupees, earned in rupees (2026-11-13); before full payment, what the rupee part would pay. */}
+                    {(l.earnedInr ?? 0) > 0 ? (
+                      <span className="block text-[11px] font-semibold tabular-nums text-amber-600 dark:text-amber-400">+ {inr(l.earnedInr ?? 0)}</span>
+                    ) : (l.amountInr ?? 0) > 0 ? (
+                      <span className="block text-[11px] tabular-nums text-muted-foreground">{inr(l.amountInr ?? 0)} on a part paid in rupees</span>
+                    ) : null}
                     {(l.balance ?? 0) > 0 && (
                       <span className="block text-[11px] tabular-nums text-amber-600 dark:text-amber-400">
                         +{aed(l.balance ?? 0)} once paid in full

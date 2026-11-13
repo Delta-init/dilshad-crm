@@ -21,6 +21,8 @@ const lineSchema = new Schema(
     user: { type: Schema.Types.ObjectId, ref: "User", required: true },
     userName: { type: String, default: "" },
     amount: { type: Number, min: 0, default: 0 },
+    /** The line's rupee amount (2026-11-13): what the part of the fee paid in rupees pays, INR. Absent: none set. */
+    amountInr: { type: Number, min: 0 },
     note: { type: String },
   },
   { _id: false },
@@ -63,7 +65,8 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
      * month (the user, 2026-10-31: "that month collected payment only count"). Absent: not followed yet.
      */
     collections: {
-      type: [new Schema({ paidAt: { type: Date, required: true }, share: { type: Number, required: true } }, { _id: false })],
+      // `inr`: handed over in rupees (2026-11-13) — INR Transfer, or typed in INR with its rate. Absent: dirhams.
+      type: [new Schema({ paidAt: { type: Date, required: true }, share: { type: Number, required: true }, inr: { type: Boolean } }, { _id: false })],
       default: undefined,
     },
     plan: {
@@ -71,6 +74,10 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
       tl: { type: Number, default: 0 },
       sm: { type: Number, default: 0 },
       creditUsd: { type: Number, default: 0 },
+      // The course's rupee amounts in Root's plan when the sale was decided (2026-11-13); absent: none.
+      salesInr: { type: Number },
+      tlInr: { type: Number },
+      smInr: { type: Number },
     },
     state: {
       type: String,

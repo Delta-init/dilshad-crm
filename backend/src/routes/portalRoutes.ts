@@ -96,6 +96,8 @@ router.get(
       people: rows.map((r) => ({
         user: r.user, name: r.name, role: r.role, level: r.level.name, percent: r.percent,
         earned: r.commission.earned, balance: r.commission.balance, payable: r.commission.payable, notCountedYet: r.commission.notCountedYet,
+        // In rupees (2026-11-13): earned on what clients paid in rupees, and what the level pays of it — apart from the AED above.
+        earnedInr: r.commission.earnedInr ?? 0, payableInr: r.commission.payableInr ?? 0,
       })),
     });
   }),

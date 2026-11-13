@@ -5,7 +5,7 @@ import { Coins, Hourglass, UserX } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCommissionPreview } from "@/hooks/useCommission";
 import { useAuthStore } from "@/lib/store/authStore";
-import { aed, ROLE_LABEL } from "@/lib/commission";
+import { aed, inr, ROLE_LABEL } from "@/lib/commission";
 
 interface CommissionPreviewProps {
   courseId?: string | null;
@@ -70,6 +70,12 @@ export function CommissionPreview({ courseId, teamId, closerId }: CommissionPrev
             {mine.length > 1 && (
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {mine.map((l) => `${ROLE_LABEL[l.role]} ${aed(l.amount)}`).join(" + ")}
+              </p>
+            )}
+            {/* Paid in rupees, earned in rupees (2026-11-13): the course's own rupee amount for that part of the fee. */}
+            {(data.closerTotalInr ?? 0) > 0 && (
+              <p className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+                Paid in rupees: <span className="font-semibold">{inr(data.closerTotalInr ?? 0)}</span> instead — for the part of the fee the client pays in INR.
               </p>
             )}
             <p className="mt-0.5 text-[10px] text-muted-foreground">

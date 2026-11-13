@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowRight, Hourglass, Landmark, Trophy, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { aed, monthLabel, ROLE_LABEL } from "@/lib/commission";
+import { aed, aedPlusInr, monthLabel, ROLE_LABEL } from "@/lib/commission";
 import { LadderBar } from "@/components/pay/SlabLadder";
 import { PayoutBadge } from "@/components/pay/PayoutBadge";
 import type { PayRow, SlabRow } from "@/types/commission";
@@ -77,10 +77,11 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
         <Figure label="Salary" value={aed(row.salary)} />
         <Figure
           label="Commission earned"
-          value={aed(row.commission.earned)}
+          value={aedPlusInr(row.commission.earned, row.commission.earnedInr)}
           sub={(row.commission.balance ?? 0) > 0 ? `+${aed(row.commission.balance ?? 0)} waiting for full payment` : undefined}
         />
-        <Figure label={`Paid at ${row.percent}%`} value={aed(row.commission.payable)} />
+        {/* The rupee part (2026-11-13) is paid in rupees, apart from the AED total. */}
+        <Figure label={`Paid at ${row.percent}%`} value={aedPlusInr(row.commission.payable, row.commission.payableInr)} />
       </div>
       {payoutsKnown && (
         <div className="mt-2 flex justify-end">

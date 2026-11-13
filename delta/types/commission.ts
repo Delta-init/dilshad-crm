@@ -107,7 +107,8 @@ export interface PayRow {
   salary: number;
   percent: number;
   /** Earned on what is collected; `balance` is earned as balance payments are approved (2026-10-31). */
-  commission: { earned: number; balance?: number; payable: number; notCountedYet: number };
+  /** `earnedInr` / `payableInr` (2026-11-13): the part earned in rupees and what the level pays of it — apart from the AED. */
+  commission: { earned: number; balance?: number; payable: number; notCountedYet: number; earnedInr?: number; payableInr?: number };
   total: number;
   /** Where finance stands on the month's commission (2026-10-21); null when neither approved nor paid. */
   payout?: CommissionPayout | null;
@@ -140,7 +141,7 @@ export interface PayView {
   me: PayRow | null;
   /** Everyone — a Super Admin and the Sales Manager; a team leader their team's people. */
   people: PayRow[] | null;
-  totals: { people: number; salary: number; payable: number; total: number } | null;
+  totals: { people: number; salary: number; payable: number; total: number; payableInr?: number } | null;
 }
 
 export interface CommissionLine {
@@ -151,6 +152,9 @@ export interface CommissionLine {
   amount: number;
   earned?: number;
   balance?: number;
+  /** The line's rupee amount, and what it earned in rupees (2026-11-13) — `earned` is then only the AED part. */
+  amountInr?: number;
+  earnedInr?: number;
   note: string;
 }
 
@@ -173,6 +177,8 @@ export interface CommissionSale {
   monthShare?: number;
   /** When the client finished paying — the commission is earned then; null while they owe (2026-10-31). */
   paidInFullAt?: string | null;
+  /** The share of what the client paid that came in rupees, 0–1 (2026-11-13). */
+  rupeeShare?: number;
   /** Only the lines the viewer may see. */
   lines: CommissionLine[];
 }
@@ -182,6 +188,8 @@ interface Tally {
   /** Earned, on what is collected. */
   amount: number;
   balance?: number;
+  /** Earned in rupees (2026-11-13), apart from `amount`. */
+  amountInr?: number;
 }
 
 export interface CommissionEarnings {
@@ -189,9 +197,9 @@ export interface CommissionEarnings {
   /** What the viewer sees: everything, their teams', or their own. */
   scope: "all" | "team" | "own";
   tlRule?: "zero_if_sm" | "always" | "never";
-  people: { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number; balance?: number }[];
+  people: { _id: string; name: string; sales: Tally; tl: Tally; sm: Tally; total: number; balance?: number; totalInr?: number }[];
   sales: CommissionSale[];
-  totals: { amount: number; balance?: number; counted: number; waiting: number; excluded: number; reversed: number; progress?: number };
+  totals: { amount: number; amountInr?: number; balance?: number; counted: number; waiting: number; excluded: number; reversed: number; progress?: number };
 }
 
 export interface CommissionPreview {
@@ -203,5 +211,7 @@ export interface CommissionPreview {
   closerName: string;
   /** What the closer earns on it, in all their roles. */
   closerTotal: number;
+  /** The same lines' rupee amounts added up (2026-11-13): what the part paid in rupees pays; 0 or absent = none set. */
+  closerTotalInr?: number;
   lines: CommissionLine[];
 }

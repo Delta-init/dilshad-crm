@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fmtFull } from "@/lib/currency";
+import { inr } from "@/lib/commission";
 import { useDailyClosings, type ClosingDay } from "@/hooks/useClosings";
 import { useTeams } from "@/hooks/useTeams";
 
@@ -166,7 +167,8 @@ export default function ClosingsPage() {
           icon={BadgeDollarSign}
           label="Commission earned"
           value={fmtFull(totals?.commissionEarned ?? 0)}
-          sub={`${fmtFull(totals?.commissionBalance ?? 0)} waiting for clients to pay in full`}
+          // The part earned in rupees (2026-11-13) is apart from the AED figure.
+          sub={`${(totals?.commissionEarnedInr ?? 0) > 0 ? `+ ${inr(totals?.commissionEarnedInr ?? 0)} earned in rupees · ` : ""}${fmtFull(totals?.commissionBalance ?? 0)} waiting for clients to pay in full`}
           tone="green"
         />
         <Stat
@@ -356,10 +358,11 @@ function DayRow({
                 <p className="text-xs">{e.closedByName}</p>
                 <p className="text-[11px] text-muted-foreground">{e.teamName}</p>
               </div>
-              {e.commission?.state === "counted" && (e.commission.earned > 0 || e.commission.balance > 0) && (
+              {e.commission?.state === "counted" && (e.commission.earned > 0 || e.commission.balance > 0 || (e.commission.earnedInr ?? 0) > 0) && (
                 <div className="text-right">
                   <p className="text-xs font-medium tabular-nums text-green-600 dark:text-green-400">
-                    {fmtFull(e.commission.earned)} commission
+                    {fmtFull(e.commission.earned)}
+                    {(e.commission.earnedInr ?? 0) > 0 && <span className="text-amber-600 dark:text-amber-400"> + {inr(e.commission.earnedInr ?? 0)}</span>} commission
                   </p>
                   <p className="text-[11px] tabular-nums text-muted-foreground">
                     {e.commission.balance > 0 ? `${fmtFull(e.commission.balance)} waiting for full payment` : "All earned"}

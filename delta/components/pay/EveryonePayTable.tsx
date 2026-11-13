@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { PayoutBadge } from "@/components/pay/PayoutBadge";
-import { aed, ROLE_SHORT } from "@/lib/commission";
+import { aed, aedPlusInr, inr, ROLE_SHORT } from "@/lib/commission";
 import { basisOf } from "@/components/pay/PayMonthCard";
 import type { PayRow, PayView } from "@/types/commission";
 
@@ -74,8 +74,10 @@ export function EveryonePayTable({ people, totals, payoutsKnown = false }: Every
               <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-foreground">{aed(p.salary)}</td>
               <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
                 <span className="text-foreground">{aed(p.commission.payable)}</span>
+                {/* The part payable in rupees (2026-11-13), apart from the AED. */}
+                {(p.commission.payableInr ?? 0) > 0 && <span className="block text-xs text-amber-600 dark:text-amber-400">+ {inr(p.commission.payableInr ?? 0)}</span>}
                 <p className="text-[10px] text-muted-foreground">
-                  {p.percent}% of {aed(p.commission.earned)}
+                  {p.percent}% of {aedPlusInr(p.commission.earned, p.commission.earnedInr)}
                   {(p.commission.balance ?? 0) > 0 ? ` · +${aed(p.commission.balance ?? 0)} waiting for full payment` : ""}
                   {p.commission.notCountedYet > 0 ? ` · ${p.commission.notCountedYet} not counted yet` : ""}
                 </p>
@@ -91,7 +93,10 @@ export function EveryonePayTable({ people, totals, payoutsKnown = false }: Every
               {totals.people} {totals.people === 1 ? "person" : "people"}
             </td>
             <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-foreground">{aed(totals.salary)}</td>
-            <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-foreground">{aed(totals.payable)}</td>
+            <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-foreground">
+              {aed(totals.payable)}
+              {(totals.payableInr ?? 0) > 0 && <span className="block text-xs text-amber-600 dark:text-amber-400">+ {inr(totals.payableInr ?? 0)}</span>}
+            </td>
             <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-primary">{aed(totals.total)}</td>
           </tr>
         </tfoot>

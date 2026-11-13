@@ -22,7 +22,8 @@ export interface Closing {
   /** Paid on it, but outside the period shown — never counted in it (2026-10-31). `paidAmount` is inside only. */
   paidOutside?: number;
   /** What the viewer may see of its commission: earned on what is collected, and the balance still to earn. */
-  commission?: { earned: number; balance: number; state: string } | null;
+  /** `earnedInr` (2026-11-13): the part earned in rupees, apart from `earned`. */
+  commission?: { earned: number; balance: number; earnedInr?: number; state: string } | null;
 }
 
 export interface ClosingDay {
@@ -48,6 +49,7 @@ export interface ClosingsResponse {
     pendingAmount: number;
     commissionEarned?: number;
     commissionBalance?: number;
+    commissionEarnedInr?: number;
   };
   /** Always present, so a quiet morning reads "0" rather than showing nothing. */
   today: { date: string; count: number; totalFee: number };

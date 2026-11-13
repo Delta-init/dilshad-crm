@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { ArrowRight, Users } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePay } from "@/hooks/useCommission";
-import { aed, monthLabel, uaeMonth } from "@/lib/commission";
+import { aed, aedPlusInr, monthLabel, uaeMonth } from "@/lib/commission";
 import { PayMonthCard } from "@/components/pay/PayMonthCard";
 
 /**
@@ -38,7 +38,7 @@ export function DashboardPayCard() {
           <p className="text-sm font-semibold text-foreground">Pay on the slabs · {monthLabel(data.month)}</p>
           <p className="text-xs text-muted-foreground">
             {data.totals.people} {data.totals.people === 1 ? "person" : "people"} · salaries {aed(data.totals.salary)} · commission{" "}
-            {aed(data.totals.payable)} · <span className="font-semibold text-primary">total {aed(data.totals.total)}</span>
+            {aedPlusInr(data.totals.payable, data.totals.payableInr)} · <span className="font-semibold text-primary">total {aed(data.totals.total)}</span>
           </p>
         </div>
       </div>

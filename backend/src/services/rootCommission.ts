@@ -97,7 +97,8 @@ export async function rootSlabs(month: string): Promise<{ slabs: ISlabs; from: s
   return { slabs, from: p.slabsFrom && p.slabsFrom !== "2000-01" ? p.slabsFrom : null };
 }
 
-type Amounts = { sales: number; tl: number; sm: number; creditUsd: number };
+/** `…Inr` (2026-11-13): the course's rupee amounts, what the part of a sale paid in rupees pays; absent from a Root before them. */
+type Amounts = { sales: number; tl: number; sm: number; creditUsd: number; salesInr?: number; tlInr?: number; smInr?: number };
 export interface RootResolved {
   state: "counted" | "waiting" | "excluded";
   reason: string;
@@ -108,6 +109,13 @@ export interface RootResolved {
   plan: Amounts;
 }
 
+/** A held sale's amounts as sent to Root: plain numbers, its rupee amounts only where it was held with any. */
+function heldAmounts(a: Amounts): Amounts {
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+  const inr = { salesInr: n(a.salesInr), tlInr: n(a.tlInr), smInr: n(a.smInr) };
+  return { sales: n(a.sales), tl: n(a.tl), sm: n(a.sm), creditUsd: n(a.creditUsd), ...(inr.salesInr + inr.tlInr + inr.smInr > 0 ? inr : {}) };
+}
+
 /**
  * Who earns what on a sale, as Root works it out: from the course's row (a bundle's courses added up), or at the
  * amounts a held sale was held at.
@@ -116,20 +124,29 @@ export async function rootResolve(input: { closer: string; team: string; course?
   await ensurePortal();
   const r = await ask<{
     state: RootResolved["state"]; reason: string; team: string | null; teamName: string; plan: Amounts;
-    lines: Array<{ role: CommissionRole; user: string; userName: string; amount: number; note?: string }>;
+    lines: Array<{ role: CommissionRole; user: string; userName: string; amount: number; amountInr?: number; note?: string }>;
   }>("POST", "/resolve", {
     body: {
       closer: input.closer || null, team: input.team || null, course: input.course || null,
-      ...(input.courses?.length ? { courses: input.courses } : {}), ...(input.amounts ? { amounts: input.amounts } : {}),
+      ...(input.courses?.length ? { courses: input.courses } : {}), ...(input.amounts ? { amounts: heldAmounts(input.amounts) } : {}),
     },
   });
+  const rupees = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
   return {
     state: r.state,
     reason: r.reason,
     team: r.team && Types.ObjectId.isValid(r.team) ? new Types.ObjectId(r.team) : null,
     teamName: r.teamName,
-    lines: r.lines.map((l) => ({ role: l.role, user: new Types.ObjectId(l.user), userName: l.userName, amount: l.amount, ...(l.note ? { note: l.note } : {}) })),
-    plan: r.plan,
+    // The rupee amount only where the course has one: a line without it is paid in AED whatever the client paid in.
+    lines: r.lines.map((l) => ({
+      role: l.role, user: new Types.ObjectId(l.user), userName: l.userName, amount: l.amount,
+      ...(rupees(l.amountInr) ? { amountInr: rupees(l.amountInr) } : {}), ...(l.note ? { note: l.note } : {}),
+    })),
+    plan: {
+      sales: r.plan.sales, tl: r.plan.tl, sm: r.plan.sm, creditUsd: r.plan.creditUsd,
+      ...(rupees(r.plan.salesInr) + rupees(r.plan.tlInr) + rupees(r.plan.smInr) > 0
+        ? { salesInr: rupees(r.plan.salesInr), tlInr: rupees(r.plan.tlInr), smInr: rupees(r.plan.smInr) } : {}),
+    },
   };
 }
 

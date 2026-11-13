@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useCommissionEarnings } from "@/hooks/useCommission";
 import {
-  aed, monthLabel, recentMonths, ROLE_LABEL, ROLE_SHORT, STATE_LABEL, TL_PAID, uaeDate, uaeMonth,
+  aed, aedPlusInr, inr, monthLabel, recentMonths, ROLE_LABEL, ROLE_SHORT, STATE_LABEL, TL_PAID, uaeDate, uaeMonth,
 } from "@/lib/commission";
 import type { CommissionEarnings, CommissionRole, CommissionSale, CommissionSaleState } from "@/types/commission";
 import { PersonSalesDialog } from "./PersonSalesDialog";
@@ -83,7 +83,7 @@ export function EarningsTab() {
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <Stat icon={Coins} label="Commission earned" value={aed(data.totals.amount)} tone="primary" />
+            <Stat icon={Coins} label="Commission earned" value={aedPlusInr(data.totals.amount, data.totals.amountInr)} tone="primary" />
             <Stat icon={Wallet} label="Waiting — client still paying" value={aed(data.totals.balance ?? 0)} tone="amber" />
             <Stat icon={CheckCircle2} label="Sales counted" value={String(data.totals.counted)} tone="green" />
             <Stat icon={Hourglass} label="Not counted yet" value={String(data.totals.waiting + (data.totals.progress ?? 0))} tone="amber" />
@@ -133,6 +133,10 @@ export function EarningsTab() {
                             >
                               <span className="text-foreground">{aed(p[role].amount)}</span>
                               <span className="ml-1 text-[11px] text-muted-foreground">· {p[role].count}</span>
+                              {/* The part earned in rupees (2026-11-13), apart from the AED. */}
+                              {(p[role].amountInr ?? 0) > 0 && (
+                                <span className="block text-[11px] text-amber-600 dark:text-amber-400">+ {inr(p[role].amountInr ?? 0)}</span>
+                              )}
                               {(p[role].balance ?? 0) > 0 && (
                                 <span className="block text-[10px] text-amber-600 dark:text-amber-400">+{aed(p[role].balance ?? 0)} waiting</span>
                               )}
@@ -142,7 +146,10 @@ export function EarningsTab() {
                           )}
                         </td>
                       ))}
-                      <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-primary">{aed(p.total)}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-primary">
+                        {aed(p.total)}
+                        {(p.totalInr ?? 0) > 0 && <span className="block text-xs text-amber-600 dark:text-amber-400">+ {inr(p.totalInr ?? 0)}</span>}
+                      </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-amber-600 dark:text-amber-400">
                         {(p.balance ?? 0) > 0 ? aed(p.balance ?? 0) : <span className="text-muted-foreground/60">—</span>}
                       </td>
@@ -249,6 +256,12 @@ function SaleRow({ sale: s, index }: { sale: CommissionSale; index: number }) {
                 {l.userName} · <span className="tabular-nums">{aed(l.earned ?? l.amount)}</span>
                 {l.earned !== undefined && l.amount > 0 && l.earned !== l.amount && (
                   <span className="tabular-nums text-muted-foreground">of {aed(l.amount)}</span>
+                )}
+                {/* Paid in rupees, earned in rupees (2026-11-13): that part at the course's rupee amount. */}
+                {(l.earnedInr ?? 0) > 0 && (
+                  <span className="tabular-nums text-amber-600 dark:text-amber-400">
+                    + {inr(l.earnedInr ?? 0)}{(l.amountInr ?? 0) > (l.earnedInr ?? 0) ? ` of ${inr(l.amountInr ?? 0)}` : ""}
+                  </span>
                 )}
                 {(l.balance ?? 0) > 0 && (
                   <span className="tabular-nums text-amber-600 dark:text-amber-400">+{aed(l.balance ?? 0)} waiting for full payment</span>

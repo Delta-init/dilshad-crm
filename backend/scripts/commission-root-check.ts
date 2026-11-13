@@ -141,6 +141,62 @@ const svc = new CommissionService();
 const pv = await svc.preview({ course: String(MBT), team: String(TEAM), closer: String(ids.Ria) }, viewer);
 check("the closing preview: Root's lines and amounts", pv.state === "counted" && pv.lines.map((l: any) => l.amount).join() === "250,90,100" && (pv.plan as any).sales === 250 && pv.closerTotal === 250, j(pv));
 
+// The course's rupee amounts (2026-11-13): kept on the lines that have one and on the plan, shown in the preview, and
+// sent back to Root for a held sale.
+const plainResolve = answer.resolve;
+const inrLine = (role: string, who: string, amount: number, amountInr: number) => ({ ...line(role, who, amount), amountInr });
+answer.resolve = (body: any) => ({
+  state: "counted", reason: "", team: String(TEAM), teamName: "Gladiators",
+  plan: body.amounts ? { creditUsd: 0, salesInr: 0, tlInr: 0, smInr: 0, ...body.amounts } : { sales: 250, tl: 90, sm: 100, creditUsd: 500, salesInr: 5000, tlInr: 0, smInr: 2500 },
+  lines: body.amounts
+    ? [inrLine("sales", "Ria", body.amounts.sales, body.amounts.salesInr ?? 0), inrLine("tl", "Lena", body.amounts.tl, body.amounts.tlInr ?? 0), inrLine("sm", "Abrar", body.amounts.sm, body.amounts.smInr ?? 0)]
+    : [inrLine("sales", "Ria", 250, 5000), inrLine("tl", "Lena", 90, 0), inrLine("sm", "Abrar", 100, 2500)],
+});
+r = await resolveSale({ closer: ids.Ria, saleTeam: TEAM, plan: planOf({ commission: { sales: 230, tl: 85, sm: 100 } }), course: MBT }, config);
+check("Root's rupee amounts kept on the lines that have one, and on the plan", r.lines[0]!.amountInr === 5000 && !("amountInr" in r.lines[1]!) && r.lines[2]!.amountInr === 2500
+  && r.plan?.salesInr === 5000 && r.plan.smInr === 2500 && linesOf(r) === "sales:Ria:250 tl:Lena:90 sm:Abrar:100", j(r));
+const pvInr = await svc.preview({ course: String(MBT), team: String(TEAM), closer: String(ids.Ria) }, viewer);
+check("…shown in the closing preview beside the AED", pvInr.lines.map((l: any) => l.amountInr).join() === "5000,0,2500" && pvInr.closerTotalInr === 5000 && pvInr.closerTotal === 250, j(pvInr));
+r = await resolveSale({ closer: ids.Ria, saleTeam: TEAM, plan: { sales: 200, tl: 70, sm: 90, creditUsd: 0, salesInr: 4000, tlInr: 0, smInr: 0 } }, config);
+hit = hits.at(-1)!;
+check("a held sale: Root asked at its held rupee amounts too", hit.body.amounts?.salesInr === 4000 && hit.body.amounts.sales === 200 && r.lines[0]!.amountInr === 4000, j(hit.body));
+r = await resolveSale({ closer: ids.Ria, saleTeam: TEAM, plan: { sales: 200, tl: 70, sm: 90, creditUsd: 0 } }, config);
+hit = hits.at(-1)!;
+check("…one held with none: none sent, none kept", !("salesInr" in hit.body.amounts) && !("amountInr" in r.lines[0]!), j(hit.body));
+const heldInr = new Types.ObjectId();
+await CommissionSale.create({ student: heldInr, studentName: "Held in rupees", closer: ids.Ria, closerName: "Ria", team: TEAM, saleDate: new Date("2026-10-21T08:00:00Z"), month: "2026-10",
+  state: "waiting", reason: "Gladiators has no leader", plan: { sales: 200, tl: 70, sm: 90, creditUsd: 0, salesInr: 4000, tlInr: 0, smInr: 1500 }, lines: [] });
+followNow();
+await sweepCommission();
+const settledInr = await CommissionSale.findOne({ student: heldInr }).lean();
+check("a held sale settles with its rupee amounts kept on its lines and plan", settledInr?.state === "counted" && settledInr.lines[0]?.amountInr === 4000 && settledInr.lines[1]?.amountInr === undefined
+  && settledInr.lines[2]?.amountInr === 1500 && settledInr.plan.salesInr === 4000, j(settledInr));
+
+// A sale counted before the rupee amounts: the recount gives it Root's rupee amounts, and nothing else moves.
+const { recountRupees, undoRecountRupees } = await import("../src/scripts/recountRupeeCommission.js");
+const os = await import("node:os"), fs = await import("node:fs");
+const oldSale = new Types.ObjectId();
+await CommissionSale.create({ student: oldSale, studentName: "Counted before rupees", invoiceNumber: "IN-70001", course: MBT, courseName: "MBT", closer: ids.Ria, closerName: "Ria", team: TEAM,
+  saleDate: new Date("2026-12-03T08:00:00Z"), month: "2026-12", state: "counted", plan: { sales: 230, tl: 85, sm: 100, creditUsd: 0 }, owedShare: 0,
+  lines: [{ role: "sales", user: ids.Ria, userName: "Ria", amount: 230 }, { role: "tl", user: ids.Lena, userName: "Lena", amount: 0, note: "Closed it themselves" }, { role: "sm", user: ids.Abrar, userName: "Abrar", amount: 100 }],
+  collections: [{ paidAt: new Date("2026-12-03T08:00:00Z"), share: 1, inr: true }] });
+const oldNow = () => CommissionSale.findOne({ student: oldSale }).lean();
+const inrOf = (s: Awaited<ReturnType<typeof oldNow>>) => (s?.lines ?? []).map((l) => `${l.role}:${l.amount}:${l.amountInr ?? "-"}`).join(" ");
+let rc = await recountRupees({ month: "2026-12", write: false });
+check("the recount, looking only: one sale to give rupee amounts, nothing written", rc.count === 1 && inrOf(await oldNow()) === "sales:230:- tl:0:- sm:100:-" && /100% paid in rupees/.test(rc.lines.join("\n")), rc.lines.join(" | "));
+const undoFile = `${os.tmpdir()}/recount-rupee-check-${Date.now()}.json`;
+rc = await recountRupees({ month: "2026-12", write: true, undoFile });
+let oldDoc = await oldNow();
+check("…written: Root's rupee amounts on the lines — the AED amounts as counted, a line that paid nothing still nothing", rc.count === 1 && inrOf(oldDoc) === "sales:230:5000 tl:0:- sm:100:2500"
+  && oldDoc?.plan.sales === 230 && oldDoc.plan.salesInr === 5000 && oldDoc.plan.smInr === 2500 && oldDoc.lines[1]?.note === "Closed it themselves", j(oldDoc));
+check("…again: nothing left to change", (await recountRupees({ month: "2026-12", write: true, undoFile })).count === 0);
+const undone = await undoRecountRupees(undoFile);
+oldDoc = await oldNow();
+check("…undone: the sale exactly as it was", undone === 1 && inrOf(oldDoc) === "sales:230:- tl:0:- sm:100:-" && oldDoc?.plan.salesInr === undefined, j(oldDoc));
+fs.unlinkSync(undoFile);
+await CommissionSale.deleteOne({ student: oldSale });
+answer.resolve = plainResolve;
+
 const held = new Types.ObjectId();
 await CommissionSale.create({ student: held, studentName: "Held", closer: ids.Ria, closerName: "Ria", team: TEAM, saleDate: new Date("2026-10-20T08:00:00Z"), month: "2026-10",
   state: "waiting", reason: "Gladiators has no leader", plan: { sales: 200, tl: 70, sm: 90, creditUsd: 0 }, lines: [] });

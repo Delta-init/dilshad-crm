@@ -1015,7 +1015,8 @@ export class StudentService {
     // balance is what the client still owes.
     type Row = {
       id: unknown; closerId?: unknown; paidAmount: number; pendingAmount: number; paidOutside?: number;
-      commission?: { earned: number; balance: number; state: string } | null;
+      /** `earnedInr` (2026-11-13): the part earned in rupees, on what the client paid in rupees — apart from `earned` (AED). */
+      commission?: { earned: number; balance: number; earnedInr?: number; state: string } | null;
     };
     const periodFrom = filters.dateFrom ? new Date(`${filters.dateFrom}T00:00:00+04:00`) : new Date(0);
     const periodTo = filters.dateTo ? new Date(`${filters.dateTo}T23:59:59.999+04:00`) : new Date();
@@ -1038,10 +1039,10 @@ export class StudentService {
 
     // Commission on each closing, as far as the viewer may see it (the Commission page's rule): earned on what came
     // in during the period, and the balance — its share of what the client still owes. Counted sales only.
-    const commission = { earned: 0, balance: 0 };
+    const commission = { earned: 0, balance: 0, earnedInr: 0 };
     if (viewer) {
       const { CommissionSale } = await import("../models/CommissionSale.js");
-      const { commissionScope, canSeeLine, earnedShareBetween, waitingShareOf, partOf } = await import("./commissionService.js");
+      const { commissionScope, canSeeLine, earnedShareBetween, waitingShareOf, partOf, rupeeShareOf, splitByCurrency } = await import("./commissionService.js");
       const sales = await CommissionSale.find({ student: { $in: all.map((e) => e.id) } }).select("student saleDate state lines paidShare owedShare collections").lean();
       const saleOf = new Map(sales.map((s) => [String(s.student), s]));
       const scope = await commissionScope(viewer as Parameters<typeof commissionScope>[0]);
@@ -1054,13 +1055,22 @@ export class StudentService {
         // Paid in full first (2026-10-31): earned whole in the period the last payment came in; waiting until then.
         const share = earnedShareBetween(sale, periodFrom, periodTo);
         const owed = waitingShareOf(sale);
+        // Paid in rupees, earned in rupees (2026-11-13): that share at the line's rupee amount, the rest in AED.
+        const rupees = rupeeShareOf(sale);
         const sum = lines.reduce(
-          (acc, l) => ({ earned: acc.earned + partOf(l.amount, share), balance: acc.balance + partOf(l.amount, owed) }),
-          { earned: 0, balance: 0 },
+          (acc, l) => {
+            const by = splitByCurrency(l.amount, l.amountInr, rupees);
+            return { earned: acc.earned + partOf(by.aed, share), balance: acc.balance + partOf(l.amount, owed), earnedInr: acc.earnedInr + partOf(by.inr, share) };
+          },
+          { earned: 0, balance: 0, earnedInr: 0 },
         );
-        e.commission = { earned: Math.round(sum.earned * 100) / 100, balance: Math.round(sum.balance * 100) / 100, state: sale.state };
+        e.commission = {
+          earned: Math.round(sum.earned * 100) / 100, balance: Math.round(sum.balance * 100) / 100, state: sale.state,
+          ...(sum.earnedInr > 0 ? { earnedInr: Math.round(sum.earnedInr * 100) / 100 } : {}),
+        };
         commission.earned += sum.earned;
         commission.balance += sum.balance;
+        commission.earnedInr += sum.earnedInr;
       }
     } else {
       for (const e of all) delete e.closerId;
@@ -1094,6 +1104,7 @@ export class StudentService {
         pendingAmount: rows.reduce((s, d) => s + d.pendingAmount, 0),
         commissionEarned: Math.round(commission.earned * 100) / 100,
         commissionBalance: Math.round(commission.balance * 100) / 100,
+        commissionEarnedInr: Math.round(commission.earnedInr * 100) / 100,
       },
       // Always present, so the header can say "nothing yet today" rather than
       // disappearing on a quiet morning.
@@ -1269,7 +1280,7 @@ export class StudentService {
     const { fetchEnrolmentStatuses } = await import("./financeClient.js");
     const { orgOfHandover } = await import("./financeOrgs.js");
     const { stepsOf } = await import("./enrolmentSteps.js");
-    const { isSuperAdmin, commissionScope, canSeeLine, shareOf, earnedShareOf, waitingShareOf, partOf } = await import("./commissionService.js");
+    const { isSuperAdmin, commissionScope, canSeeLine, shareOf, earnedShareOf, waitingShareOf, partOf, rupeeShareOf, splitByCurrency } = await import("./commissionService.js");
 
     if (!Types.ObjectId.isValid(id)) throw createError("Enrolment not found", 404);
     const student = await Student.findById(id)
@@ -1318,10 +1329,14 @@ export class StudentService {
             // Paid in full first (2026-10-31): all of it earned once the client paid in full, all of it waiting until then.
             lines: (sale.lines ?? [])
               .filter((l) => !!scope && canSeeLine(scope, viewer.userId, l, closer))
-              .map((l) => ({
-                role: l.role, userName: l.userName, amount: l.amount,
-                earned: partOf(l.amount, earnedShareOf(sale)), balance: partOf(l.amount, waitingShareOf(sale)), note: l.note ?? "",
-              })),
+              .map((l) => {
+                // Paid in rupees, earned in rupees (2026-11-13): that share at the line's rupee amount, the rest in AED.
+                const by = splitByCurrency(l.amount, l.amountInr, rupeeShareOf(sale));
+                return {
+                  role: l.role, userName: l.userName, amount: l.amount, amountInr: l.amountInr ?? 0,
+                  earned: partOf(by.aed, earnedShareOf(sale)), earnedInr: partOf(by.inr, earnedShareOf(sale)), balance: partOf(l.amount, waitingShareOf(sale)), note: l.note ?? "",
+                };
+              }),
           }
         : null,
     };

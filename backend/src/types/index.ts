@@ -298,6 +298,12 @@ export interface ICommissionLine {
   user: Types.ObjectId;
   userName: string;
   amount: number;
+  /**
+   * What the line pays, in rupees, for the part of the fee the client paid in rupees (the user, 2026-11-13: "separate
+   * INR commission for each course… the INR pay will be different") — the course's own rupee amount in Root's plan,
+   * never `amount` converted. Absent or 0: none set, and that part is paid at `amount` like the rest.
+   */
+  amountInr?: number;
   note?: string;
 }
 
@@ -330,9 +336,10 @@ export interface ICommissionSale extends Document {
   /** What the client still owes, as a share of the fee. */
   owedShare?: number;
   /** Payments received from COUNT_FROM on, as shares of the fee by day: each earns in its own month. */
-  collections?: { paidAt: Date; share: number }[];
-  /** The plan row as it was when decided — what the lines are paid from. */
-  plan: { sales: number; tl: number; sm: number; creditUsd: number };
+  /** `inr`: the payment was handed over in rupees (2026-11-13) — that share of each line is earned at its rupee amount. */
+  collections?: { paidAt: Date; share: number; inr?: boolean }[];
+  /** The plan row as it was when decided — what the lines are paid from; the `…Inr` its rupee amounts, where it has any. */
+  plan: { sales: number; tl: number; sm: number; creditUsd: number; salesInr?: number; tlInr?: number; smInr?: number };
   state: CommissionSaleState;
   /** Why it is waiting, excluded or reversed. */
   reason: string;

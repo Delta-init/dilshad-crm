@@ -5,7 +5,7 @@ import {
   ResponsiveDialog, ResponsiveDialogContent, ResponsiveDialogDescription, ResponsiveDialogHeader, ResponsiveDialogTitle,
 } from "@/components/ui/responsive-dialog";
 import { cn } from "@/lib/utils";
-import { aed, monthLabel, ROLE_LABEL, ROLE_SHORT, uaeDate } from "@/lib/commission";
+import { aed, aedPlusInr, inr, monthLabel, ROLE_LABEL, ROLE_SHORT, uaeDate } from "@/lib/commission";
 import type { CommissionEarnings, CommissionRole, CommissionSale } from "@/types/commission";
 
 type Person = CommissionEarnings["people"][number];
@@ -28,7 +28,7 @@ export function PersonSalesDialog({ person, role, month, sales, roles, onRole, o
 }) {
   // As the table adds them up: a counted sale's lines that pay this month or wait for the full payment — a line of 0
   // (a team leader's own close, say) pays nothing and isn't in the figures.
-  const pays = (l: CommissionSale["lines"][number]) => (l.earned ?? l.amount) > 0 || (l.balance ?? 0) > 0;
+  const pays = (l: CommissionSale["lines"][number]) => (l.earned ?? l.amount) > 0 || (l.balance ?? 0) > 0 || (l.earnedInr ?? 0) > 0;
   const mine = sales
     .filter((s) => s.state === "counted")
     .map((s) => ({ sale: s, lines: s.lines.filter((l) => l.user === person._id && (!role || l.role === role) && pays(l)) }))
@@ -36,6 +36,8 @@ export function PersonSalesDialog({ person, role, month, sales, roles, onRole, o
     .sort((a, b) => a.sale.saleDate.localeCompare(b.sale.saleDate));
   const stillPaying = mine.filter((x) => x.lines.some((l) => (l.balance ?? 0) > 0)).length;
   const earned = role ? person[role].amount : person.total;
+  // The part earned in rupees (2026-11-13), apart from the AED.
+  const earnedInr = role ? person[role].amountInr ?? 0 : person.totalInr ?? 0;
   const waiting = role ? person[role].balance ?? 0 : person.balance ?? 0;
 
   return (
@@ -52,7 +54,7 @@ export function PersonSalesDialog({ person, role, month, sales, roles, onRole, o
         <div className="space-y-4 px-4 pb-4 sm:px-0 sm:pb-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-sm font-semibold tabular-nums text-primary">
-              Earned {aed(earned)}
+              Earned {aedPlusInr(earned, earnedInr)}
             </span>
             {waiting > 0 && (
               <span className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-1.5 text-sm tabular-nums text-amber-700 dark:text-amber-400">
@@ -65,7 +67,7 @@ export function PersonSalesDialog({ person, role, month, sales, roles, onRole, o
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Role">
             <RoleChip active={!role} onClick={() => onRole(null)} label="All" />
             {roles.filter((r) => person[r].count > 0 || (person[r].balance ?? 0) > 0).map((r) => (
-              <RoleChip key={r} active={role === r} onClick={() => onRole(r)} label={`${ROLE_LABEL[r]} · ${aed(person[r].amount)}`} />
+              <RoleChip key={r} active={role === r} onClick={() => onRole(r)} label={`${ROLE_LABEL[r]} · ${aedPlusInr(person[r].amount, person[r].amountInr)}`} />
             ))}
           </div>
 
@@ -107,6 +109,9 @@ export function PersonSalesDialog({ person, role, month, sales, roles, onRole, o
                           <span className="tabular-nums font-semibold">{aed(l.earned ?? l.amount)}</span>
                           {l.earned !== undefined && l.amount > 0 && l.earned !== l.amount && (
                             <span className="tabular-nums text-muted-foreground">of {aed(l.amount)}</span>
+                          )}
+                          {(l.earnedInr ?? 0) > 0 && (
+                            <span className="tabular-nums font-semibold text-amber-600 dark:text-amber-400">+ {inr(l.earnedInr ?? 0)}</span>
                           )}
                           {(l.balance ?? 0) > 0 && (
                             <span className="tabular-nums text-amber-600 dark:text-amber-400">+{aed(l.balance ?? 0)} waiting</span>
