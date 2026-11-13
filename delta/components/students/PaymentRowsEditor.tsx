@@ -10,7 +10,7 @@ import { listItemVariants } from "@/lib/animations";
 import { fmtFull } from "@/lib/currency";
 import { CURRENCIES } from "@/lib/store/currencyStore";
 import { uploadReceipt } from "@/hooks/useStudents";
-import { BASE_CURRENCY, ENROLMENT_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type StoredReceipt } from "@/types/student";
+import { BASE_CURRENCY, ENROLMENT_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, isRupeeMethod, type StoredReceipt } from "@/types/student";
 
 /*
  * The payments taken at a close, one row each (the user, 2026-10-05): a client
@@ -32,6 +32,8 @@ import { BASE_CURRENCY, ENROLMENT_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type S
  * Rupees on a Dubai close (the user, 2026-10-13) take their rate the way it is
  * quoted — 1 AED = so many INR — and "INR Transfer" as the method picks INR;
  * the rate kept and sent stays 1 INR = so many AED, like every other currency's.
+ * "Razorpay" pays out in rupees too (the owner, 2026-11-13) and picks INR the
+ * same way — both are RUPEE_METHODS.
  */
 
 export interface PaymentRow {
@@ -216,9 +218,10 @@ export function PaymentRowsEditor({ leadId, rows, onChange, base = BASE_CURRENCY
   }
   // A new currency starts its rate afresh: no feed is trusted for it, the seller enters it.
   const setCurrency = (r: PaymentRow, currency: string) => update(r.id, { currency, rateInput: "", convertedInput: "" });
-  // "INR Transfer" is rupees: it picks INR for the row (on a Bangalore close, its own currency).
+  // "INR Transfer" is rupees, and so is "Razorpay" (2026-11-13): it picks INR for the row (on a Bangalore close, its
+  // own currency).
   function setMethod(r: PaymentRow, method: string) {
-    if (method !== "inr_bank_account" || r.collectedBefore || r.currency === "INR") return update(r.id, { method });
+    if (!isRupeeMethod(method) || r.collectedBefore || r.currency === "INR") return update(r.id, { method });
     update(r.id, { method, currency: "INR", rateInput: "", convertedInput: "" });
   }
 

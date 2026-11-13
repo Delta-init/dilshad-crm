@@ -124,23 +124,36 @@ export const ENROLMENT_LANGUAGES = ["English", "Malayalam", "Hindi/Urdu", "Tamil
 export type EnrolmentLanguage = (typeof ENROLMENT_LANGUAGES)[number];
 
 export const ENROLMENT_PAYMENT_METHODS = [
-  "cash", "bank_transfer", "cheque", "card",
+  // "pos": the card machine (the owner, 2026-11-13) — beside Card, and taken as Card is.
+  "cash", "bank_transfer", "cheque", "card", "pos",
   "easebuzz_emi", "tabby", "tamara", "billexpro",
   // Rupees into the INR account (the user, 2026-10-13) — finance's "INR Bank Account".
   "inr_bank_account",
+  // Razorpay pays out in rupees (the owner, 2026-11-13) — taken as INR Transfer is: see RUPEE_METHODS.
+  "razorpay",
 ] as const;
 export type EnrolmentPaymentMethod = (typeof ENROLMENT_PAYMENT_METHODS)[number];
+
+/**
+ * The methods that are rupees (2026-11-13): INR Transfer, and Razorpay, which pays out in rupees. Picking either at
+ * the close makes that payment rupees (PaymentRowsEditor) — asked of this one list, so the two never drift apart.
+ * The server keeps the same list (backend types/index.ts).
+ */
+export const RUPEE_METHODS: readonly EnrolmentPaymentMethod[] = ["inr_bank_account", "razorpay"];
+export const isRupeeMethod = (method?: string | null): boolean => (RUPEE_METHODS as readonly string[]).includes(method ?? "");
 
 export const PAYMENT_METHOD_LABELS: Record<EnrolmentPaymentMethod, string> = {
   cash: "Cash",
   bank_transfer: "Bank Transfer",
   cheque: "Cheque",
   card: "Card",
+  pos: "POS",
   easebuzz_emi: "Easebuzz EMI",
   tabby: "Tabby",
   tamara: "Tamara",
   billexpro: "BillExPro",
   inr_bank_account: "INR Transfer",
+  razorpay: "Razorpay",
 };
 
 /** A receipt, once it is in storage. */
