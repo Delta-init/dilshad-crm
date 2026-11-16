@@ -652,7 +652,8 @@ try {
   // Unread, pop-ups and alerts: each their own.
   const { holdersOf } = await import("../src/services/whatsapp/holders.js");
   const su0 = (await call("GET", "/whatsapp/unread", "Sam")).body.data?.unread, ou0 = (await call("GET", "/whatsapp/unread", "Omar")).body.data?.unread;
-  const since = new Date(Date.now() - 1000).toISOString();
+  const since = new Date().toISOString();
+  await new Promise((done) => setTimeout(done, 5));
   await incoming("Sam", "971501234567", "Thanks Sam!", { name: "Asha" });
   await incoming("Sam", "971559876543", "Thanks Omar!", { name: "Bilal" });
   const [su, ou] = [await call("GET", `/whatsapp/unread?since=${encodeURIComponent(since)}`, "Sam"), await call("GET", `/whatsapp/unread?since=${encodeURIComponent(since)}`, "Omar")];
