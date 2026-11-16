@@ -30,9 +30,12 @@
  *     still refused; a lead added meanwhile still found.
  *   - Case 17: beside a chat — Student (marked, or enrolled), a call logged by hand (counted, on the lead, in its
  *     calls and the lead page's count), taken off by a Super Admin only.
- *   - Case 18: one WhatsApp, two people (2026-10-31) — a Super Admin shares Sam's with Omar: Omar reads and sends from
- *     it as his own (named on each message), unread and new-message alerts shared, his own link refused; each sees the
- *     other's leads; who can be shared; taken off, back to his own.
+ *   - Case 18: one WhatsApp, two people (2026-10-31) — a Super Admin shares Sam's with Omar: Omar sends from it
+ *     (named on each message), his own link refused; who can be shared; taken off, back to his own. Since 2026-11-16
+ *     each sees, counts unread of, is told of and sends in only his own leads' chats (a lead moved takes its chat; a
+ *     number started from the CRM is the starter's, and their lead when it answers); New chat — his own lead or a
+ *     number, another's refused saying whose; the team leader, Sales Manager and Super Admin see as before; leads no
+ *     longer shared.
  *   - Case 15: "Load older messages for all chats" — the phone asked for each chat, newest first, one at a time in
  *     the background; one run at a time; not linked, or no chats — refused.
  *
@@ -593,56 +596,138 @@ try {
   check("Omar can't link a phone of his own while sharing", r.status === 409 && /Sam's WhatsApp/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
   r = await call("POST", "/whatsapp/disconnect", "Omar");
   check("…nor unlink Sam's", r.status === 409, `${r.status}`);
+  // Each sees their own leads' chats on it (2026-11-16): Asha is Sam's lead, so her chat is Sam's.
   let oc = await chatsOf("Omar");
-  check("Omar's chats are Sam's (Asha's among them), held by Sam", oc.status === 200 && oc.body.data?.ownerId === String(P("Sam"))
-    && oc.body.data?.chats?.find((x: any) => x.chat === "971501234567")?.lead?.owner === "Sam", j(oc.body.data?.chats?.map((x: any) => x.chat)));
-  check("…Sam's phone not linked: he can't send yet", oc.body.data?.canSend === false);
+  check("Omar's list is Sam's WhatsApp — without Asha's chat (Sam's lead)", oc.status === 200 && oc.body.data?.ownerId === String(P("Sam"))
+    && !oc.body.data?.chats?.some((x: any) => x.chat === "971501234567"), j(oc.body.data?.chats?.map((x: any) => x.chat)));
+  check("…Sam still has it", (await chatsOf("Sam")).body.data?.chats?.some((x: any) => x.chat === "971501234567"));
+  check("…Sam's phone not linked: Omar can't send yet", oc.body.data?.canSend === false);
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { leadId: omarLead, text: "Hi Bilal" });
+  check("New chat while the WhatsApp isn't linked: refused, saying so", r.status === 409 && /not linked/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
   const shared: Sent[] = [];
   wa.attachSocketForCheck(String(P("Sam")), fakeSock(shared), "971500000001");
   oc = await chatsOf("Omar");
   check("Sam's phone linked: Omar may send from it", oc.body.data?.canSend === true);
-  r = await call("POST", "/whatsapp/send", "Omar", { chat: "971501234567", text: "Omar here, from Sam's WhatsApp" });
-  const fromOmar = await WhatsAppMessage.findOne({ body: "Omar here, from Sam's WhatsApp" }).lean();
-  check("Omar sends: out of Sam's WhatsApp, kept under Sam, named Omar", r.status === 200 && shared.length === 1 && String(fromOmar?.owner) === String(P("Sam"))
-    && fromOmar?.sentByName === "Omar" && String(fromOmar?.sentBy) === String(P("Omar")), `${r.status} ${r.body.message} ${j(fromOmar)}`);
-  r = await call("GET", `/whatsapp/messages?chat=971501234567`, "Omar");
-  check("…in the chat, with his name", r.body.data?.messages?.some((m: any) => m.sentByName === "Omar") && r.body.data?.canSend === true);
-  const src = await WhatsAppMessage.findOne({ owner: P("Sam"), direction: "in" }).lean();
-  r = await call("POST", "/whatsapp/forward", "Omar", { messageId: String(src!._id), chats: ["971501234567"] });
-  check("Forward from it: named Omar too", r.status === 200 && (await WhatsAppMessage.findOne({ forwarded: true, sentByName: "Omar" }).lean()) !== null, `${r.status} ${r.body.message}`);
-  await incoming("Sam", "971501234567", "Thanks both!", { name: "Asha" });
-  const [su, ou] = [await call("GET", "/whatsapp/unread", "Sam"), await call("GET", "/whatsapp/unread", "Omar")];
-  check("unread on the WhatsApp: the same for both", su.body.data?.unread >= 1 && su.body.data?.unread === ou.body.data?.unread, `${su.body.data?.unread} / ${ou.body.data?.unread}`);
-  const { tellees } = await import("../src/services/whatsapp/sharing.js");
-  check("…a new message on it is told to both", j((await tellees(String(P("Sam")))).sort()) === j([String(P("Sam")), String(P("Omar"))].sort()));
-  r = await call("POST", "/whatsapp/read", "Omar", { chat: "971501234567" });
-  const [su2, ou2] = [await call("GET", "/whatsapp/unread", "Sam"), await call("GET", "/whatsapp/unread", "Omar")];
-  check("Omar opening it reads it for both", r.body.data?.marked >= 1 && su2.body.data?.unread === su.body.data?.unread - r.body.data.marked && su2.body.data?.unread === ou2.body.data?.unread,
-    `${j(r.body.data)} ${su.body.data?.unread}→${su2.body.data?.unread}/${ou2.body.data?.unread}`);
-  r = await call("POST", "/whatsapp/student", "Omar", { chat: "971501234567", student: true });
-  check("Omar marks the student on Sam's chat", r.status === 200 && r.body.data?.student === true && r.body.data?.byName === "Omar", j(r.body));
-  await call("POST", "/whatsapp/student", "Omar", { chat: "971501234567", student: false });
-  // A chat Sam started (no lead made of it): Omar makes the lead — his.
+  r = await call("GET", "/whatsapp/messages?chat=971501234567", "Omar");
+  check("Asha's chat: Omar can't open it — it's Sam's", r.status === 403 && /Sam's/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
+  r = await call("POST", "/whatsapp/send", "Omar", { chat: "971501234567", text: "Omar here" });
+  check("…nor send in it", r.status === 403 && shared.length === 0, `${r.status} ${r.body.message}`);
+  for (const [what, method, p, body] of [
+    ["read it", "POST", "/whatsapp/read", { chat: "971501234567" }],
+    ["mark the student", "POST", "/whatsapp/student", { chat: "971501234567", student: true }],
+    ["log a call", "POST", "/whatsapp/calls", { chat: "971501234567", answered: true }],
+    ["load its older messages", "POST", "/whatsapp/history", { chat: "971501234567" }],
+    ["see its calls", "GET", "/whatsapp/chat-extras?chat=971501234567", undefined],
+    ["link it", "POST", "/whatsapp/link", { chat: "971501234567", leadId: omarLead }],
+    ["send a saved message in it", "POST", "/whatsapp/send-saved", { chat: "971501234567", id: "followup:1" }],
+  ] as const) {
+    r = await call(method, p, "Omar", body);
+    check(`…nor ${what}`, r.status === 403, `${r.status} ${r.body.message}`);
+  }
+  // New chat: only his own lead.
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { leadId: asha, text: "Hello Asha" });
+  check("New chat with Sam's lead: refused, saying whose", r.status === 403 && /Asha Thomas is Sam's lead/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { number: "050 123 4567", text: "Hello" });
+  check("…her number typed in: refused too", r.status === 403 && /Asha Thomas, Sam's lead/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { text: "Hello" });
+  check("…no lead and no number: refused", r.status === 400, `${r.status}`);
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { number: "12", text: "Hello" });
+  check("…a number too short: refused", r.status === 400, `${r.status}`);
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { leadId: omarLead, text: "  " });
+  check("…no message: refused", r.status === 400, `${r.status}`);
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { leadId: omarLead, text: "Hi Bilal, Omar here" });
+  const fromOmar = await WhatsAppMessage.findOne({ body: "Hi Bilal, Omar here" }).lean();
+  check("New chat with his own lead Bilal: out of Sam's WhatsApp, kept under Sam, named Omar", r.status === 201 && r.body.data?.chat === "971559876543"
+    && r.body.data?.lead?.name === "Bilal Khan" && shared.length === 1 && String(fromOmar?.owner) === String(P("Sam")) && fromOmar?.sentByName === "Omar",
+    `${r.status} ${r.body.message} ${j(r.body.data)} ${j(fromOmar)}`);
+  oc = await chatsOf("Omar");
+  check("…in Omar's list", oc.body.data?.chats?.some((x: any) => x.chat === "971559876543"), j(oc.body.data?.chats?.map((x: any) => x.chat)));
+  check("…not in Sam's", !(await chatsOf("Sam")).body.data?.chats?.some((x: any) => x.chat === "971559876543"));
+  r = await call("GET", "/whatsapp/messages?chat=971559876543", "Sam");
+  check("…Sam can't open it", r.status === 403 && /Omar's/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
+  r = await call("POST", "/whatsapp/new-chat", "Sam", { number: "+971 55 987 6543", text: "Hi" });
+  check("…nor start one with Bilal (Omar's lead)", r.status === 403 && /Omar's lead/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
+  r = await call("POST", "/whatsapp/send", "Omar", { chat: "971559876543", text: "Following up" });
+  check("Omar sends on in his chat", r.status === 200, `${r.status} ${r.body.message}`);
+  // Unread, pop-ups and alerts: each their own.
+  const { holdersOf } = await import("../src/services/whatsapp/holders.js");
+  const su0 = (await call("GET", "/whatsapp/unread", "Sam")).body.data?.unread, ou0 = (await call("GET", "/whatsapp/unread", "Omar")).body.data?.unread;
+  const since = new Date(Date.now() - 1000).toISOString();
+  await incoming("Sam", "971501234567", "Thanks Sam!", { name: "Asha" });
+  await incoming("Sam", "971559876543", "Thanks Omar!", { name: "Bilal" });
+  const [su, ou] = [await call("GET", `/whatsapp/unread?since=${encodeURIComponent(since)}`, "Sam"), await call("GET", `/whatsapp/unread?since=${encodeURIComponent(since)}`, "Omar")];
+  check("unread: Asha's message counts for Sam only, Bilal's for Omar only", su.body.data?.unread === su0 + 1 && ou.body.data?.unread === ou0 + 1,
+    `${su0}→${su.body.data?.unread} / ${ou0}→${ou.body.data?.unread}`);
+  check("…the pop-ups too: Sam gets Asha's, Omar Bilal's", j(su.body.data?.messages?.map((m: any) => m.body)) === j(["Thanks Sam!"])
+    && j(ou.body.data?.messages?.map((m: any) => m.body)) === j(["Thanks Omar!"]), `${j(su.body.data?.messages)} ${j(ou.body.data?.messages)}`);
+  const h = await holdersOf(String(P("Sam")), [{ chat: "971501234567", lead: asha }, { chat: "971559876543", lead: omarLead }]);
+  check("…a new message is told to the chat's holder only", h?.get("971501234567") === String(P("Sam")) && h?.get("971559876543") === String(P("Omar")), j([...(h ?? [])]));
+  r = await call("POST", "/whatsapp/read", "Omar", { chat: "971559876543" });
+  const ou2 = (await call("GET", "/whatsapp/unread", "Omar")).body.data?.unread;
+  check("Omar opens his chat: read (Sam's count untouched)", r.status === 200 && r.body.data?.marked >= 1 && ou2 === ou.body.data?.unread - r.body.data.marked
+    && (await call("GET", "/whatsapp/unread", "Sam")).body.data?.unread === su.body.data?.unread, `${j(r.body)} ${ou.body.data?.unread}→${ou2}`);
+  // Forward: into his own chats only.
+  const bilalIn = await WhatsAppMessage.findOne({ body: "Thanks Omar!" }).lean();
+  r = await call("POST", "/whatsapp/forward", "Omar", { messageId: String(bilalIn!._id), chats: ["971501234567", "971559876543"] });
+  check("Forward: into his own chat yes, into Sam's no", r.status === 200 && r.body.data?.results?.find((x: any) => x.chat === "971501234567")?.ok === false
+    && r.body.data?.results?.find((x: any) => x.chat === "971559876543")?.ok === true, j(r.body));
+  r = await call("POST", "/whatsapp/student", "Omar", { chat: "971559876543", student: true });
+  check("Omar marks the student on his own chat", r.status === 200 && r.body.data?.student === true && r.body.data?.byName === "Omar", j(r.body));
+  await call("POST", "/whatsapp/student", "Omar", { chat: "971559876543", student: false });
+  // A number that is nobody's lead: his chat, and his lead when they answer.
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { number: "+971 54 888 1234", text: "Hi, Omar from the academy" });
+  check("New chat with a number that is no lead's: started, his", r.status === 201 && r.body.data?.chat === "971548881234" && r.body.data?.lead === null && r.body.data?.existed === false, j(r.body));
+  check("…in his list, not Sam's", (await chatsOf("Omar")).body.data?.chats?.some((x: any) => x.chat === "971548881234")
+    && !(await chatsOf("Sam")).body.data?.chats?.some((x: any) => x.chat === "971548881234"));
+  await incoming("Sam", "971548881234", "Yes please, tell me more", { name: "Hana Rami" });
+  const hana = await db.collection("leads").findOne({ phone: "+971548881234" });
+  check("…they answer: a lead made — Omar's (he started it), not Sam's", hana?.name === "Hana Rami" && String(hana?.assignedTo) === String(P("Omar")), j(hana));
+  check("…and the chat stays his", (await chatsOf("Omar")).body.data?.chats?.find((x: any) => x.chat === "971548881234")?.lead?.owner === "Omar");
+  // A chat Sam started from his phone (no lead): Sam's.
   await incoming("Sam", "971547771234", "Hello from Sam", { fromMe: true });
   r = await call("POST", "/whatsapp/create-lead", "Omar", { chat: "971547771234", name: "Walk In" });
+  check("a chat Sam started from his phone (no lead): Omar can't make a lead of it", r.status === 403, `${r.status} ${r.body.message}`);
+  r = await call("POST", "/whatsapp/new-chat", "Omar", { number: "971547771234", text: "Hi" });
+  check("…nor start it again as his", r.status === 403 && /Sam's/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
+  r = await call("POST", "/whatsapp/create-lead", "Sam", { chat: "971547771234", name: "Walk In" });
   const walkIn = r.body.data?.lead?.id ? await db.collection("leads").findOne({ _id: new Types.ObjectId(r.body.data.lead.id) }) : null;
-  check("Make a lead there: the one who makes it holds it", r.status === 201 && String(walkIn?.assignedTo) === String(P("Omar")), `${r.status} ${r.body.message} ${j(walkIn?.assignedTo)}`);
-  // Each sees the other's leads.
+  check("…Sam makes it: his", r.status === 201 && String(walkIn?.assignedTo) === String(P("Sam")), `${r.status} ${r.body.message}`);
+  // A lead moved to the other: its chat goes with it.
+  await db.collection("leads").updateOne({ _id: new Types.ObjectId(omarLead) }, { $set: { assignedTo: P("Sam") } });
+  check("Bilal's lead moved to Sam: the chat is Sam's now", (await chatsOf("Sam")).body.data?.chats?.some((x: any) => x.chat === "971559876543")
+    && !(await chatsOf("Omar")).body.data?.chats?.some((x: any) => x.chat === "971559876543"));
+  await db.collection("leads").updateOne({ _id: new Types.ObjectId(omarLead) }, { $set: { assignedTo: P("Omar") } });
+  check("…moved back: Omar's again", (await chatsOf("Omar")).body.data?.chats?.some((x: any) => x.chat === "971559876543"));
+  // Overseers see as before.
+  const onSams = async (who: string) => ((await call("GET", `/whatsapp/chats?ownerId=${P("Sam")}`, who)).body.data?.chats ?? []).map((x: any) => x.chat);
+  let seenBy = await onSams("Mona");
+  check("the Sales Manager reading Sam's WhatsApp: every chat on it", seenBy.includes("971501234567") && seenBy.includes("971559876543") && seenBy.includes("971548881234"), j(seenBy));
+  seenBy = await onSams("Root");
+  check("…a Super Admin: every chat", seenBy.includes("971501234567") && seenBy.includes("971559876543"), j(seenBy));
+  seenBy = await onSams("Lina");
+  check("…Sam's team leader: Sam's chats, not Omar's (not her team)", seenBy.includes("971501234567") && !seenBy.includes("971559876543"), j(seenBy));
+  // The lead page.
+  r = await call("GET", `/whatsapp/lead/${asha}`, "Omar");
+  check("Asha's lead page for Omar: no chat of Sam's shown", r.status === 200 && (r.body.data?.threads ?? []).every((t: any) => t.ownerId !== String(P("Sam"))), j(r.body.data?.threads?.map((t: any) => t.ownerId)));
+  r = await call("GET", `/whatsapp/lead/${omarLead}`, "Omar");
+  check("…Bilal's for Omar: his chat on Sam's WhatsApp", (r.body.data?.threads ?? []).some((t: any) => t.ownerId === String(P("Sam")) && t.chat === "971559876543"), j(r.body.data?.threads?.map((t: any) => t.chat)));
+  r = await call("GET", `/whatsapp/lead/${asha}`, "Sam");
+  check("…Asha's for Sam: his chat", (r.body.data?.threads ?? []).some((t: any) => t.ownerId === String(P("Sam")) && t.chat === "971501234567"));
+  // Leads: each their own (2026-11-16 — no longer each other's).
   const names = async (who: string) => ((await call("GET", "/leads?limit=100", who)).body.data ?? []).map((l: any) => l.name);
   let on = await names("Omar"), sn = await names("Sam");
-  check("Omar's Leads: his and Sam's", on.includes("Asha Thomas") && on.includes("Bilal Khan") && on.includes("Walk In"), j(on));
-  check("Sam's Leads: his and Omar's", sn.includes("Asha Thomas") && sn.includes("Bilal Khan"), j(sn));
-  check("Sally's: not Omar's", !(await names("Sally")).includes("Bilal Khan"));
+  check("Omar's Leads: his own, not Sam's", on.includes("Bilal Khan") && on.includes("Hana Rami") && !on.includes("Asha Thomas") && !on.includes("Walk In"), j(on));
+  check("Sam's Leads: his own, not Omar's", sn.includes("Asha Thomas") && sn.includes("Walk In") && !sn.includes("Bilal Khan") && !sn.includes("Hana Rami"), j(sn));
   r = await call("GET", `/leads?assignedTo=${P("Sam")}&limit=100`, "Omar");
-  check("…filtered to Sam's: only Sam's", r.status === 200 && (r.body.data ?? []).length > 0 && r.body.data.every((l: any) => String(l.assignedTo?._id ?? l.assignedTo) === String(P("Sam"))), j(r.body.data?.map?.((l: any) => l.name)));
-  r = await call("GET", `/leads?assignedTo=${P("Sally")}&limit=100`, "Omar");
-  check("…filtered to Sally's: nothing", r.status === 200 && (r.body.data ?? []).length === 0);
+  check("…filtered to Sam's: nothing", r.status === 200 && (r.body.data ?? []).length === 0, j(r.body.data?.map?.((l: any) => l.name)));
   r = await call("GET", `/users/${P("Sam")}/leads`, "Omar");
-  check("Sam's own leads page: open to Omar", r.status === 200, `${r.status} ${r.body.message}`);
-  r = await call("GET", `/users/${P("Omar")}/leads`, "Sally");
-  check("…Omar's, not to Sally", r.status === 403, `${r.status}`);
+  check("Sam's own leads page: not open to Omar", r.status === 403, `${r.status}`);
   r = await call("GET", "/whatsapp/lead-options?search=Asha", "Omar");
-  check("linking a chat: Sam's leads offered to Omar", (r.body.data ?? []).some((l: any) => l.name === "Asha Thomas"), j(r.body.data));
+  check("New chat / linking: Sam's leads not offered to Omar", r.status === 200 && !(r.body.data ?? []).some((l: any) => l.name === "Asha Thomas"), j(r.body.data));
+  r = await call("GET", "/whatsapp/lead-options?search=Bilal", "Omar");
+  check("…his own are", (r.body.data ?? []).some((l: any) => l.name === "Bilal Khan"), j(r.body.data));
+  r = await call("POST", "/whatsapp/new-chat", "Sally", { leadId: asha, text: "Hi" });
+  check("Sally (her own WhatsApp): New chat with Sam's lead refused too", r.status === 403 && /Sam's lead/.test(r.body.message ?? ""), `${r.status} ${r.body.message}`);
   // Rules on who can be shared.
   r = await call("PUT", "/whatsapp/sharing", "Root", { ownerId: String(P("Omar")), userIds: [String(P("Sally"))] });
   check("Omar's own can't be shared while he uses Sam's", r.status === 400, `${r.status} ${r.body.message}`);

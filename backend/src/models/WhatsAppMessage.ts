@@ -188,3 +188,28 @@ const whatsAppTagSchema = new Schema<IWhatsAppTag>(
   { versionKey: false, collection: "whatsapp_tags" },
 );
 export const WhatsAppTag = mongoose.model<IWhatsAppTag>("WhatsAppTag", whatsAppTagSchema);
+
+/*
+ * Who holds a chat on a WhatsApp more than one person uses (the user, 2026-11-16: "user 1 and user 2 on the same
+ * WhatsApp — user 1 only sees his leads' WhatsApp, and they can start a new chat from here"). Kept for a chat someone
+ * started from the CRM: `user` is who. A lead's chat is its holder's whatever this says (services/whatsapp/holders.ts);
+ * this decides a number that is no lead's (yet) — and gives the lead made when they answer to that person.
+ */
+export interface IWhatsAppChatHolder {
+  _id: Types.ObjectId;
+  owner: Types.ObjectId;
+  chat: string;
+  user: Types.ObjectId;
+  at: Date;
+}
+const whatsAppChatHolderSchema = new Schema<IWhatsAppChatHolder>(
+  {
+    owner: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    chat: { type: String, required: true },
+    user: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    at: { type: Date, default: () => new Date() },
+  },
+  { versionKey: false, collection: "whatsapp_chat_holders" },
+);
+whatsAppChatHolderSchema.index({ owner: 1, chat: 1 }, { unique: true });
+export const WhatsAppChatHolder = mongoose.model<IWhatsAppChatHolder>("WhatsAppChatHolder", whatsAppChatHolderSchema);

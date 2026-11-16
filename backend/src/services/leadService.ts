@@ -16,7 +16,6 @@ import type {
   IRole,
 } from "../types/index.js";
 import { collectAssignments } from "./leadAlertService.js";
-import { phoneMates } from "./whatsapp/sharing.js";
 import { LeadSourceTeam, sourceKey } from "../models/LeadSourceTeam.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -506,13 +505,11 @@ export class LeadService {
       if (ledTeams.length) {
         // Team leader: every team they lead — and every lead given to them, whatever team it sits in (2026-11-02:
         // a team leader's own leads filed under another team were nowhere on their Leads page).
-        const mates = (await phoneMates(userId)).map((m) => new Types.ObjectId(m));
-        scope = { $or: [{ team: { $in: ledTeams.map((t) => t._id) } }, { assignedTo: { $in: mates } }] };
+        scope = { $or: [{ team: { $in: ledTeams.map((t) => t._id) } }, { assignedTo: new Types.ObjectId(userId) }] };
       } else {
-        // Regular member / BDE / any non-admin role: only their assigned leads —
-        // and those of whoever shares a WhatsApp with them (2026-10-31).
-        const mates = await phoneMates(userId);
-        query.assignedTo = mates.length > 1 ? { $in: mates.map((m) => new Types.ObjectId(m)) } : userId;
+        // Regular member / BDE / any non-admin role: only their assigned leads (2026-11-16: no longer also those of
+        // whoever shares a WhatsApp with them — each sees their own).
+        query.assignedTo = userId;
       }
     }
 

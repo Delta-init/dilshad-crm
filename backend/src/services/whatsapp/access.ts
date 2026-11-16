@@ -2,7 +2,7 @@ import { Types } from "mongoose";
 import { Team } from "../../models/Team.js";
 import { CommissionSettings } from "../../models/CommissionSettings.js";
 import type { IRole } from "../../types/index.js";
-import { phoneMates, phoneOwnerOf } from "./sharing.js";
+import { phoneOwnerOf } from "./sharing.js";
 
 /*
  * Who reads whose WhatsApp, and which leads a chat may be linked to (2026-10-27, as in the Sales CRM) — the lines the
@@ -37,13 +37,22 @@ export async function readableOwners(viewer: Viewer): Promise<Set<string> | null
   return new Set([viewer.userId, await phoneOwnerOf(viewer.userId), ...led.flatMap((t) => [...(t.members ?? []), ...(t.leaders ?? [])].map(idOf))]);
 }
 
+/**
+ * On a WhatsApp more than one person uses, whose chats the viewer sees (services/whatsapp/holders.ts) — null: all of
+ * them (a Super Admin, the Sales Manager). Anyone else: their own, and a team leader their teams' people's too.
+ */
+export async function visibleHolders(viewer: Viewer): Promise<Set<string> | null> {
+  if (await seesAll(viewer)) return null;
+  const led = await ledTeams(viewer.userId);
+  return new Set([viewer.userId, ...led.flatMap((t) => [...(t.members ?? []), ...(t.leaders ?? [])].map(idOf))]);
+}
+
 /** The leads the viewer may link a chat to, or make one for: a Lead filter. */
 export async function leadScope(viewer: Viewer): Promise<Record<string, unknown>> {
   if (await seesAll(viewer)) return {};
   const me = new Types.ObjectId(viewer.userId);
-  // Theirs, and those of whoever shares a WhatsApp with them.
-  const mates = (await phoneMates(viewer.userId)).map((i) => new Types.ObjectId(i));
-  const own = mates.length > 1 ? { assignedTo: { $in: mates } } : { assignedTo: me };
+  // Their own only — not those of whoever shares a WhatsApp with them (2026-11-16: each sees their own leads' chats).
+  const own = { assignedTo: me };
   const led = await ledTeams(viewer.userId);
   if (!led.length) return own;
   const members = led.flatMap((t) => [...(t.members ?? []), ...(t.leaders ?? [])].map((u) => new Types.ObjectId(idOf(u))));

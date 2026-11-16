@@ -17,7 +17,7 @@ import { leadsByPhone, phoneKey } from "./leads.js";
 import { sendPushToUser } from "../pushService.js";
 import { emitToUser } from "../../socket.js";
 import { asVoiceNote, VOICE_MIME } from "./voice.js";
-import { tellees } from "./sharing.js";
+import { holdersOf, starterOf } from "./holders.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    WhatsApp, as in CS Portal (the user, 2026-10-27: "working of the
@@ -141,14 +141,16 @@ export function leadForNewNumber(owner: Owner, phone: string, key: string, pushN
     const already = await Lead.findOne({ phone: new RegExp(`${key.split("").join("\\D*")}(?!\\d)`) })
       .select("_id").lean<{ _id: Types.ObjectId } | null>();
     if (already) { rememberLead(key, already._id); return already._id; }
+    // A chat someone on this WhatsApp started from the CRM (holders.ts): the lead is theirs, not the phone owner's.
+    const holder = (await starterOf(owner.id, phone).catch(() => null)) ?? owner.id;
     const saved = (await contactNames(owner.id, [key])).get(key) ?? "";
     const name = (saved && !/^\+?\d+$/.test(saved) ? saved : "")
       || (pushName && !/^\+?\d+$/.test(pushName.trim()) ? pushName.trim().slice(0, 100) : "")
       || `WhatsApp +${phone}`;
     const lead = await Lead.create({
       name, phone: `+${phone}`, source: "WhatsApp", status: "assigned",
-      assignedTo: new Types.ObjectId(owner.id), assignedAt: new Date(),
-      reporter: new Types.ObjectId(owner.id),
+      assignedTo: new Types.ObjectId(holder), assignedAt: new Date(),
+      reporter: new Types.ObjectId(holder),
       activityLogs: [{
         action: "lead_created",
         description: `Lead made automatically — +${phone} wrote to ${owner.name}'s WhatsApp`,
@@ -158,7 +160,7 @@ export function leadForNewNumber(owner: Owner, phone: string, key: string, pushN
     });
     rememberLead(key, lead._id as Types.ObjectId);
     const { notifyLeadAssignment } = await import("../pushService.js");
-    void notifyLeadAssignment(owner.id, String(lead._id), name, emitToUser).catch(() => null);
+    void notifyLeadAssignment(holder, String(lead._id), name, emitToUser).catch(() => null);
     console.log(`[whatsapp] new lead ${name} (+${phone}) for ${owner.name}${lead.team ? "" : " (in no team)"}`);
     return lead._id as Types.ObjectId;
   })().catch((err) => {
@@ -368,8 +370,9 @@ export async function receive(owner: Owner, sock: WASocket, msg: WAMessage, opts
     const leadDoc = lead ? await Lead.findById(lead).select("name").lean<{ name?: string } | null>() : null;
     const who = String(leadDoc?.name ?? "").trim() || msg.pushName || (phone ? `+${phone}` : "WhatsApp");
     const text = body || LABEL[media!.type] || "File";
-    // Its owner, and whoever uses this WhatsApp with them (sharing.ts).
-    for (const to of await tellees(owner.id).catch(() => [owner.id])) {
+    // Its owner — or, on a WhatsApp more than one person uses, only the one whose chat it is (holders.ts, 2026-11-16).
+    const holders = await holdersOf(owner.id, [{ chat: kept.chat, lead }]).catch(() => null);
+    for (const to of [holders?.get(kept.chat) ?? owner.id]) {
       emitToUser(to, "whatsapp_message", { chat: kept.chat, name: who, body: text });
       void sendPushToUser(to, {
         title: `WhatsApp · ${who}`,
