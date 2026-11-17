@@ -126,7 +126,7 @@ export type EnrolmentLanguage = (typeof ENROLMENT_LANGUAGES)[number];
 export const ENROLMENT_PAYMENT_METHODS = [
   // "pos": the card machine (the owner, 2026-11-13) — beside Card, and taken as Card is.
   "cash", "bank_transfer", "cheque", "card", "pos",
-  "easebuzz_emi", "tabby", "tamara", "billexpro",
+  "easebuzz_emi", "tabby", "tamara", "tamara_ksa", "billexpro", // tamara_ksa: Tamara's Saudi account (2026-11-17)
   // Rupees into the INR account (the user, 2026-10-13) — finance's "INR Bank Account".
   "inr_bank_account",
   // Razorpay pays out in rupees (the owner, 2026-11-13) — taken as INR Transfer is: see RUPEE_METHODS.
@@ -151,6 +151,7 @@ export const PAYMENT_METHOD_LABELS: Record<EnrolmentPaymentMethod, string> = {
   easebuzz_emi: "Easebuzz EMI",
   tabby: "Tabby",
   tamara: "Tamara",
+  tamara_ksa: "Tamara KSA",
   billexpro: "BillExPro",
   inr_bank_account: "INR Transfer",
   razorpay: "Razorpay",
