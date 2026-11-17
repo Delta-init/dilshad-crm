@@ -307,6 +307,19 @@ section("Case 5b — INR Transfer (2026-10-13): the method, rupees at 1 AED = 22
     JSON.stringify(payload?.payments));
 }
 
+section("Case 5d — Tamara KSA (2026-11-17): its own method beside Tamara, a plain AED payment");
+{
+  const x = await close({ paidAmount: 500, payments: [pay("tamara", 300, "tam-a"), pay("tamara_ksa", 200, "tamksa-b")] });
+  const st = x.status === 201 ? await studentOf(x) : null;
+  check("201: Tamara and Tamara KSA kept apart, both in AED", x.status === 201
+    && st?.payments?.map((p) => `${p.method}:${p.amount}`).join(",") === "tamara:300,tamara_ksa:200" && st?.payments?.[1]?.currency === undefined,
+    `${x.status} ${x.body.message} ${JSON.stringify(st?.payments)}`);
+  const sent = st ? await service.buildHandoverPayload(String(st._id)) as Record<string, any> : null;
+  check("finance is sent `tamara` AED 300 and `tamara_ksa` AED 200, with their receipts and no original",
+    sent?.payments?.map((p: any) => `${p.method}:${p.amountMinor}:${p.receipt?.key}`).join(",") === "tamara:30000:receipts/tam-a.jpg,tamara_ksa:20000:receipts/tamksa-b.jpg"
+      && sent?.payments?.every((p: any) => p.original === undefined), JSON.stringify(sent?.payments));
+}
+
 section("Case 5c — POS and Razorpay (2026-11-13): a POS payment, and a Razorpay one in rupees with its rate");
 {
   // 500: 300 on the card machine, and ₹4,550 through Razorpay at 1 AED = 22.75 INR → AED 200.

@@ -646,6 +646,8 @@ export const ENROLMENT_PAYMENT_METHODS = [
   "easebuzz_emi",
   "tabby",
   "tamara",
+  // Tamara's Saudi account (the user, 2026-11-17) — its own method beside Tamara, an AED payment like it.
+  "tamara_ksa",
   "billexpro",
   // Rupees into the INR account (the user, 2026-10-13) — finance's "INR Bank Account".
   "inr_bank_account",
@@ -672,6 +674,7 @@ export const PAYMENT_METHOD_LABELS: Record<EnrolmentPaymentMethod, string> = {
   easebuzz_emi: "Easebuzz EMI",
   tabby: "Tabby",
   tamara: "Tamara",
+  tamara_ksa: "Tamara KSA",
   billexpro: "BillExPro",
   inr_bank_account: "INR Transfer",
   razorpay: "Razorpay",
