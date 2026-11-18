@@ -307,6 +307,19 @@ section("Case 5b — INR Transfer (2026-10-13): the method, rupees at 1 AED = 22
     JSON.stringify(payload?.payments));
 }
 
+section("Case 5e — Tabby DGO (2026-11-18): its own method beside Tabby, a plain AED payment");
+{
+  const x = await close({ paidAmount: 500, payments: [pay("tabby", 300, "tab-a"), pay("tabby_dgo", 200, "tabdgo-b")] });
+  const st = x.status === 201 ? await studentOf(x) : null;
+  check("201: Tabby and Tabby DGO kept apart, both in AED", x.status === 201
+    && st?.payments?.map((p) => `${p.method}:${p.amount}`).join(",") === "tabby:300,tabby_dgo:200" && st?.payments?.[1]?.currency === undefined,
+    `${x.status} ${x.body.message} ${JSON.stringify(st?.payments)}`);
+  const sent = st ? await service.buildHandoverPayload(String(st._id)) as Record<string, any> : null;
+  check("finance is sent `tabby` AED 300 and `tabby_dgo` AED 200, with their receipts and no original",
+    sent?.payments?.map((p: any) => `${p.method}:${p.amountMinor}:${p.receipt?.key}`).join(",") === "tabby:30000:receipts/tab-a.jpg,tabby_dgo:20000:receipts/tabdgo-b.jpg"
+      && sent?.payments?.every((p: any) => p.original === undefined), JSON.stringify(sent?.payments));
+}
+
 section("Case 5d — Tamara KSA (2026-11-17): its own method beside Tamara, a plain AED payment");
 {
   const x = await close({ paidAmount: 500, payments: [pay("tamara", 300, "tam-a"), pay("tamara_ksa", 200, "tamksa-b")] });

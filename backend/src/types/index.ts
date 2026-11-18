@@ -645,6 +645,8 @@ export const ENROLMENT_PAYMENT_METHODS = [
   "pos",
   "easebuzz_emi",
   "tabby",
+  // Tabby's DGO account (the user, 2026-11-18) — its own method beside Tabby, an AED payment like it.
+  "tabby_dgo",
   "tamara",
   // Tamara's Saudi account (the user, 2026-11-17) — its own method beside Tamara, an AED payment like it.
   "tamara_ksa",
@@ -673,6 +675,7 @@ export const PAYMENT_METHOD_LABELS: Record<EnrolmentPaymentMethod, string> = {
   pos: "POS",
   easebuzz_emi: "Easebuzz EMI",
   tabby: "Tabby",
+  tabby_dgo: "Tabby DGO",
   tamara: "Tamara",
   tamara_ksa: "Tamara KSA",
   billexpro: "BillExPro",
