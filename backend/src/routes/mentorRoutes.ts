@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import { checkPermission, checkAnyPermission } from "../middleware/permissions.js";
 import {
-  mentorSchedule, classDetail, scheduleMeeting, meetingDetail, updateMeeting, cancelMeeting,
+  mentorSchedule, classDetail, scheduleMeeting, meetingDetail, updateMeeting, cancelMeeting, heldMeetings,
 } from "../controllers/mentorController.js";
 
 const router = Router();
@@ -22,6 +22,8 @@ const router = Router();
  */
 router.use(authenticate);
 
+// The close form's "Meeting done by": the person closing's held meetings with a mentor (2026-11-18).
+router.get("/held-meetings", heldMeetings);
 // The Calendar's meeting dialog reads the mentors' week too.
 router.get("/schedule", checkAnyPermission(["mentors", "view"], ["calendar", "view"]), mentorSchedule);
 router.post("/meetings", checkPermission("mentors", "create"), scheduleMeeting);

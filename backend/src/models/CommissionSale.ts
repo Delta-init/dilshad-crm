@@ -24,6 +24,8 @@ const lineSchema = new Schema(
     /** The line's rupee amount (2026-11-13): what the part of the fee paid in rupees pays, INR. Absent: none set. */
     amountInr: { type: Number, min: 0 },
     note: { type: String },
+    /** What came off the line for the mentor's meeting (2026-11-18), AED. */
+    mentorCut: { type: Number, min: 0 },
   },
   { _id: false },
 );
@@ -86,6 +88,31 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
     },
     reason: { type: String, default: "" },
     lines: { type: [lineSchema], default: [] },
+    /** The mentor's meeting its close named (2026-11-18). */
+    meeting: {
+      type: new Schema({
+        none: { type: Boolean },
+        meetingId: { type: String },
+        mentorEmail: { type: String },
+        mentorName: { type: String },
+        at: { type: Date },
+        title: { type: String },
+        checked: { type: Boolean },
+      }, { _id: false }),
+      default: null,
+    },
+    /** The mentor's fee once counted (2026-11-18): Root's figure, taken off the lines. */
+    mentor: {
+      type: new Schema(
+        {
+          email: { type: String }, name: { type: String }, meetingId: { type: String }, at: { type: String },
+          amount: { type: Number, min: 0 },
+          plan: { mentor: { type: Number }, sales: { type: Number }, tl: { type: Number }, sm: { type: Number } },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
     countedAt: { type: Date },
     reversedAt: { type: Date },
   },

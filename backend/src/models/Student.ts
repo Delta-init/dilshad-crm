@@ -68,6 +68,24 @@ const studentSchema = new Schema<IStudent>(
      */
     academy: { type: String, enum: ACADEMIES },
 
+    /*
+     * Who held the mentor's meeting the sale was made with (the user, 2026-11-18): asked at the close — None, or one of
+     * the closer's meetings with a mentor that have been held. Its mentor earns the course's meeting fee, taken off the
+     * sale's commission (Root's plan). Absent on closes from before.
+     */
+    mentorMeeting: {
+      type: new Schema({
+        none: { type: Boolean },
+        meetingId: { type: String },
+        mentorEmail: { type: String },
+        mentorName: { type: String },
+        at: { type: Date },
+        title: { type: String },
+        checked: { type: Boolean },
+      }, { _id: false }),
+      default: undefined,
+    },
+
     status: {
       type: String,
       enum: ["active", "inactive", "graduated", "dropped"],

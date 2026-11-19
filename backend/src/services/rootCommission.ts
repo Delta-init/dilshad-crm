@@ -2,7 +2,7 @@ import axios from "axios";
 import { Types } from "mongoose";
 import { CommissionSettings } from "../models/CommissionSettings.js";
 import { Course } from "../models/Course.js";
-import type { CommissionRole, ICommissionLine, ISlabRow, ISlabs } from "../types/index.js";
+import type { ISaleMentor, CommissionRole, ICommissionLine, ISlabRow, ISlabs } from "../types/index.js";
 
 /*
  * Commission worked out by Root (the user, 2026-11-01: "one plan, in Root, one logic for every portal"; "Root works
@@ -107,6 +107,8 @@ export interface RootResolved {
   lines: ICommissionLine[];
   /** The amounts Root used: the course's row in its plan, or the held ones it was given. */
   plan: Amounts;
+  /** The mentor's fee on the sale (2026-11-18); null: none. */
+  mentor?: ISaleMentor | null;
 }
 
 /** A held sale's amounts as sent to Root: plain numbers, its rupee amounts only where it was held with any. */
@@ -120,15 +122,21 @@ function heldAmounts(a: Amounts): Amounts {
  * Who earns what on a sale, as Root works it out: from the course's row (a bundle's courses added up), or at the
  * amounts a held sale was held at.
  */
-export async function rootResolve(input: { closer: string; team: string; course?: string; courses?: string[]; amounts?: Amounts }): Promise<RootResolved> {
+export async function rootResolve(input: {
+  closer: string; team: string; course?: string; courses?: string[]; amounts?: Amounts;
+  /** The mentor's meeting the sale was made with (2026-11-18): Root takes its fee off the lines. */
+  meeting?: { mentorEmail: string; mentorName?: string; meetingId?: string; at?: string } | null;
+}): Promise<RootResolved> {
   await ensurePortal();
   const r = await ask<{
     state: RootResolved["state"]; reason: string; team: string | null; teamName: string; plan: Amounts;
-    lines: Array<{ role: CommissionRole; user: string; userName: string; amount: number; amountInr?: number; note?: string }>;
+    lines: Array<{ role: CommissionRole; user: string; userName: string; amount: number; amountInr?: number; note?: string; mentorCut?: number }>;
+    mentor?: ISaleMentor | null;
   }>("POST", "/resolve", {
     body: {
       closer: input.closer || null, team: input.team || null, course: input.course || null,
       ...(input.courses?.length ? { courses: input.courses } : {}), ...(input.amounts ? { amounts: heldAmounts(input.amounts) } : {}),
+      ...(input.meeting?.mentorEmail ? { meeting: input.meeting } : {}),
     },
   });
   const rupees = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
@@ -141,7 +149,10 @@ export async function rootResolve(input: { closer: string; team: string; course?
     lines: r.lines.map((l) => ({
       role: l.role, user: new Types.ObjectId(l.user), userName: l.userName, amount: l.amount,
       ...(rupees(l.amountInr) ? { amountInr: rupees(l.amountInr) } : {}), ...(l.note ? { note: l.note } : {}),
+      ...(rupees(l.mentorCut) ? { mentorCut: rupees(l.mentorCut) } : {}),
     })),
+    // The mentor's fee (2026-11-18): only with a meeting, on a counted sale, a course with a fee in Root's plan.
+    mentor: r.mentor && rupees(r.mentor.amount) ? r.mentor : null,
     plan: {
       sales: r.plan.sales, tl: r.plan.tl, sm: r.plan.sm, creditUsd: r.plan.creditUsd,
       ...(rupees(r.plan.salesInr) + rupees(r.plan.tlInr) + rupees(r.plan.smInr) > 0

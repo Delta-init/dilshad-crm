@@ -1,5 +1,8 @@
 import type { Response, NextFunction } from "express";
+import { Types } from "mongoose";
 import { mentorService } from "../services/mentorService.js";
+import { Lead } from "../models/Lead.js";
+import { User } from "../models/User.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
@@ -13,6 +16,23 @@ import type { AuthenticatedRequest } from "../types/index.js";
  * one academy's mentors and books time with them, both of which the LMS
  * authorises for itself.
  */
+
+/**
+ * GET /mentors/held-meetings?leadId= (2026-11-18) — for the close form's "Meeting done by": the meetings the person
+ * closing booked with a mentor (and the lead's owner, where that is somebody else) that have been held, the client's
+ * first. Nothing is written.
+ */
+export const heldMeetings = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const leadId = typeof req.query["leadId"] === "string" ? req.query["leadId"] : "";
+    const lead = Types.ObjectId.isValid(leadId) ? await Lead.findById(leadId).select("name assignedTo").lean() : null;
+    const owner = lead?.assignedTo ? await User.findById(lead.assignedTo).select("email").lean() : null;
+    const bookers = [req.user?.email ?? "", (owner as { email?: string } | null)?.email ?? ""];
+    sendSuccess(res, "Held meetings", { meetings: await mentorService.heldMeetings({ bookers, clientName: lead?.name ?? "" }) });
+  } catch (error) {
+    next(error);
+  }
+};
 
 /** The academy's mentors across a window of days. */
 export const mentorSchedule = async (

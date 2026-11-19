@@ -35,6 +35,8 @@ const previewSchema = z.object({
   course: objectId,
   team: objectId.optional(),
   closer: objectId.optional(),
+  /** The mentor picked on the close form (2026-11-18), by email: the meeting fee shown off the lines. */
+  mentor: z.string().trim().toLowerCase().email().max(200).optional(),
 });
 
 /** One level of a salary slab: AED target and salary, percent of commission. */
@@ -180,6 +182,7 @@ export const getPreview = async (req: AuthenticatedRequest, res: Response, next:
       course: q.course,
       team: q.team || undefined,
       closer: q.closer || undefined,
+      mentor: q.mentor || undefined,
     });
     if (!parsed.success) {
       sendError(res, "Validation failed", 400, parsed.error.flatten().fieldErrors);

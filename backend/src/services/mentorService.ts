@@ -102,7 +102,68 @@ const MAX_WINDOW_DAYS = 62;
 const isSuperAdmin = (email: string) =>
   email.trim().toLowerCase() === env.SUPER_ADMIN_EMAIL.toLowerCase();
 
+/**
+ * One of a salesperson's meetings with a mentor that has been held (2026-11-18), for the close form's "which meeting":
+ * not cancelled (the LMS schedule leaves those out), started by now, not a staff meeting. `client`: an attendee's name
+ * is the lead's.
+ */
+export interface HeldMeeting {
+  id: string;
+  title: string;
+  kind: string;
+  startsAt: string;
+  durationMins: number;
+  attendeeNames: string[];
+  bookedByEmail: string;
+  mentor: { id: string; name: string; email: string };
+  client: boolean;
+}
+
+const nameKey = (v: unknown) => String(v ?? "").toLowerCase().replace(/[^a-z0-9\u0600-\u06ff\u0900-\u097f]+/g, "");
+/** Whether a meeting's attendee is the client: one name holds the other, letters only. */
+export function isClientMeeting(attendeeNames: string[], clientName: string): boolean {
+  const c = nameKey(clientName);
+  if (c.length < 3) return false;
+  return attendeeNames.some((n) => {
+    const a = nameKey(n);
+    return a.length >= 3 && (a.includes(c) || c.includes(a));
+  });
+}
+
+/** How far back a close looks for the meeting it was made with. */
+export const HELD_MEETING_DAYS = 60;
+
 export const mentorService = {
+  /**
+   * The meetings these people booked with a mentor that have been held, the last HELD_MEETING_DAYS days (2026-11-18):
+   * the client's first, then the newest. From the LMS's mentor schedule — the same the Mentors page reads.
+   */
+  async heldMeetings(input: { bookers: string[]; clientName?: string; now?: Date }): Promise<HeldMeeting[]> {
+    const now = input.now ?? new Date();
+    const bookers = new Set(input.bookers.map((e) => String(e ?? "").trim().toLowerCase()).filter(Boolean));
+    if (!bookers.size) return [];
+    const from = new Date(now.getTime() - HELD_MEETING_DAYS * 864e5);
+    const s = await this.schedule({ from: from.toISOString(), to: now.toISOString() });
+    const seen = new Set<string>();
+    const out: HeldMeeting[] = [];
+    for (const m of s.mentors ?? []) {
+      for (const mt of m.meetings ?? []) {
+        if (seen.has(mt.id) || mt.kind === "staff") continue;
+        if (!bookers.has(String(mt.bookedByEmail ?? "").toLowerCase())) continue;
+        const start = new Date(mt.startsAt).getTime();
+        if (!Number.isFinite(start) || start > now.getTime()) continue;
+        seen.add(mt.id);
+        out.push({
+          id: mt.id, title: mt.title, kind: mt.kind, startsAt: mt.startsAt, durationMins: mt.durationMins,
+          attendeeNames: mt.attendeeNames ?? [], bookedByEmail: String(mt.bookedByEmail ?? "").toLowerCase(),
+          mentor: { id: m.id, name: m.name, email: String(m.email ?? "").toLowerCase() },
+          client: isClientMeeting(mt.attendeeNames ?? [], input.clientName ?? ""),
+        });
+      }
+    }
+    return out.sort((a, b) => Number(b.client) - Number(a.client) || b.startsAt.localeCompare(a.startsAt));
+  },
+
   async schedule(input: { from?: string; to?: string }): Promise<MentorSchedule> {
     const from = input.from ? new Date(input.from) : new Date();
     if (Number.isNaN(from.getTime())) throw httpError("from is not a date", 400);

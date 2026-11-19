@@ -16,6 +16,7 @@ import {
 } from "../types/index.js";
 import { Student } from "../models/Student.js";
 import { Lead } from "../models/Lead.js";
+import { User } from "../models/User.js";
 import type { IRole, IStudent, IStudentPayment } from "../types/index.js";
 import { FINANCE_EMAIL_RE, emailKey, isFinanceEmail, takenMessage, type EmailHolder } from "../utils/clientEmail.js";
 import { findEmailHolder } from "./emailHolder.js";
@@ -291,6 +292,46 @@ export class StudentService {
 
   // ── Create ───────────────────────────────────────────────────────────────────
 
+  /**
+   * The close's mentor meeting, checked (2026-11-18): None; or a meeting the person closing (or the lead's owner)
+   * booked with a mentor that has been held, the last HELD_MEETING_DAYS days — its mentor and day from the LMS — and
+   * not on another close. The LMS unreachable: kept as the form sent it, marked unchecked. Absent: nothing (a form from
+   * before it).
+   */
+  async closeMeeting(
+    m: { none?: boolean; meetingId?: string; mentorEmail?: string; mentorName?: string; at?: string } | null | undefined,
+    who: { performedBy?: string; assignedTo?: string | null; clientName?: string },
+  ): Promise<IStudent["mentorMeeting"] | undefined> {
+    if (m === undefined || m === null) return undefined;
+    if (m.none === true) return { none: true };
+    const meetingId = String(m.meetingId ?? "").trim();
+    if (!meetingId) throw createError("Say who held the mentor's meeting and which meeting it was — or None", 422);
+    const already = await Student.findOne({ "mentorMeeting.meetingId": meetingId }).select("name enrollmentNumber").lean();
+    if (already) {
+      throw createError(`That meeting is already on ${(already as { name?: string }).name ?? "another close"}'s close${(already as { enrollmentNumber?: string }).enrollmentNumber ? ` (${(already as { enrollmentNumber?: string }).enrollmentNumber})` : ""} — one meeting, one sale`, 409);
+    }
+    const ids = [who.performedBy, who.assignedTo].map((v) => String(v ?? "")).filter((v) => Types.ObjectId.isValid(v));
+    const people = ids.length ? await User.find({ _id: { $in: ids } }).select("email").lean() : [];
+    const bookers = people.map((u) => String((u as { email?: string }).email ?? ""));
+    const { mentorService } = await import("./mentorService.js");
+    let held;
+    try {
+      held = await mentorService.heldMeetings({ bookers, clientName: who.clientName ?? "" });
+    } catch (err) {
+      console.error("[close] the LMS could not list the held meetings — the meeting is kept as sent", err);
+      const email = String(m.mentorEmail ?? "").trim().toLowerCase();
+      if (!email) throw createError("The LMS can't be reached to check the meeting. Try again in a moment.", 503);
+      return { meetingId, mentorEmail: email, mentorName: String(m.mentorName ?? ""), at: m.at ? new Date(m.at) : null, checked: false };
+    }
+    const found = held.find((x) => x.id === meetingId);
+    if (!found) {
+      throw createError("That meeting isn't one of your held meetings with a mentor (the last 60 days). Pick it again, or None.", 422);
+    }
+    return {
+      meetingId, mentorEmail: found.mentor.email, mentorName: found.mentor.name, at: new Date(found.startsAt), title: found.title, checked: true,
+    };
+  }
+
   async createStudent(data: {
     leadId: string;
     name: string;
@@ -320,6 +361,11 @@ export class StudentService {
     bonusAmount?: number;
     /** Which academy it is closed for: "dubai" (the default) or "bangalore". */
     academy?: string | null;
+    /**
+     * Who held the mentor's meeting the sale was made with (2026-11-18): `{ none: true }`, or one of the closer's held
+     * meetings — `{ meetingId }` (its mentor and day are taken from the LMS). Absent from a form before it: not asked.
+     */
+    mentorMeeting?: { none?: boolean; meetingId?: string; mentorEmail?: string; mentorName?: string; at?: string } | null;
   }, performedBy?: string) {
     const existing = await Student.findOne({ leadId: data.leadId });
     if (existing) throw createError("A student already exists for this lead", 409);
@@ -372,6 +418,9 @@ export class StudentService {
       );
     }
 
+    // Who held the mentor's meeting (2026-11-18): its mentor earns the course's meeting fee once the sale counts.
+    const mentorMeeting = await this.closeMeeting(data.mentorMeeting, { performedBy, assignedTo: data.assignedTo, clientName: data.name });
+
     /*
      * The client's own email (one email, one client — the user, 2026-10-10).
      * Finance files a close under the customer its email already belongs to,
@@ -421,6 +470,7 @@ export class StudentService {
       ...(payments ? { payments } : {}),
       hasBonus: data.hasBonus,
       bonusAmount: data.hasBonus ? Number(data.bonusAmount) : 0,
+      ...(mentorMeeting ? { mentorMeeting } : {}),
       status: "active",
     });
 
