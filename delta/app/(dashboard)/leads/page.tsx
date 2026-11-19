@@ -7,6 +7,7 @@ import {
   CalendarDays, Filter, Tags, ArrowRightLeft, CheckSquare, Square,
   LayoutGrid, List, Columns3, GripVertical, Phone, History,
   ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, Sheet, UserPlus,
+  Send,
 } from "lucide-react";
 import Link from "next/link";
 import { TodayLeadsButton, SplitTodayButton } from "@/components/leads/LeadsDateFilter";
@@ -34,6 +35,8 @@ import { LeadDialog } from "@/components/leads/LeadDialog";
 import { DeleteLeadDialog } from "@/components/leads/DeleteLeadDialog";
 import { AssignLeadDialog } from "@/components/leads/AssignLeadDialog";
 import { KanbanBoard } from "@/components/leads/KanbanBoard";
+import { MoveToCrmDialog } from "@/components/leads/MoveToCrmDialog";
+import { useMayMoveToCrm } from "@/hooks/useCrmLeadMoves";
 import { useLeads, useLeadSources, useUpdateLeadStatus, useBulkUpdateLeadStatus, useBulkDeleteLeads, useBulkAssignLeadsToTeam, useUpdateLead } from "@/hooks/useLeads";
 import { useAllCourses } from "@/hooks/useCourses";
 import { useUsers } from "@/hooks/useUsers";
@@ -572,6 +575,10 @@ function LeadsPageContent() {
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   const [bulkTeamOpen, setBulkTeamOpen] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  // Move the picked leads to another CRM (2026-11-19) — Super Admins, the Sales Manager, team leaders.
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkMoved, setBulkMoved] = useState(false);
+  const { data: mayMove = false } = useMayMoveToCrm();
   const [bulkStatus, setBulkStatus] = useState<LeadStatus>("followup");
   const [bulkTeamId, setBulkTeamId] = useState<string>("");
 
@@ -1759,6 +1766,17 @@ function LeadsPageContent() {
 
       {/* ── Dialogs ────────────────────────────────────────────────────────────── */}
       <LeadDialog open={dialogOpen} onOpenChange={setDialogOpen} lead={selectedLead} />
+      <MoveToCrmDialog
+        open={bulkMoveOpen}
+        onOpenChange={(o) => {
+          setBulkMoveOpen(o);
+          // Closed after a move: the moved ones have left the list, so the selection goes too.
+          if (!o && bulkMoved) { setSelectedIds(new Set()); setBulkMoved(false); }
+        }}
+        leadIds={Array.from(selectedIds)}
+        label={`${selectedIds.size} lead${selectedIds.size === 1 ? "" : "s"}`}
+        onDone={(r) => { if (r.moved.length) setBulkMoved(true); }}
+      />
       <DeleteLeadDialog open={deleteOpen} onOpenChange={setDeleteOpen} lead={selectedLead} />
       <AssignLeadDialog open={assignOpen} onOpenChange={setAssignOpen} lead={selectedLead} />
 
@@ -2021,6 +2039,18 @@ function LeadsPageContent() {
                 >
                   <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
                   <span className="hidden sm:inline">Assign Team</span>
+                </Button>
+              )}
+
+              {/* Move to another CRM */}
+              {mayMove && (
+                <Button
+                  variant="ghost" size="sm"
+                  className="gap-1 h-8 text-xs px-2 sm:px-3 text-foreground hover:bg-muted"
+                  onClick={() => setBulkMoveOpen(true)}
+                >
+                  <Send className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden sm:inline">Move to CRM</span>
                 </Button>
               )}
 

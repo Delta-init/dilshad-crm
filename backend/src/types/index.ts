@@ -441,7 +441,8 @@ export type ActivityAction =
   | "repeat_verified"
   | "whatsapp_followup"
   | "call_logged"
-  | "lead_transferred";
+  | "lead_transferred"
+  | "lead_moved";
 
 export interface ILeadNote {
   _id: Types.ObjectId;
@@ -567,6 +568,8 @@ export interface ILead extends Document {
   repeatCount?: number;
   /** The last time it came again, and the team leader's verification of it. */
   repeat?: ILeadRepeat | null;
+  /** Moved in from another sales CRM (2026-11-19). */
+  movedFrom?: { crm?: string; leadId?: string; ownerName?: string; status?: string; byName?: string; at?: Date } | null;
   createdAt: Date;
   updatedAt: Date;
 }

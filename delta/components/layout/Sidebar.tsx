@@ -34,9 +34,10 @@ import {
   Wallet,
   WalletCards,
   HandCoins,
-  Repeat2, MessageCircle,
+  Repeat2, MessageCircle, Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMayMoveToCrm } from "@/hooks/useCrmLeadMoves";
 import { useUiStore } from "@/lib/store/uiStore";
 import {
   Tooltip,
@@ -65,6 +66,8 @@ export const navItems: { href: string; label: string; icon: React.ElementType; p
   { href: "/leads",     label: "Leads",              icon: FileText,        permModule: "leads"     },
   // Team leaders, Super Admins and the Sales Manager only (hidden for everyone else below) — 2026-10-23
   { href: "/repeat-leads", label: "Repeat leads",    icon: Repeat2,         permModule: "leads"     },
+  // Leads moved to another CRM, with Undo (2026-11-19) — Super Admins, the Sales Manager, team leaders (hidden below).
+  { href: "/moved-leads", label: "Moved leads",      icon: Send,            permModule: "leads"     },
   { href: "/calls",     label: "Calls",              icon: PhoneCall,       permModule: "calls"     },
   /* Calls marked for training, to listen and learn (2026-11-03); open to every role until unticked. */
   { href: "/training-calls", label: "Training calls", icon: Headphones, permModule: "trainingCalls" },
@@ -115,6 +118,7 @@ function NavLinks({ collapsed = false, onNavigate }: NavLinksProps) {
   const { data: reminderCount = 0 } = useMyReminderCount();
   const { data: balanceDue = 0 } = useBalanceDueCount(useAuthStore((st) => st.hasPermission)("balancePayments", "view"));
   const { data: repeatsWaiting = null } = useRepeatLeadCount();
+  const { data: mayMove = false } = useMayMoveToCrm();
   // Your unread WhatsApp (2026-10-27).
   const { data: waUnread = 0 } = useWhatsAppUnread(useAuthStore((st) => st.hasPermission)("whatsapp", "view"));
   const queryClient = useQueryClient();
@@ -155,6 +159,7 @@ function NavLinks({ collapsed = false, onNavigate }: NavLinksProps) {
       {navItems.map(({ href, label, icon: Icon, permModule }) => {
         // Repeat leads: only for whoever verifies them (the count is null for everyone else).
         if (href === "/repeat-leads" && repeatsWaiting === null) return null;
+        if (href === "/moved-leads" && !mayMove) return null;
         const isActive = pathname === href || pathname.startsWith(href + "/");
         const allowed = permModule === null ? true : hasPermission(permModule ?? href.split("/")[1], "view");
         const badgeCount = href === "/leads" ? newLeadsCount : href === "/reminders" ? reminderCount : href === "/balance-payments" ? balanceDue : href === "/repeat-leads" ? (repeatsWaiting ?? 0) : href === "/whatsapp" ? waUnread : 0;

@@ -7,6 +7,7 @@ import roleRoutes from "./roleRoutes.js";
 import leadRoutes from "./leadRoutes.js";
 import userLeadRoutes from "./userLeadRoutes.js";
 import leadTransferRoutes from "./leadTransferRoutes.js";
+import crmLeadMoveRoutes from "./crmLeadMoveRoutes.js";
 import teamRoutes from "./teamRoutes.js";
 import courseRoutes from "./courseRoutes.js";
 import sheetsRoutes from "./sheetsRoutes.js";
@@ -43,6 +44,7 @@ router.use("/users", userRoutes);
 router.use("/users", userLeadRoutes);
 // A person's open leads to someone else, or split (2026-11-10).
 router.use("/lead-transfers", leadTransferRoutes);
+router.use("/crm-lead-moves", crmLeadMoveRoutes);
 router.use("/roles", roleRoutes);
 router.use("/leads", leadRoutes);
 router.use("/teams", teamRoutes);
