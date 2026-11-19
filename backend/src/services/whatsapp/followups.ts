@@ -490,6 +490,12 @@ export async function runFollowups(now = new Date()): Promise<RunResult> {
 /* ── The first reply ────────────────────────────────────────────────────── */
 
 const FIRST = "whatsapp_first_contacts";
+/**
+ * A message from the phone this soon after theirs is the phone's own automatic answer — a click-to-WhatsApp ad's answer
+ * to the question tapped, a WhatsApp Business greeting — not a person (2026-11-19: those were stopping the first reply).
+ */
+const INSTANT_PHONE_MS = 10_000;
+const notInstantPhone = (at: Date) => ({ $nor: [{ sentByName: "From their phone", at: { $lt: new Date(at.getTime() + INSTANT_PHONE_MS) } }] });
 export const FIRST_REPLY_AFTER_MS = MIN;
 /** How long a first message waits for its sender's WhatsApp to be linked again before it is let go. */
 const FIRST_REPLY_WAIT_LINK_MS = 30 * MIN;
@@ -540,7 +546,8 @@ export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Mat
       const fr = mine.firstReply;
       // Before it was switched on — by when it reached the CRM (WhatsApp's own times are whole seconds).
       if (!fr.enabled || !fr.items.length || !fr.startedAt || (d.createdAt ?? d.at) < fr.startedAt) { await close("off"); return; }
-      const answered = await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at } });
+      // Answered — not counting the phone's own instant automatic answer.
+      const answered = await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at }, ...notInstantPhone(d.at) });
       if (answered) { await close("answered"); return; }
       // Not to a student, nor to a lead already closed, lost or a repeat (2026-10-30).
       if (await isStudentKey(d.key)) { await close("student"); return; }
@@ -675,7 +682,7 @@ export async function runKeywordReplies(now = new Date(), gapMs = () => 3000 + M
       const first = await WhatsAppMessage.db.collection(FIRST).findOne({ _id: `${owner}|${d.key}` as never, status: { $in: ["waiting", "sending"] } });
       if (first) continue;
       // A person answered (an automatic message — the first reply, a follow-up — doesn't count).
-      if (await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at }, $or: [{ auto: null }, { auto: { $exists: false } }] })) { await close("answered"); continue; }
+      if (await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at }, $or: [{ auto: null }, { auto: { $exists: false } }], ...notInstantPhone(d.at) })) { await close("answered"); continue; }
       if (await isStudentKey(d.key)) { await close("student"); continue; }
       const leadId = (await leadsByKey()).get(d.key);
       const leadDoc = leadId ? await Lead.findById(leadId).select("name status").lean<{ name?: string; status?: string } | null>() : null;

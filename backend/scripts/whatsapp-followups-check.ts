@@ -30,6 +30,8 @@
  *     lead filed under Titans (on) held by Omar (Others, off) gets none, and its card says off.
  *   - Case 16: only Assigned and Follow-up leads get follow-ups (2026-11-11) — a Call back lead none, its card says
  *     why; a Follow-up lead gets them.
+ *   - Case 17: the phone's own instant answer (2026-11-19 — a click-to-WhatsApp ad's answer to the question tapped) is
+ *     not a person answering: the first reply still goes; the phone answering 30 seconds on still stops it.
  *   - Case 8: the first reply — to someone's first message, a minute on: voice note, audio, link, brochure in order;
  *     not when a person answered, not off a team switched on, not twice; the follow-ups count from it.
  *
@@ -709,6 +711,18 @@ try {
   check("a Follow-up lead gets its step; a Call back lead none", sent16.some((x) => /^Hi Follow,/.test(textOf(x))) && !sent16.some((x) => /^Hi Call,/.test(textOf(x))), j(sent16.map(textOf)));
   const card16 = await call("GET", `/whatsapp/lead/${cb}`, "Sally");
   check("…the Call back lead's card says why", card16.body.data?.followup?.state === "status", j(card16.body.data?.followup));
+
+  section("Case 17 — the phone's own instant answer isn't a person answering");
+  link("Sally");
+  await first("Sally", "971559000001", "AD-1", "Can I build websites and apps without coding?", "Adil");
+  const ad1 = await firsts().findOne({ key: "559000001" });
+  await msg("Sally", "971559000001", "out", new Date(new Date(ad1!.at).getTime() + 1000), { sentByName: "From their phone", body: "Yes! You can build websites and apps using AI tools." });
+  await first("Sally", "971559000002", "AD-2", "Hello", "Bina");
+  const ad2 = await firsts().findOne({ key: "559000002" });
+  await msg("Sally", "971559000002", "out", new Date(new Date(ad2!.at).getTime() + 30_000), { sentByName: "From their phone", body: "Hi Bina, Sally here" });
+  const fr17 = await F.runFirstReplies(new Date(Date.now() + 61_000), () => 0);
+  check("the ad's answer from the phone a second later: the first reply still goes", (await firsts().findOne({ key: "559000001" }))?.status === "sent", j({ fr17, s: await firsts().findOne({ key: "559000001" }) }));
+  check("…a reply from the phone 30 seconds later (a person): no first reply", (await firsts().findOne({ key: "559000002" }))?.status === "answered", j(await firsts().findOne({ key: "559000002" })));
 } finally {
   server.close();
   await mongoose.disconnect();
