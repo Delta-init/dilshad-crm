@@ -13,6 +13,12 @@ interface CommissionPreviewProps {
   teamId?: string | null;
   /** The lead's counsellor — who closes it, and earns the Sales Staff amount. */
   closerId?: string | null;
+  /**
+   * The mentor picked as "Meeting done by" on the close (2026-11-18), by email: the course's meeting fee comes off the
+   * lines, and is shown here. Absent or None: no fee.
+   */
+  mentorEmail?: string | null;
+  mentorName?: string | null;
 }
 
 /**
@@ -22,9 +28,9 @@ interface CommissionPreviewProps {
  * Information only: it never stops a close. Anything it cannot answer (no
  * course yet, the server unreachable) simply shows nothing.
  */
-export function CommissionPreview({ courseId, teamId, closerId }: CommissionPreviewProps) {
+export function CommissionPreview({ courseId, teamId, closerId, mentorEmail, mentorName }: CommissionPreviewProps) {
   const me = useAuthStore((s) => s.user?._id);
-  const { data, isLoading, isError } = useCommissionPreview({ course: courseId, team: teamId, closer: closerId });
+  const { data, isLoading, isError } = useCommissionPreview({ course: courseId, team: teamId, closer: closerId, mentor: mentorEmail });
 
   if (!courseId || isError) return null;
   if (isLoading || !data) return <Skeleton className="h-14 rounded-xl" />;
@@ -34,6 +40,10 @@ export function CommissionPreview({ courseId, teamId, closerId }: CommissionPrev
   const earns = you ? "earn" : "earns";
   const mine = data.lines.filter((l) => l.user === closerId && l.amount > 0);
   const planIsEmpty = data.plan.sales + data.plan.tl + data.plan.sm === 0;
+  // The mentor's meeting (2026-11-18): the fee, and what it took off each line this viewer may see.
+  const mentorFee = data.mentorFee ?? 0;
+  const cutLines = data.lines.filter((l) => (l.mentorCut ?? 0) > 0);
+  const mentorWho = mentorName || "The mentor";
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
@@ -76,6 +86,20 @@ export function CommissionPreview({ courseId, teamId, closerId }: CommissionPrev
             {(data.closerTotalInr ?? 0) > 0 && (
               <p className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
                 Paid in rupees: <span className="font-semibold">{inr(data.closerTotalInr ?? 0)}</span> instead — for the part of the fee the client pays in INR.
+              </p>
+            )}
+            {/* The mentor who held the meeting is paid out of the sale's commission (2026-11-18). */}
+            {mentorEmail && mentorFee > 0 && (
+              <p className="mt-0.5 text-[11px] text-violet-600 dark:text-violet-400">
+                {mentorWho} earns <span className="font-semibold">{aed(mentorFee)}</span> for the meeting
+                {cutLines.length > 0
+                  ? ` — taken off ${cutLines.map((l) => `${l.user === closerId && you ? "yours" : `${ROLE_LABEL[l.role]} ${l.userName}`} −${aed(l.mentorCut ?? 0)}`).join(", ")}`
+                  : ""}.
+              </p>
+            )}
+            {mentorEmail && mentorFee === 0 && (
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                No meeting fee is set for {data.courseName} — the mentor earns nothing on this sale, and nothing is taken off.
               </p>
             )}
             <p className="mt-0.5 text-[10px] text-muted-foreground">

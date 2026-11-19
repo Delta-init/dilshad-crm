@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   GraduationCap, X, User2, Phone, Mail, BookOpen,
-  Calendar, DollarSign, StickyNote, CheckCircle2, Gift, MapPin, AlertTriangle,
+  Calendar, DollarSign, StickyNote, CheckCircle2, Gift, MapPin, AlertTriangle, UserCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import { useCloseOptions, useCreateStudent, useEmailCheck, useUpdateStudent } fr
 import { useAllCourses } from "@/hooks/useCourses";
 import { useAddPayment, useLeadPaymentFinance } from "@/hooks/usePayments";
 import { CommissionPreview } from "@/components/commission/CommissionPreview";
+import { useHeldMeetings } from "@/hooks/useHeldMeetings";
 import {
   PaymentRowsEditor, describeForeign, leadAmountOf, leadPaymentRows, missingInRows, newPaymentRow, rowAmount, rowForeignFields, rowsForBase,
   type PaymentRow,
@@ -24,7 +25,7 @@ import {
 import { AcademyBadge } from "@/components/students/AcademyBadge";
 import type { Lead } from "@/types/lead";
 import { bangalorePriceOf, feeFor, type Course } from "@/types/course";
-import type { Academy, EnrolmentPaymentMethod, FeeStatus, Student, StoredReceipt } from "@/types/student";
+import type { Academy, CloseMentorMeeting, EnrolmentPaymentMethod, FeeStatus, Student, StoredReceipt } from "@/types/student";
 import {
   ACADEMIES,
   ACADEMY_CURRENCY,
@@ -258,6 +259,49 @@ export function CreateStudentModal({ open, lead, existingStudent, progress, onCl
     ? { hasBonus: bonusChoice === "yes", bonusAmount: bonusChoice === "yes" ? bonusAmount : 0 }
     : {};
 
+  /*
+   * Who held the mentor's meeting the sale was made with (the user, 2026-11-18), as the CS Portal asks: None, or a
+   * mentor — then which of their meetings. Offered from the meetings the person closing (and the lead's owner) booked
+   * with a mentor and that have been held, the last 60 days, the client's first. The mentor earns the course's meeting
+   * fee out of the sale's commission. Asked at every new close; an enrolment being edited is not asked again.
+   */
+  const heldQuery = useHeldMeetings(lead._id, open && !editing);
+  const heldMeetings = heldQuery.data ?? [];
+  /** "" unanswered, "none", or the mentor's email. */
+  const [meetingMentor, setMeetingMentor] = useState("");
+  const [meetingId, setMeetingId] = useState("");
+  const meetingMentors = heldMeetings.reduce<{ email: string; name: string; count: number; client: boolean }[]>((acc, m) => {
+    const known = acc.find((x) => x.email === m.mentor.email);
+    if (known) {
+      known.count += 1;
+      known.client = known.client || m.client;
+    } else {
+      acc.push({ email: m.mentor.email, name: m.mentor.name, count: 1, client: m.client });
+    }
+    return acc;
+  }, []);
+  const mentorMeetings = heldMeetings.filter((m) => m.mentor.email === meetingMentor);
+  const pickedMeeting = mentorMeetings.find((m) => m.id === meetingId) ?? null;
+  const pickedMentor = meetingMentors.find((m) => m.email === meetingMentor) ?? null;
+  /** Only what was answered is sent. */
+  const mentorMeeting: CloseMentorMeeting | undefined =
+    meetingMentor === "none"
+      ? { none: true }
+      : pickedMeeting
+        ? { meetingId: pickedMeeting.id, mentorEmail: pickedMeeting.mentor.email, mentorName: pickedMeeting.mentor.name, at: pickedMeeting.startsAt }
+        : undefined;
+  /** A mentor picked: their only meeting, or their only one with this client, is taken; otherwise one is chosen. */
+  function chooseMeetingMentor(next: string) {
+    setMeetingMentor(next);
+    const theirs = heldMeetings.filter((m) => m.mentor.email === next);
+    const withClient = theirs.filter((m) => m.client);
+    setMeetingId(theirs.length === 1 ? theirs[0].id : withClient.length === 1 ? withClient[0].id : "");
+  }
+  const meetingWhen = (iso: string) =>
+    new Date(iso).toLocaleString("en-AE", {
+      timeZone: "Asia/Dubai", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true,
+    });
+
   const missing = editing
     ? [bonusAmountMissing && "the bonus amount"].filter(Boolean) as string[]
     : [
@@ -268,6 +312,8 @@ export function CreateStudentModal({ open, lead, existingStudent, progress, onCl
         ...missingInRows(paymentRows, base),
         !bonusChoice && "whether a bonus was given",
         bonusAmountMissing && "the bonus amount",
+        !meetingMentor && "who held the mentor meeting (or None)",
+        meetingMentor && meetingMentor !== "none" && !pickedMeeting && "which meeting",
       ].filter(Boolean) as string[];
 
   function toIST(iso?: string | null) {
@@ -382,6 +428,7 @@ export function CreateStudentModal({ open, lead, existingStudent, progress, onCl
         ...rowForeignFields(r, base),
       })),
       ...bonusFields,
+      ...(mentorMeeting ? { mentorMeeting } : {}),
     }).then(
       () => onCreated(),
       (err: unknown) => {
@@ -705,8 +752,100 @@ export function CreateStudentModal({ open, lead, existingStudent, progress, onCl
                 </div>
               </motion.div>
 
+              {/* Who held the mentor's meeting (2026-11-18): the mentor earns the course's meeting fee out of the commission. */}
+              {!editing && (
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Mentor meeting</p>
+                  <div className="space-y-1">
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <UserCheck className="h-3 w-3" /> Meeting done by (mentor) *
+                    </p>
+                    <Select value={meetingMentor} onValueChange={chooseMeetingMentor}>
+                      <SelectTrigger className="h-8 text-xs" aria-label="Meeting done by (mentor)">
+                        <SelectValue placeholder={heldQuery.isLoading ? "Loading your meetings…" : "Pick the mentor, or None"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-xs">None — no mentor held a meeting</SelectItem>
+                        {meetingMentors.map((m) => (
+                          <SelectItem key={m.email} value={m.email} className="text-xs">
+                            {m.name} · {m.count} meeting{m.count === 1 ? "" : "s"}{m.client ? " · with this client" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {heldQuery.isError && (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                        The LMS couldn&apos;t be reached for your meetings.{" "}
+                        <button type="button" onClick={() => heldQuery.refetch()} className="font-medium underline">Try again</button>
+                        {" "}— or pick None if no mentor held one.
+                      </p>
+                    )}
+                    {heldQuery.isSuccess && meetingMentors.length === 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        No meeting with a mentor held in the last 60 days that you or the lead&apos;s owner booked.
+                      </p>
+                    )}
+                  </div>
+                  <AnimatePresence>
+                    {meetingMentor && meetingMentor !== "none" && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        className="space-y-1"
+                      >
+                        <p className="text-[11px] text-muted-foreground">Which meeting *</p>
+                        <div role="radiogroup" aria-label="Which meeting" className="space-y-1">
+                          {mentorMeetings.map((m) => (
+                            <button
+                              key={m.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={meetingId === m.id}
+                              onClick={() => setMeetingId(m.id)}
+                              className={cn(
+                                "flex w-full items-start gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors",
+                                meetingId === m.id ? "border-primary bg-primary/10" : "border-border/60 hover:border-primary/40",
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "mt-0.5 h-3 w-3 shrink-0 rounded-full border",
+                                  meetingId === m.id ? "border-primary bg-primary" : "border-muted-foreground/50",
+                                )}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate font-medium text-foreground">{m.title || "Meeting"}</span>
+                                <span className="block text-[10px] text-muted-foreground">
+                                  {meetingWhen(m.startsAt)} · {m.durationMins} min
+                                  {m.attendeeNames.length ? ` · ${m.attendeeNames.join(", ")}` : ""}
+                                </span>
+                              </span>
+                              {m.client && (
+                                <span className="shrink-0 rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium text-green-600 dark:text-green-400">
+                                  This client
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          One meeting, one sale. {pickedMentor?.name ?? "The mentor"} earns the course&apos;s meeting fee once finance approves the sale.
+                        </p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              )}
+
               {/* What this sale earns the counsellor, by the commission plan. */}
-              <CommissionPreview courseId={pickedCourse?._id} teamId={saleTeamId} closerId={closerId} />
+              <CommissionPreview
+                courseId={pickedCourse?._id}
+                teamId={saleTeamId}
+                closerId={closerId}
+                mentorEmail={!editing && meetingMentor && meetingMentor !== "none" ? meetingMentor : null}
+                mentorName={pickedMentor?.name ?? null}
+              />
 
               {/* Editable fields */}
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="space-y-3">

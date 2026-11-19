@@ -156,6 +156,8 @@ export interface CommissionLine {
   amountInr?: number;
   earnedInr?: number;
   note: string;
+  /** What a mentor's meeting on the sale took off this line (2026-11-18); `amount` is already after it. */
+  mentorCut?: number;
 }
 
 export interface CommissionSale {
@@ -214,4 +216,6 @@ export interface CommissionPreview {
   /** The same lines' rupee amounts added up (2026-11-13): what the part paid in rupees pays; 0 or absent = none set. */
   closerTotalInr?: number;
   lines: CommissionLine[];
+  /** The mentor's fee for the meeting picked on the close (2026-11-18), taken off the lines; 0 or absent = none. */
+  mentorFee?: number;
 }

@@ -66,13 +66,15 @@ export const usePay = (month: string | null) =>
  * What a sale would earn its closer — for the closing dialog. Nothing is saved;
  * off until there is a course to ask about.
  */
-export const useCommissionPreview = (input: { course?: string | null; team?: string | null; closer?: string | null }) =>
+export const useCommissionPreview = (input: { course?: string | null; team?: string | null; closer?: string | null; mentor?: string | null }) =>
   useQuery({
-    queryKey: [...COMMISSION_KEY, "preview", input.course, input.team, input.closer],
+    queryKey: [...COMMISSION_KEY, "preview", input.course, input.team, input.closer, input.mentor ?? ""],
     queryFn: async () => {
       const params: Record<string, string> = { course: input.course! };
       if (input.team) params.team = input.team;
       if (input.closer) params.closer = input.closer;
+      // The mentor picked as "Meeting done by" (2026-11-18), by email: the meeting fee comes off the lines.
+      if (input.mentor) params.mentor = input.mentor;
       const response = await api.get<ApiResponse<CommissionPreview>>("/commission/preview", { params });
       return response.data.data!;
     },

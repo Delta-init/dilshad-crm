@@ -98,6 +98,30 @@ export interface CreateStudentInput {
   bonusAmount?: number;
   /** Which academy it is closed for — Dubai unless said. */
   academy?: Academy;
+  /**
+   * Who held the mentor's meeting the sale was made with (2026-11-18): None, or one of the held meetings offered —
+   * the server checks it against the LMS and takes the mentor and day from there.
+   */
+  mentorMeeting?: CloseMentorMeeting;
+}
+
+/** The close's answer to "Meeting done by" (2026-11-18). */
+export type CloseMentorMeeting =
+  | { none: true }
+  | { meetingId: string; mentorEmail: string; mentorName: string; at: string };
+
+/** A meeting with a mentor that has been held, booked by the person closing (or the lead's owner), the last 60 days. */
+export interface HeldMeeting {
+  id: string;
+  title: string;
+  kind: string;
+  startsAt: string;
+  durationMins: number;
+  attendeeNames: string[];
+  bookedByEmail: string;
+  mentor: { id: string; name: string; email: string };
+  /** An attendee's name is the client's. */
+  client: boolean;
 }
 
 /**
