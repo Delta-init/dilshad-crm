@@ -262,11 +262,17 @@ export function canSeeLine(scope: CommissionScope, viewerId: string, line: { use
   return scope.teamPeople.has(idOf(line.user));
 }
 
-/** The rates a viewer may see: a team leader no SM rate, everyone else only the sales rate. */
+/**
+ * The rates a viewer may see: a team leader no SM rate, everyone else only the sales rate. Each rupee amount
+ * (2026-11-20) goes with its AED one — a team leader's salesInr and tlInr, a salesperson's salesInr — and only where
+ * the plan has them.
+ */
 export function planFor(plan: Plan, scope: CommissionScope): Partial<Plan> {
   if (scope.all) return plan;
-  if (scope.ledTeamIds.length) return { sales: plan.sales, tl: plan.tl, creditUsd: plan.creditUsd };
-  return { sales: plan.sales, creditUsd: plan.creditUsd };
+  const keep: Array<keyof Plan> = scope.ledTeamIds.length
+    ? ["sales", "tl", "creditUsd", "salesInr", "tlInr"]
+    : ["sales", "creditUsd", "salesInr"];
+  return Object.fromEntries(keep.filter((k) => plan[k] !== undefined).map((k) => [k, plan[k]])) as Partial<Plan>;
 }
 
 /** The salary slabs a viewer may see, by the same rule. */

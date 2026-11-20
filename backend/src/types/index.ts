@@ -274,6 +274,10 @@ export interface ICourseCommission {
   sm: number;
   /** The MT5 credit (USD) the course comes with — shown beside the plan, earns nobody anything. */
   creditUsd: number;
+  /** The rupee amounts (2026-11-20): what the part of a sale paid in rupees earns, mirrored from Root's plan. */
+  salesInr?: number;
+  tlInr?: number;
+  smInr?: number;
   updatedAt?: Date;
   updatedBy?: Types.ObjectId;
 }

@@ -55,7 +55,8 @@ export interface RootPlan {
   tlPaidOnOwnClose: boolean;
   salesManager: { id: string; name: string } | null;
   excluded: Array<{ id: string; name: string }>;
-  courses: Array<{ courseId: string; name: string; sales: number; tl: number; sm: number; creditUsd: number }>;
+  /** `…Inr` (2026-11-13): the course's rupee amounts; absent from a Root before them (none). */
+  courses: Array<{ courseId: string; name: string; sales: number; tl: number; sm: number; creditUsd: number; salesInr?: number; tlInr?: number; smInr?: number }>;
   month: string;
   slabsFrom: string;
   slabs: Record<"sales" | "tl" | "sm", ISlabRow[]>;
@@ -171,6 +172,9 @@ export async function rootPayRows<T>(month: string): Promise<T[]> {
  * Root's plan copied into this CRM's own settings — every few minutes while COMMISSION_FROM_ROOT is on: each course's
  * amounts, the Sales Manager, the logins that earn nothing. What reads them here (the Plan tab, the leaderboard, who
  * sees everyone's pay, the timed jobs) then follows Root. Only what differs is written. Returns what changed.
+ *
+ * Since 2026-11-20 each course's rupee amounts (salesInr / tlInr / smInr) come with its AED ones, for the Plan tab and
+ * the Courses page to show apart; a Root before them sends none, read as 0.
  */
 export async function mirrorRootPlan(month: string): Promise<string[]> {
   planCache.delete(month);
@@ -190,15 +194,19 @@ export async function mirrorRootPlan(month: string): Promise<string[]> {
     );
     changed.push("the Sales Manager and the logins that earn nothing");
   }
+  const rupees = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+  const KEYS = ["sales", "tl", "sm", "creditUsd", "salesInr", "tlInr", "smInr"] as const;
   for (const c of p.courses) {
     if (!Types.ObjectId.isValid(c.courseId)) continue;
     const course = await Course.findById(c.courseId).select("name commission").lean();
     if (!course) continue;
     const now = (course.commission ?? {}) as Partial<Amounts>;
-    if ((now.sales ?? 0) === c.sales && (now.tl ?? 0) === c.tl && (now.sm ?? 0) === c.sm && (now.creditUsd ?? 0) === c.creditUsd) continue;
+    // The rupee amounts as plain numbers, 0 for none — what the course keeps (a course from before them has none).
+    const row: Required<Amounts> = { sales: c.sales, tl: c.tl, sm: c.sm, creditUsd: c.creditUsd, salesInr: rupees(c.salesInr), tlInr: rupees(c.tlInr), smInr: rupees(c.smInr) };
+    if (KEYS.every((k) => (now[k] ?? 0) === row[k])) continue;
     await Course.updateOne(
       { _id: course._id },
-      { $set: { "commission.sales": c.sales, "commission.tl": c.tl, "commission.sm": c.sm, "commission.creditUsd": c.creditUsd, "commission.updatedAt": new Date() } },
+      { $set: { ...Object.fromEntries(KEYS.map((k) => [`commission.${k}`, row[k]])), "commission.updatedAt": new Date() } },
     );
     changed.push(String(course.name ?? c.courseId));
   }

@@ -5,6 +5,13 @@ export interface CoursePlan {
   sm: number;
   /** The MT5 credit (USD) the course comes with — shown beside the plan. */
   creditUsd: number;
+  /**
+   * What the part of a sale paid in rupees earns each of them, in INR (2026-11-20): Root's plan's rupee amounts, shown
+   * apart from the AED ones — never added to them. Absent or 0: none set (a viewer gets only those of their own rates).
+   */
+  salesInr?: number;
+  tlInr?: number;
+  smInr?: number;
 }
 
 export type CommissionRole = "sales" | "tl" | "sm";
@@ -126,6 +133,10 @@ export interface CommissionPayout {
   paidOn?: string | null;
   paymentMethod?: string | null;
   reference?: string | null;
+  /** The month's rupee part (2026-11-13), approved and paid apart from the AED: its own state, amount (INR) and day paid. */
+  inr?: { state: "approved" | "paid"; amount: number; paidOn?: string | null };
+  /** A month that is only rupees (2026-11-20): `amount` is 0 and the figure is in `inr`. */
+  inrOnly?: boolean;
 }
 
 export interface PayView {

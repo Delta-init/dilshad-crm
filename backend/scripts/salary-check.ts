@@ -217,8 +217,12 @@ check("…and back", (await saleOf(s1))?.fee === 48_000);
 
 payouts.push(
   { userId: String(people.Ria), state: "approved", amount: 600, currency: "AED", approvedByName: "Mona Manager", approvedAt: "2026-10-21T08:00:00.000Z" },
+  // Her rupee part (2026-11-13) approved, not paid yet: it rides on her row as `inr`.
   { userId: String(people.Theertha), state: "paid", amount: 115, currency: "AED", approvedByName: "Mona Manager", approvedAt: "2026-10-21T08:00:00.000Z",
-    paidOn: "2026-11-02", paymentMethod: "bank_transfer", reference: "TRX-9" },
+    paidOn: "2026-11-02", paymentMethod: "bank_transfer", reference: "TRX-9", inr: { state: "approved", amount: 5750, paidOn: null } },
+  // A month that is only rupees (2026-11-20): a row of its own, AED 0, the figure in `inr`.
+  { userId: String(people.Neethu), state: "paid", amount: 0, currency: "AED", approvedByName: "Mona Manager", approvedAt: "2026-10-22T08:00:00.000Z",
+    paidOn: null, paymentMethod: null, reference: null, inrOnly: true, inr: { state: "paid", amount: 2500, paidOn: "2026-11-03" } },
 );
 const pay = await salary.getPay({ userId: String(people.Owner), role: { roleName: "Super Admin", isSystemRole: true } as never }, MONTH);
 const row = (name: string) => pay.people?.find((p) => p.name === name);
@@ -274,6 +278,11 @@ check("finance was asked, signed, for this CRM and month", payoutAsks.some((a) =
 check("the payouts are known", (pay as { payoutsKnown?: boolean }).payoutsKnown === true);
 check("Ria: approved, 600, by the manager", row("Ria")?.payout?.state === "approved" && row("Ria")?.payout?.amount === 600 && row("Ria")?.payout?.approvedByName === "Mona Manager", JSON.stringify(row("Ria")?.payout));
 check("Theertha: paid on 2 November by bank transfer, with the reference", row("Theertha")?.payout?.state === "paid" && row("Theertha")?.payout?.paidOn === "2026-11-02" && row("Theertha")?.payout?.reference === "TRX-9");
+check("Theertha's rupee part comes through as finance sent it: INR 5,750 approved, apart from the AED paid",
+  JSON.stringify(row("Theertha")?.payout?.inr) === JSON.stringify({ state: "approved", amount: 5750, paidOn: null }) && row("Theertha")?.payout?.amount === 115, JSON.stringify(row("Theertha")?.payout));
+check("…a rupees-only month (Neethu): inrOnly, AED 0, the INR 2,500 paid", row("Neethu")?.payout?.inrOnly === true && row("Neethu")?.payout?.amount === 0
+  && row("Neethu")?.payout?.inr?.amount === 2500 && row("Neethu")?.payout?.inr?.state === "paid" && row("Neethu")?.payout?.inr?.paidOn === "2026-11-03", JSON.stringify(row("Neethu")?.payout));
+check("…a row from a finance before the rupee part: no inr, no inrOnly", !("inr" in (row("Ria")?.payout ?? {})) && !("inrOnly" in (row("Ria")?.payout ?? {})));
 check("nobody else has one", row("Idle")?.payout === null && row("Shahana")?.payout === null);
 const own = await salary.getPay({ userId: String(people.Theertha) }, MONTH);
 check("…and her own My Pay says so too", own.me?.payout?.state === "paid");

@@ -23,7 +23,7 @@ import type { Course } from "@/types/course";
 import { bangalorePriceOf, lmsCoursesOf } from "@/types/course";
 import { useCurrencyStore } from "@/lib/store/currencyStore";
 import Link from "next/link";
-import { TL_PAID, usd } from "@/lib/commission";
+import { inr, TL_PAID, usd } from "@/lib/commission";
 import { fmtCurrency, fmtUSD } from "@/lib/currency";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -208,6 +208,10 @@ function CourseCard({ course, onEdit, onDelete, onMap, index }: CourseCardProps)
 function CourseCommission({ course }: { course: Course }) {
   const c = course.commission;
   const paid = c ? c.sales + (TL_PAID ? c.tl : 0) + c.sm : 0;
+  // Its rupee amounts (2026-11-20, from Root's plan): what the part of a sale paid in rupees earns — apart, never added.
+  const rupees = c
+    ? ([["Sales", c.salesInr ?? 0], ...(TL_PAID ? [["TL", c.tlInr ?? 0] as const] : []), ["SM", c.smInr ?? 0]] as const).filter(([, v]) => v > 0)
+    : [];
   return (
     <Link
       href="/commission"
@@ -230,6 +234,11 @@ function CourseCommission({ course }: { course: Course }) {
         </div>
       ) : (
         <p className="mt-0.5 text-[11px] text-muted-foreground">No commission set</p>
+      )}
+      {rupees.length > 0 && (
+        <p className="mt-1 text-[10px] tabular-nums text-amber-600 dark:text-amber-400">
+          Paid in rupees: {rupees.map(([label, value]) => `${label} ${inr(value)}`).join(" · ")}
+        </p>
       )}
       {c?.creditUsd ? (
         <p className="mt-1 text-[10px] text-muted-foreground">Comes with {usd(c.creditUsd)} MT5 credit</p>

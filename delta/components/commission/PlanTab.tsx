@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import {
   useCommissionPlan, useUpdateCommissionSettings, useUpdateCoursePlan,
 } from "@/hooks/useCommission";
-import { aed, TL_PAID, TL_RULE, uaeDate, usd } from "@/lib/commission";
+import { aed, inr, TL_PAID, TL_RULE, uaeDate, usd } from "@/lib/commission";
 import type { CommissionPlanView, CoursePlan } from "@/types/commission";
 import { SlabsCard } from "@/components/commission/SlabsCard";
 
@@ -142,11 +142,13 @@ function HowItsPaid() {
 
 // ─── The plan, a card per course ──────────────────────────────────────────────
 
+// `inrKey` (2026-11-20): the rupee amount that goes with an AED one — what the part of a sale paid in rupees earns,
+// from Root's plan, shown under it and never added to it.
 const ALL_FIELDS = [
-  { key: "creditUsd", label: "MT5 credit (USD)", money: usd },
-  { key: "sales", label: "Sales Staff (AED)", money: aed },
-  { key: "tl", label: "Team Leader (AED)", money: aed },
-  { key: "sm", label: "Sales Manager (AED)", money: aed },
+  { key: "creditUsd", label: "MT5 credit (USD)", money: usd, inrKey: null },
+  { key: "sales", label: "Sales Staff (AED)", money: aed, inrKey: "salesInr" },
+  { key: "tl", label: "Team Leader (AED)", money: aed, inrKey: "tlInr" },
+  { key: "sm", label: "Sales Manager (AED)", money: aed, inrKey: "smInr" },
 ] as const;
 // Where no TL is paid there is nothing to set for one.
 const FIELDS = ALL_FIELDS.filter((f) => TL_PAID || f.key !== "tl");
@@ -167,7 +169,8 @@ function PlanTable({ plan }: { plan: CommissionPlanView }) {
   );
 }
 
-type Draft = Record<keyof CoursePlan, string>;
+// Only the AED amounts and the credit: the rupee amounts are Root's, never edited here.
+type Draft = Record<"sales" | "tl" | "sm" | "creditUsd", string>;
 const draftOf = (p: Partial<CoursePlan>): Draft => ({
   sales: String(p.sales ?? 0), tl: String(p.tl ?? 0), sm: String(p.sm ?? 0), creditUsd: String(p.creditUsd ?? 0),
 });
@@ -188,12 +191,15 @@ function PlanRow({ course, canEdit, index }: {
     sales: num(draft.sales), tl: num(draft.tl), sm: num(draft.sm), creditUsd: num(draft.creditUsd),
   };
   const invalid = Object.values(values).some((v) => !Number.isFinite(v) || v < 0);
-  const dirty = (Object.keys(draft) as (keyof CoursePlan)[]).some((k) => values[k] !== course.commission[k]);
+  const dirty = (Object.keys(draft) as (keyof Draft)[]).some((k) => values[k] !== course.commission[k]);
   const shown = canEdit ? values : course.commission;
   // Only the rates sent for this viewer: a salesperson's own, a team leader's own and their team's (2026-10-23).
   const fields = FIELDS.filter((f) => f.key in course.commission);
   const perSale = (shown.sales ?? 0) + (TL_PAID ? (shown.tl ?? 0) : 0) + (shown.sm ?? 0);
   const perSaleLabel = !("sm" in course.commission) ? (TL_PAID && "tl" in course.commission ? "sales + TL per sale" : "you earn per sale") : "paid per sale";
+  // The same, in rupees (2026-11-20): what a sale paid wholly in rupees pays instead — apart, never added to the AED.
+  const c = course.commission;
+  const perSaleInr = (c.salesInr ?? 0) + (TL_PAID ? (c.tlInr ?? 0) : 0) + (c.smInr ?? 0);
   const inactive = course.status === "inactive";
 
   return (
@@ -215,6 +221,9 @@ function PlanRow({ course, canEdit, index }: {
             {perSale && !invalid ? aed(perSale) : "—"}
           </p>
           <p className="text-[10px] text-muted-foreground">{perSaleLabel}</p>
+          {perSaleInr > 0 && (
+            <p className="text-[11px] tabular-nums text-amber-600 dark:text-amber-400">{inr(perSaleInr)} when paid in rupees</p>
+          )}
         </div>
       </div>
 
@@ -236,6 +245,10 @@ function PlanRow({ course, canEdit, index }: {
               <p className="text-sm tabular-nums text-foreground">
                 {course.commission[f.key] ? f.money(course.commission[f.key]!) : <span className="text-muted-foreground/60">—</span>}
               </p>
+            )}
+            {/* The rupee amount beside it (2026-11-20), where Root's plan has one: read only, set in Root. */}
+            {f.inrKey && (c[f.inrKey] ?? 0) > 0 && (
+              <p className="text-[11px] tabular-nums text-amber-600 dark:text-amber-400">{inr(c[f.inrKey] ?? 0)} when paid in rupees</p>
             )}
           </label>
         ))}

@@ -81,7 +81,7 @@ export function EveryonePayTable({ people, totals, payoutsKnown = false }: Every
                   {(p.commission.balance ?? 0) > 0 ? ` · +${aed(p.commission.balance ?? 0)} waiting for full payment` : ""}
                   {p.commission.notCountedYet > 0 ? ` · ${p.commission.notCountedYet} not counted yet` : ""}
                 </p>
-                {payoutsKnown && <div className="mt-1"><PayoutBadge payout={p.payout} payable={p.commission.payable} compact /></div>}
+                {payoutsKnown && <div className="mt-1"><PayoutBadge payout={p.payout} payable={p.commission.payable} payableInr={p.commission.payableInr} compact /></div>}
               </td>
               <td className="whitespace-nowrap px-4 py-2.5 text-right font-semibold tabular-nums text-primary">{aed(p.total)}</td>
             </motion.tr>

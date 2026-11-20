@@ -42,7 +42,7 @@ const { signAccessToken } = await import("../src/utils/jwt.js");
 const express = (await import("express")).default;
 const routes = (await import("../src/routes/index.js")).default;
 const { errorHandler } = await import("../src/middleware/errorHandler.js");
-const { canSeeLine, commissionScope, uaeMonthOf } = await import("../src/services/commissionService.js");
+const { canSeeLine, commissionScope, planFor, uaeMonthOf } = await import("../src/services/commissionService.js");
 
 const admin = new Types.ObjectId(), staff = new Types.ObjectId();
 await db.collection("roles").insertMany([
@@ -66,6 +66,9 @@ await db.collection("teams").insertMany([
 await db.collection("commissionsettings").insertOne({ key: "default", salesManager: P.sm, excludedUsers: [] });
 const course = id();
 await db.collection("courses").insertOne({ _id: course, name: "Forex Pro", amount: 5000, status: "active", commission: { sales: 300, tl: 100, sm: 50, creditUsd: 10 } });
+// A course with rupee amounts (2026-11-20, mirrored from Root's plan): each goes with its AED one.
+await db.collection("courses").insertOne({ _id: id(), name: "Rupee Course", amount: 5000, status: "active",
+  commission: { sales: 230, tl: 85, sm: 100, creditUsd: 0, salesInr: 5750, tlInr: 2125, smInr: 2500 } });
 
 const month = uaeMonthOf(new Date());
 const line = (role: string, who: keyof typeof P, amount: number) => ({ role, user: P[who], userName: NAME[who], amount });
@@ -123,6 +126,27 @@ section("Case 1 — the Plan");
   check("a team leader: view team, sales + TL rate (no SM), their own team with its members", tl?.view === "team" && rate(tl) === "creditUsd,sales,tl"
     && tl?.salesManager === null && (tl?.teams ?? []).length === 1 && tl.teams[0].name === "Alpha" && tl.teams[0].members?.[0]?.name === "Ann", { view: tl?.view, rate: rate(tl), teams: tl?.teams });
   check("the Sales Manager: the whole plan, the SM rate and who the SM is", sm?.view === "all" && rate(sm) === "creditUsd,sales,sm,tl" && sm?.salesManager?.name === "Sam Manager", { view: sm?.view, rate: rate(sm) });
+  // The rupee amounts (2026-11-20) with their AED ones: a salesperson the sales one, a team leader sales + TL, no SM's.
+  const rupee = (p: Json) => (p?.courses ?? []).find((c: Json) => c.name === "Rupee Course")?.commission ?? {};
+  const keys = (p: Json) => Object.keys(rupee(p)).sort().join(",");
+  check("a course's rupee amounts, a salesperson: only the sales one (INR 5,750)", keys(ann) === "creditUsd,sales,salesInr" && rupee(ann).salesInr === 5750, rupee(ann));
+  check("…a team leader: sales + TL (INR 5,750 / 2,125), no SM's", keys(tl) === "creditUsd,sales,salesInr,tl,tlInr" && rupee(tl).tlInr === 2125, rupee(tl));
+  check("…the Sales Manager: every one", keys(sm) === "creditUsd,sales,salesInr,sm,smInr,tl,tlInr" && rupee(sm).smInr === 2500, rupee(sm));
+}
+
+section("Case 2 — planFor, each scope");
+{
+  const full = { sales: 230, tl: 85, sm: 100, creditUsd: 500, salesInr: 5750, tlInr: 2125, smInr: 2500 };
+  const all = { all: true, ledTeamIds: [], teamPeople: new Set<string>() };
+  const team = { all: false, ledTeamIds: [String(teamA)], teamPeople: new Set([String(P.ann)]) };
+  const own = { all: false, ledTeamIds: [], teamPeople: new Set<string>() };
+  check("all: the whole plan, every rupee amount", JSON.stringify(planFor(full, all)) === JSON.stringify(full), planFor(full, all));
+  check("a team leader: sales, TL, credit and their rupee amounts — nothing of the SM's",
+    JSON.stringify(planFor(full, team)) === JSON.stringify({ sales: 230, tl: 85, creditUsd: 500, salesInr: 5750, tlInr: 2125 }), planFor(full, team));
+  check("own: the sales rate, credit and its rupee amount", JSON.stringify(planFor(full, own)) === JSON.stringify({ sales: 230, creditUsd: 500, salesInr: 5750 }), planFor(full, own));
+  const plain = { sales: 230, tl: 85, sm: 100, creditUsd: 500 };
+  check("a plan with no rupee amounts: no rupee keys for anyone", JSON.stringify(planFor(plain, team)) === JSON.stringify({ sales: 230, tl: 85, creditUsd: 500 })
+    && JSON.stringify(planFor(plain, own)) === JSON.stringify({ sales: 230, creditUsd: 500 }) && JSON.stringify(planFor(plain, all)) === JSON.stringify(plain));
 }
 
 section("Case 1 — My Pay");

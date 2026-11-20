@@ -44,6 +44,14 @@ export function CommissionPreview({ courseId, teamId, closerId, mentorEmail, men
   const mentorFee = data.mentorFee ?? 0;
   const cutLines = data.lines.filter((l) => (l.mentorCut ?? 0) > 0);
   const mentorWho = mentorName || "The mentor";
+  // Paid in rupees, earned in rupees (2026-11-13): the same lines' rupee amounts, for the part of the fee the client
+  // pays in INR — shown apart from the AED, never added to it (2026-11-20).
+  const rupees = data.closerTotalInr ?? 0;
+  const rupeeNote = rupees > 0 && (
+    <p className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+      {aed(data.closerTotal)} · or <span className="font-semibold">{inr(rupees)}</span> on the part paid in rupees
+    </p>
+  );
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
@@ -68,6 +76,7 @@ export function CommissionPreview({ courseId, teamId, closerId, mentorEmail, men
             <p className="mt-0.5 text-[11px] text-amber-700 dark:text-amber-400">
               Will wait after the steps: {data.reason}.
             </p>
+            {rupeeNote}
           </div>
         </div>
       ) : (
@@ -79,15 +88,10 @@ export function CommissionPreview({ courseId, teamId, closerId, mentorEmail, men
             </p>
             {mine.length > 1 && (
               <p className="mt-0.5 text-[11px] text-muted-foreground">
-                {mine.map((l) => `${ROLE_LABEL[l.role]} ${aed(l.amount)}`).join(" + ")}
+                {mine.map((l) => `${ROLE_LABEL[l.role]} ${aed(l.amount)}${(l.amountInr ?? 0) > 0 ? ` (or ${inr(l.amountInr ?? 0)})` : ""}`).join(" + ")}
               </p>
             )}
-            {/* Paid in rupees, earned in rupees (2026-11-13): the course's own rupee amount for that part of the fee. */}
-            {(data.closerTotalInr ?? 0) > 0 && (
-              <p className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
-                Paid in rupees: <span className="font-semibold">{inr(data.closerTotalInr ?? 0)}</span> instead — for the part of the fee the client pays in INR.
-              </p>
-            )}
+            {rupeeNote}
             {/* The mentor who held the meeting is paid out of the sale's commission (2026-11-18). */}
             {mentorEmail && mentorFee > 0 && (
               <p className="mt-0.5 text-[11px] text-violet-600 dark:text-violet-400">

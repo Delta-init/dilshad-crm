@@ -394,6 +394,16 @@ export interface CommissionPayout {
   paidOn?: string | null;
   paymentMethod?: string | null;
   reference?: string | null;
+  /**
+   * The month's rupee part (2026-11-13), approved and paid apart from the AED one: its own state and amount, in INR.
+   * Absent: no rupee part.
+   */
+  inr?: { state: "approved" | "paid"; amount: number; paidOn?: string | null };
+  /**
+   * A month that is only rupees (2026-11-20): `amount` 0, the state and approver from the rupee payout, the figure in
+   * `inr`. Absent from a finance before it, which sent no row for such a month.
+   */
+  inrOnly?: boolean;
 }
 
 /**

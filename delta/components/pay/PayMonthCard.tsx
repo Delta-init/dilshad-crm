@@ -85,7 +85,7 @@ export function PayMonthCard({ row, slab, month, compact = false, payoutsKnown =
       </div>
       {payoutsKnown && (
         <div className="mt-2 flex justify-end">
-          <PayoutBadge payout={row.payout} payable={row.commission.payable} compact={compact} />
+          <PayoutBadge payout={row.payout} payable={row.commission.payable} payableInr={row.commission.payableInr} compact={compact} />
         </div>
       )}
 

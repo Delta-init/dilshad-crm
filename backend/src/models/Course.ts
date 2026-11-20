@@ -109,6 +109,14 @@ const courseSchema = new Schema<ICourse>(
       tl: { type: Number, min: 0, default: 0 },
       sm: { type: Number, min: 0, default: 0 },
       creditUsd: { type: Number, min: 0, default: 0 },
+      /**
+       * What the part of a sale paid in rupees earns each of them, in INR (2026-11-20): Root's plan's rupee amounts,
+       * mirrored in with the AED ones while commission comes from Root — never edited in the CRM. Shown apart from the
+       * AED amounts, never added to them; 0 = none set.
+       */
+      salesInr: { type: Number, min: 0, default: 0 },
+      tlInr: { type: Number, min: 0, default: 0 },
+      smInr: { type: Number, min: 0, default: 0 },
       updatedAt: { type: Date },
       updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
     },

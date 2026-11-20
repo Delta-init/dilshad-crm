@@ -242,6 +242,37 @@ check("Root's plan copied in: the Sales Manager, who earns nothing, MBT's amount
 const dwt = await db.collection("courses").findOne({ _id: DWT });
 check("…a course Root doesn't list is left as it is; one Root lists that isn't here is skipped", dwt?.commission?.sales === 500 && !changed.includes("Gone"), j(changed));
 check("…a second copy changes nothing", (await mirrorRootPlan("2026-10")).length === 0);
+
+// The courses' rupee amounts (2026-11-20): copied in with the AED ones, written only when they differ; a Root from
+// before them sends none, read as 0. Never added to the AED amounts.
+const mbtRow = answer.plan.courses[0];
+const gone = answer.plan.courses[1];
+const mbtCommission = async () => ((await db.collection("courses").findOne({ _id: MBT }))?.commission ?? {}) as Record<string, any>;
+answer.plan = { ...answer.plan, courses: [{ ...mbtRow, salesInr: 6250, tlInr: 2250, smInr: 2500 }, gone] };
+let inrChanged = await mirrorRootPlan("2026-10");
+let mbtNow = await mbtCommission();
+check("Root's rupee amounts copied in with the AED ones: INR 6,250 / 2,250 / 2,500, the AED as they were", inrChanged.join() === "MBT"
+  && mbtNow.salesInr === 6250 && mbtNow.tlInr === 2250 && mbtNow.smInr === 2500 && mbtNow.sales === 250 && mbtNow.tl === 90 && mbtNow.sm === 100, j({ inrChanged, mbtNow }));
+const stamp = new Date(mbtNow.updatedAt).getTime();
+await new Promise((ok) => setTimeout(ok, 10));
+check("…a second copy writes nothing: the course untouched", (await mirrorRootPlan("2026-10")).length === 0 && new Date((await mbtCommission()).updatedAt).getTime() === stamp);
+answer.plan = { ...answer.plan, courses: [{ ...mbtRow, salesInr: 6250, tlInr: 2300, smInr: 2500 }, gone] };
+inrChanged = await mirrorRootPlan("2026-10");
+mbtNow = await mbtCommission();
+check("…only a rupee amount changed in Root: copied in", inrChanged.join() === "MBT" && mbtNow.tlInr === 2300 && mbtNow.salesInr === 6250 && mbtNow.sales === 250
+  && new Date(mbtNow.updatedAt).getTime() > stamp, j({ inrChanged, mbtNow }));
+const mbtPlan = planOf({ commission: mbtNow });
+check("…the course's plan carries them apart from the AED", mbtPlan.sales === 250 && mbtPlan.salesInr === 6250 && mbtPlan.tlInr === 2300 && mbtPlan.smInr === 2500, j(mbtPlan));
+const shownPlan = (await svc.getPlan(viewer)).courses.find((c: { name: string }) => c.name === "MBT")?.commission as Record<string, number> | undefined;
+check("…and the Plan tab is given them (a Super Admin: every one)", shownPlan?.salesInr === 6250 && shownPlan.tlInr === 2300 && shownPlan.smInr === 2500 && shownPlan.sales === 250, j(shownPlan));
+const dwtNow = (await db.collection("courses").findOne({ _id: DWT }))?.commission ?? {};
+check("…a course Root doesn't list gets none", !("salesInr" in dwtNow) && dwtNow.sales === 500, j(dwtNow));
+answer.plan = { ...answer.plan, courses: [mbtRow, gone] };
+inrChanged = await mirrorRootPlan("2026-10");
+mbtNow = await mbtCommission();
+check("a Root without rupee amounts: read as none — 0 copied in, the plan has none", inrChanged.join() === "MBT" && mbtNow.salesInr === 0 && mbtNow.tlInr === 0 && mbtNow.smInr === 0
+  && mbtNow.sales === 250 && !("salesInr" in planOf({ commission: mbtNow })), j({ inrChanged, mbtNow }));
+check("…and copied again: nothing written", (await mirrorRootPlan("2026-10")).length === 0);
 config = await loadConfig();
 check("…and the CRM's settings now read Root's Sales Manager", String(config.salesManager) === String(ids.Lena));
 answer.plan = { ...answer.plan, salesManager: { id: String(ids.Abrar), name: "Abrar" } };
