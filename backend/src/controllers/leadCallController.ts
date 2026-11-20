@@ -6,7 +6,7 @@ import { LeadCall } from "../models/LeadCall.js";
 import { leadCallService, canSeeCall, type CallFilters } from "../services/leadCallService.js";
 import {
   BACKFILL_DAYS, LINK_TTL_S, callLogPath, checkRecordingLink, getCallSettings, groupRows, leadsByPhone, parseCall, recordingCount,
-  recordingPath, recordingSource, syncCalls, syncExtensions,
+  recordingPath, recordingSource, syncCalls, syncExtensions, usersByExtension,
 } from "../services/callSyncService.js";
 import { threecxConfigured, threecxFetch, threecxJson, threecxSettings } from "../lib/threecx.js";
 import { isSuperAdmin } from "../services/commissionService.js";
@@ -31,7 +31,7 @@ export const getCallLog = async (req: AuthenticatedRequest, res: Response, next:
     }
     const f: CallFilters = {
       preset: q(req.query.preset), from: q(req.query.from), to: q(req.query.to),
-      direction: q(req.query.direction), result: q(req.query.result), person: q(req.query.person),
+      direction: q(req.query.direction), result: q(req.query.result), lead: q(req.query.lead), person: q(req.query.person),
       search: q(req.query.search), sort: q(req.query.sort), order: q(req.query.order),
       page: q(req.query.page), limit: q(req.query.limit),
     };
@@ -204,7 +204,7 @@ export const syncCallsNow = async (req: AuthenticatedRequest, res: Response, nex
       return;
     }
     const r = await syncCalls(by);
-    if (r.ok) sendSuccess(res, r.inserted ? `${r.inserted} new call(s) with leads` : "Up to date — no new calls with leads", r);
+    if (r.ok) sendSuccess(res, r.inserted ? `${r.inserted} new call(s)` : "Up to date — no new calls", r);
     else sendError(res, r.error || r.skipped || "The sync failed", 400);
   } catch (err) {
     next(err);
@@ -260,15 +260,29 @@ export const testThreecx = async (_req: AuthenticatedRequest, res: Response, nex
       const data = await threecxJson<{ value?: Record<string, unknown>[] }>(callLogPath(to - DAY_MS, to, 0, 200).replace("StartTime%20asc", "StartTime%20desc"));
       const rows = Array.isArray(data?.value) ? data.value : [];
       const groups = groupRows(rows);
-      const leads = await leadsByPhone();
-      const calls = groups.map((g) => parseCall(g, (k) => leads.has(k))).filter((c): c is NonNullable<typeof c> => !!c);
+      const [leads, users] = await Promise.all([leadsByPhone(), usersByExtension()]);
+      const outside = groups.map((g) => parseCall(g, (k) => leads.has(k))).filter((c): c is NonNullable<typeof c> => !!c);
+      // What the sync keeps (2026-11-20): a lead's number, or one of this CRM's people's extension. The rest are
+      // other people's on the shared 3CX — named, so a person here whose extension is missing shows up.
+      const kept = outside.filter((c) => leads.has(c.numberKey) || (c.extension && users.has(c.extension)));
+      const withLead = kept.filter((c) => leads.has(c.numberKey)).length;
+      const others = new Map<string, number>();
+      for (const c of outside) {
+        if (kept.includes(c)) continue;
+        const who = c.extension ? `${c.extension}${c.agentName ? ` ${c.agentName}` : ""}` : "no extension";
+        others.set(who, (others.get(who) ?? 0) + 1);
+      }
+      const notKept = [...others].sort((a, b) => b[1] - a[1]).map(([who, n]) => `${who} ×${n}`);
       steps.push({
         name: "Call log",
         ok: true,
-        detail: `${rows.length} rows in the last 24 hours → ${groups.length} calls, ${calls.length} with leads (${calls.filter((c) => recordingCount(c)).length} recorded)`,
+        detail: `${rows.length} rows in the last 24 hours → ${groups.length} calls, ${outside.length} with an outside number: `
+          + `${kept.length} kept (${withLead} with leads, ${kept.length - withLead} by this CRM's people without a lead; `
+          + `${kept.filter((c) => recordingCount(c)).length} recorded)`
+          + (notKept.length ? `; not kept — extensions that are no one's here: ${notKept.slice(0, 8).join(", ")}${notKept.length > 8 ? ` and ${notKept.length - 8} more` : ""}` : ""),
       });
       sample = rows.slice(0, 3);
-      parsed = calls.slice(0, 5).map((c) => ({ ...c, lead: leads.get(c.numberKey)?.[0]?.name ?? null }));
+      parsed = kept.slice(0, 5).map((c) => ({ ...c, lead: leads.get(c.numberKey)?.[0]?.name ?? null }));
     } catch (err) {
       steps.push({ name: "Call log", ok: false, detail: errText(err) });
     }
@@ -283,7 +297,7 @@ export const testThreecx = async (_req: AuthenticatedRequest, res: Response, nex
         steps.push({ name: "Recordings", ok: false, detail: errText(err) });
       }
     } else {
-      steps.push({ name: "Recordings", ok: true, detail: "No recorded call with a lead in the last 24 hours to try" });
+      steps.push({ name: "Recordings", ok: true, detail: "No recorded call kept in the last 24 hours to try" });
     }
     done({ sample, parsed });
   } catch (err) {

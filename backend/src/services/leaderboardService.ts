@@ -209,7 +209,7 @@ export class LeaderboardService {
     };
   }
 
-  /** 3CX calls with leads in a span, by the call's person (the sync links an extension to its user). */
+  /** 3CX calls in a span — every one, a lead's or not, since 2026-11-20 — by the call's person (the sync links an extension to its user). */
   private callsIn(span: { $gte: Date; $lt: Date }) {
     return LeadCall.aggregate<CallTotals>([
       { $match: { startedAt: span, user: { $ne: null } } },

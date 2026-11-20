@@ -26,7 +26,7 @@ import { ThreecxTestDialog } from "@/components/calls/ThreecxTestDialog";
 import { TrainingBadge, TrainingMarkDialog } from "@/components/calls/TrainingMarkDialog";
 
 /**
- * Calls (2026-10-14) — every call with a lead through 3CX, synced from 3CX's call log every minute: in or out,
+ * Calls (2026-10-14) — every call through 3CX (with a lead; since 2026-11-20 this CRM's people's calls to numbers no lead has too), synced from 3CX's call log every minute: in or out,
  * connected, missed or not answered, who took it, how long, and the recording. Only these 3CX calls; the older
  * click-to-call / journal logs are not listed here. The server decides whose calls each person sees: their own
  * (and their leads'), their team's, or everyone's. Days are Dubai days.
@@ -80,6 +80,8 @@ export default function CallsPage() {
   const [to, setTo] = useState("");
   const [direction, setDirection] = useState<Direction>("");
   const [result, setResult] = useState<Result>("");
+  // Every call is kept now, a lead's or not (2026-11-20): all to start with.
+  const [withLead, setWithLead] = useState<NonNullable<CallLogFilters["lead"]>>("");
   const [person, setPerson] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -92,11 +94,11 @@ export default function CallsPage() {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300);
     return () => clearTimeout(t);
   }, [searchInput]);
-  useEffect(() => setPage(1), [preset, from, to, direction, result, person, search, sort, order]);
+  useEffect(() => setPage(1), [preset, from, to, direction, result, withLead, person, search, sort, order]);
 
   const filters: CallLogFilters = {
     preset, from: preset === "custom" ? from : undefined, to: preset === "custom" ? to : undefined,
-    direction, result, person, search, sort, order, page, limit: PAGE_SIZE,
+    direction, result, lead: withLead, person, search, sort, order, page, limit: PAGE_SIZE,
   };
   const { data, isLoading, isFetching, error, refetch } = useCallLog(filters);
   const sync = useSyncCallsNow();
@@ -109,7 +111,7 @@ export default function CallsPage() {
   const people = data?.people ?? [];
   const pagination = data?.pagination;
   const named = people.filter((p) => p.key !== "-");
-  const hasFilters = !!(direction || result || person || search);
+  const hasFilters = !!(direction || result || withLead || person || search);
   const personName = useMemo(() => people.find((p) => p.key === person)?.name, [people, person]);
 
   function choosePreset(id: NonNullable<CallLogFilters["preset"]>) {
@@ -120,7 +122,7 @@ export default function CallsPage() {
     setPreset(id);
   }
   function clearFilters() {
-    setDirection(""); setResult(""); setPerson(""); setSearchInput(""); setSearch("");
+    setDirection(""); setResult(""); setWithLead(""); setPerson(""); setSearchInput(""); setSearch("");
   }
   function sortBy(s: Sort) {
     if (sort === s) setOrder(order === "desc" ? "asc" : "desc");
@@ -177,7 +179,7 @@ export default function CallsPage() {
         <div>
           <h2 className="text-2xl font-bold">Calls</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Every call with a lead through 3CX — in or out, connected or missed, who took it, how long, and the recording.
+            Every call through 3CX — with a lead or a number no lead has, in or out, connected or missed, who took it, how long, and the recording.
           </p>
           <div className="mt-2"><SyncNote threecx={data?.threecx} /></div>
         </div>
@@ -314,6 +316,14 @@ export default function CallsPage() {
                 <SelectItem value="not_answered">Not answered</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={withLead || ALL} onValueChange={(v) => setWithLead(v === ALL ? "" : (v as "with" | "without"))}>
+              <SelectTrigger className="h-8 w-[160px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All calls</SelectItem>
+                <SelectItem value="with">With a lead</SelectItem>
+                <SelectItem value="without">Without a lead</SelectItem>
+              </SelectContent>
+            </Select>
             {named.length > 1 && (
               <Select value={person || ALL} onValueChange={(v) => setPerson(v === ALL ? "" : v)}>
                 <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue placeholder="Everyone" /></SelectTrigger>
@@ -370,7 +380,7 @@ export default function CallsPage() {
             <div className="flex flex-col items-center gap-3 py-16 text-center">
               <div className="rounded-full bg-muted/60 p-4"><PhoneCall className="h-6 w-6 text-muted-foreground" /></div>
               <p className="text-sm text-muted-foreground">
-                {hasFilters ? "No calls match these filters." : "No calls with leads in this period."}
+                {hasFilters ? "No calls match these filters." : "No calls in this period."}
               </p>
               {hasFilters && <Button variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button>}
             </div>
@@ -393,19 +403,26 @@ export default function CallsPage() {
                     <tr key={c.id} className="group border-b border-border/50 align-top transition-colors hover:bg-muted/30">
                       <td className="whitespace-nowrap px-4 py-3 text-xs font-medium">{fmtWhen(c.startedAt)}</td>
                       <td className="px-4 py-3">
-                        <Link href={`/leads/${c.leadId}`} className="block max-w-[180px] truncate text-xs font-medium text-primary hover:underline">
-                          {c.leadName || "Lead"}
-                        </Link>
+                        {c.leadId ? (
+                          <Link href={`/leads/${c.leadId}`} className="block max-w-[180px] truncate text-xs font-medium text-primary hover:underline">
+                            {c.leadName || "Lead"}
+                          </Link>
+                        ) : (
+                          // A number no lead has (kept since 2026-11-20): the number, no lead to open or call from.
+                          <span className="text-xs text-muted-foreground">No lead</span>
+                        )}
                         <div className="flex items-center gap-1">
                           <span className="font-mono text-[11px] text-muted-foreground">{c.number}</span>
-                          <ClickToCall
-                            phoneNumber={c.leadPhone || c.number}
-                            leadId={c.leadId}
-                            leadName={c.leadName}
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
-                          />
+                          {c.leadId && (
+                            <ClickToCall
+                              phoneNumber={c.leadPhone || c.number}
+                              leadId={c.leadId}
+                              leadName={c.leadName}
+                              size="icon"
+                              variant="ghost"
+                              className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                            />
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3"><CallResult call={c} /></td>

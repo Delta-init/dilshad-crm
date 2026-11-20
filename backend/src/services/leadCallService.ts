@@ -68,6 +68,8 @@ export async function canSeeCall(viewer: Viewer, call: Pick<ILeadCall, "user" | 
   const scope = await scopeOf(viewer);
   if (scope.everyone) return true;
   if (call.user && scope.users.some((u) => u.equals(call.user!))) return true;
+  // A call with no lead is seen by who took it (above) and their team leaders, as scopeFilter has it.
+  if (!call.lead) return false;
   return leadInScope(scope, call.lead);
 }
 
@@ -90,6 +92,7 @@ export interface CallFilters {
   to?: string;
   direction?: string; // in | out
   result?: string;    // connected | missed | not_answered
+  lead?: string;      // with | without — calls with a lead, or with a number no lead has (2026-11-20)
   person?: string;    // u:<userId> | x:<extension> | -
   search?: string;    // lead name or number
   sort?: string;      // date | talk | ring
@@ -190,7 +193,7 @@ function row(c: CallDoc) {
     userId,
     userName: c.userName ?? "",
     person: personKey(userId, c.extension ?? ""),
-    leadId: lead ? String(lead._id) : String(c.lead ?? ""),
+    leadId: lead ? String(lead._id) : c.lead ? String(c.lead) : "",
     leadName: lead?.name ?? c.leadName ?? "",
     leadPhone: lead?.phone ?? "",
     recordings: recordingCount(c),
@@ -229,6 +232,9 @@ export class LeadCallService {
     if (f.direction === "in" || f.direction === "out") and.push({ direction: f.direction });
     const status = RESULT[String(f.result ?? "")];
     if (status) and.push({ status });
+    // Every call is kept now, a lead's or not (2026-11-20).
+    if (f.lead === "with") and.push({ lead: { $ne: null } });
+    else if (f.lead === "without") and.push({ lead: null });
     const search = await searchFilter(String(f.search ?? ""));
     if (search) and.push(search);
     const base = and.length ? { $and: and } : {};

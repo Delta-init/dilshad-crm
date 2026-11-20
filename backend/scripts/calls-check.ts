@@ -6,8 +6,8 @@
  *   - Case 1: sync — rows grouped into calls by call history id (a queue call
  *     credited to whoever answered), keyed so a second and third run store
  *     nothing twice, 3CX's pages followed past 500 rows, the 90-day first run,
- *     the 3-hour overlap after it; calls with numbers no lead has, and internal
- *     calls, are not kept;
+ *     the 3-hour overlap after it; internal calls are not kept, and calls with
+ *     numbers no lead has are kept without one (since 2026-11-20 — Case 10);
  *   - Case 2: phone matching on the last 9 digits whatever the format, a lead
  *     with two numbers, a number on two leads (the taker's own lead first);
  *     extensions from 3CX by email — a typed one (or one there from before)
@@ -42,6 +42,11 @@
  *   - Case 9: the Leaderboard from lead_calls — calls, connected, talk time by
  *     the call's person, Dubai month boundaries, ranked by revenue / calls /
  *     talk time; the old click log no longer counted.
+ *   - Case 10 (2026-11-20, as in the Draw CRM): every call of this CRM's
+ *     people kept, a lead's or not — a number no lead has kept without one and
+ *     linked once a lead with it appears; extension-to-extension and the voice
+ *     agent never; another CRM's extension never; the lead filter, who sees
+ *     them, totals; Test connection's kept / not-kept count.
  *
  * Run by calls-check.sh. Scratch database only.
  */
@@ -256,7 +261,9 @@ function row(at: number, o: Partial<Row> & { call?: string | null }): Row {
 }
 const todayStart = dubaiDayStart(dubaiToday())!.getTime();
 const T = {
-  A: now - 2 * D, B: now - 2 * D + H, C: todayStart + 60_000, C2: todayStart - 60_000, D: now - 3 * D,
+  // A ten minutes off a day window's edge: its two rows a second apart are read in one window (the sync reads a day at
+  // a time from when it starts — at exactly now - 2 days, a slow start split them and the check flaked).
+  A: now - 2 * D + 10 * 60_000, B: now - 2 * D + H, C: todayStart + 60_000, C2: todayStart - 60_000, D: now - 3 * D,
   G: now - 4 * D, H: now - 1 * D, I: now - 10 * D + 5 * H, J: now - 2 * H, K: now - 5 * H,
 };
 ROWS.push(
@@ -272,7 +279,7 @@ ROWS.push(
   row(T.C2, { SourceDn: "10000", SourceCallerId: "0567778888", DestinationDn: "102", DestinationDisplayName: "Tia T", Answered: true, TalkingDuration: "PT30S" }),
   // D: ext 103 (nobody in the CRM yet) rings Rami; no answer.
   row(T.D, { SourceDn: "103", SourceDisplayName: "Late L", DestinationDn: "10002", DestinationCallerId: "0567778888", RingingDuration: "PT25S" }),
-  // E: a number no lead has — ignored.
+  // E: a number no lead has — kept, without a lead (2026-11-20).
   row(T.A + 5 * H, { SourceDn: "101", DestinationDn: "10002", DestinationCallerId: "+971500000000", Answered: true, TalkingDuration: "PT3M" }),
   // F: an internal call, extension to extension — ignored.
   row(T.A + 6 * H, { SourceDn: "101", DestinationDn: "102", Answered: true, TalkingDuration: "PT1M" }),
@@ -302,6 +309,14 @@ async function call(method: string, path: string, who?: string, body?: unknown):
 }
 const list = (who: string, qs = "") => call("GET", `/calls/log?preset=30d${qs}`, who);
 const byKey = async (k: string) => LeadCall.findOne({ key: `call:${k}` }).lean();
+/** A sync for the cases about calls with leads: the calls without one it keeps are cleared after it (2026-11-20 — those
+ *  have their own case, last). `inserted` counts the leads' calls only. */
+async function syncLeadCalls(by: string) {
+  const before = await LeadCall.countDocuments({ lead: null });
+  const out = await sync.syncCalls(by);
+  const cleared = (await LeadCall.deleteMany({ lead: null })).deletedCount;
+  return { ...out, inserted: out.inserted - Math.max(0, cleared - before) };
+}
 
 /* ── Case 1 ──────────────────────────────────────────────────────────────── */
 
@@ -313,7 +328,13 @@ const firstFrom = Math.min(...seen.logWindows.map((w) => w.from));
 check("…reading 90 days back, a day at a time", Math.abs(firstFrom - (now - 90 * D)) < 60_000 && s.windows >= 90 && s.windows <= 91, { windows: s.windows });
 check("…following 3CX's pages past 500 rows", seen.logWindows.some((w) => w.skip === 500));
 const total1 = await LeadCall.countDocuments();
-check("eight calls with leads kept (A B C C2 D G H I; not E, F, the 520 unknown numbers, nor anything older than 90 days)", total1 === 8, total1);
+// Since 2026-11-20 every call with an outside number is kept: E and the 520 numbers no lead has too.
+check("529 calls kept: the 8 with leads (A B C C2 D G H I), E and the 520 numbers no lead has (not F, internal; nothing older than 90 days)", total1 === 529, total1);
+check("…E kept without a lead — Sam's (101), out, 3 minutes, its number", await LeadCall.exists({ lead: null, numberKey: "500000000", extension: "101", direction: "out", talkSeconds: 180 }).then(Boolean));
+check("…the internal call F not kept", !(await LeadCall.exists({ numberKey: "" })));
+// The cases after this one are about calls with leads, as before: the calls without one are cleared, here and after each sync.
+await LeadCall.deleteMany({ lead: null });
+const leadCalls1 = await LeadCall.countDocuments();
 const A = await byKey("A");
 check("A: two rows → one call, talk = the longest row (90s), ring 8s, both recordings, Sam's extension",
   !!A && A.rows === 2 && A.talkSeconds === 90 && A.ringSeconds === 8 && A.recordingIds.join() === "11,12" && A.extension === "101" && A.direction === "out" && A.status === "answered", A);
@@ -332,25 +353,25 @@ const Hc = await LeadCall.findOne({ startedAt: new Date(T.H) }).lean();
 check("H: Sam rings that number — neither is his, so the newest lead (Dup New)", String(Hc?.lead) === String(DUP_NEW._id));
 const I = await LeadCall.findOne({ startedAt: new Date(T.I) }).lean();
 check("I: 515th row of a busy day (3CX's second page) — kept", String(I?.lead) === String(L2._id) && I?.talkSeconds === 5);
-check("no internal or unknown-number call kept", (await LeadCall.countDocuments({ numberKey: { $in: ["500000000", ""] } })) === 0);
+check("no internal call kept, and (cleared for these cases) no call without a lead", (await LeadCall.countDocuments({ $or: [{ numberKey: "" }, { lead: null }] })) === 0);
 const syncedTo = new Date((await sync.getCallSettings()).syncedTo!).getTime();
 
 seen.logWindows = [];
-s = await sync.syncCalls("check");
-check("a second run straight after: nothing new, nothing doubled", s.ok && s.inserted === 0 && (await LeadCall.countDocuments()) === total1, s);
+s = await syncLeadCalls("check");
+check("a second run straight after: nothing new, nothing doubled", s.ok && s.inserted === 0 && (await LeadCall.countDocuments()) === leadCalls1, s);
 const secondFrom = Math.min(...seen.logWindows.map((w) => w.from));
 check("…reading from 3 hours before where the last one got to", Math.abs(secondFrom - (syncedTo - sync.OVERLAP_MS)) < 5_000, { secondFrom, syncedTo });
 
 // J ended inside the overlap (logged late), K before it.
 ROWS.push(row(T.J, { call: "J", SourceDn: "10000", SourceCallerId: "+971501234567", DestinationDn: "101", DestinationDisplayName: "Sam S", Answered: true, TalkingDuration: "PT1M" }));
 ROWS.push(row(T.K, { call: "K", SourceDn: "10000", SourceCallerId: "+971501234567", DestinationDn: "101", Answered: true, TalkingDuration: "PT1M" }));
-s = await sync.syncCalls("check");
+s = await syncLeadCalls("check");
 check("a call logged late, inside the overlap, is picked up (J)", s.inserted === 1 && !!(await byKey("J")), s);
 check("…one before the overlap is not (K)", !(await byKey("K")));
 await LeadCall.deleteOne({ key: "call:K" });
 ROWS.splice(ROWS.findIndex((r) => r.MainCallHistoryId === "K"), 1);
-s = await sync.syncCalls("check");
-check("a third run: still nothing doubled", s.inserted === 0 && (await LeadCall.countDocuments()) === total1 + 1, s);
+s = await syncLeadCalls("check");
+check("a third run: still nothing doubled", s.inserted === 0 && (await LeadCall.countDocuments()) === leadCalls1 + 1, s);
 check("keys are unique in the database", (await LeadCall.collection.indexes()).some((i) => i.key?.key === 1 && i.unique));
 // A call whose rows straddle the start of a day window — Lina rings the queue a second before it, Sam answers a second
 // after — is read whole, not just the part on the later day.
@@ -382,10 +403,10 @@ check("a super admin types 122 for Tia: marked manual", r.status === 200 && (awa
 await sync.syncExtensions();
 check("…and 3CX's 102 no longer overwrites it", (await ext("Tia"))?.extension === "122");
 await db.collection("app_settings").updateOne({ _id: "threecx_calls" as any }, { $set: { syncedTo: new Date(T.B - H) } });
-s = await sync.syncCalls("check");
+s = await syncLeadCalls("check");
 const B2 = await byKey("B");
 check("calls read again while their extension is nobody's keep who took them (B stays Tia's), nothing doubled",
-  s.ok && String(B2?.user) === String(ids.Tia) && (await LeadCall.countDocuments()) === total1 + 1, { s, user: B2?.user });
+  s.ok && String(B2?.user) === String(ids.Tia) && (await LeadCall.countDocuments()) === leadCalls1 + 1, { s, user: B2?.user });
 r = await call("PUT", `/users/${ids.Tia}`, "Admin", { extension: "" });
 check("cleared: no longer manual", (await ext("Tia"))?.extensionSource == null);
 await sync.syncExtensions();
@@ -393,7 +414,7 @@ check("…so 3CX fills it again", (await ext("Tia"))?.extension === "102" && (aw
 await person("Late", salesRole);
 const ex = await sync.syncExtensions();
 check("a new user with 3CX's email gets ext 103", (await ext("Late"))?.extension === "103", ex);
-await sync.syncCalls("check");
+await syncLeadCalls("check");
 const D2 = await LeadCall.findOne({ startedAt: new Date(T.D) }).lean();
 check("…and the call ext 103 made before is now theirs", String(D2?.user) === String(ids.Late) && D2?.userName === "Late");
 
@@ -509,7 +530,7 @@ r = await call("POST", "/calls/log/sync", "Admin");
 check("…Super Admin: runs, up to date", r.status === 200 && r.body.data?.inserted === 0, r.body);
 
 disconnect();
-s = await sync.syncCalls("check");
+s = await syncLeadCalls("check");
 check("3CX not connected: the sync does nothing and says so", !s.ok && s.skipped === "3CX is not connected", s);
 r = await list("Admin");
 check("…the Calls page still lists what it has, and says 3CX is not connected", r.body.data.threecx.connected === false && r.body.data.stats.total === 9);
@@ -530,14 +551,14 @@ connect();
 
 check("the lock: taken once", await sync.takeLock());
 check("…not twice", !(await sync.takeLock()));
-s = await sync.syncCalls("check");
+s = await syncLeadCalls("check");
 check("…a sync while it is held is skipped", !s.ok && s.skipped === "A sync is already running", s);
 await db.collection("app_settings").updateOne({ _id: "threecx_calls" as any }, { $set: { lockUntil: new Date(Date.now() - 1000) } });
 check("…a lock left behind expires (15 minutes) and can be taken", await sync.takeLock());
 await sync.releaseLock();
-const both = await Promise.all([sync.syncCalls("one"), sync.syncCalls("two")]);
+const both = await Promise.all([syncLeadCalls("one"), syncLeadCalls("two")]);
 check("two syncs at once: one runs, the other is skipped", both.filter((x) => x.ok).length === 1 && both.filter((x) => x.skipped === "A sync is already running").length === 1, both);
-check("…and still nothing doubled", (await LeadCall.countDocuments()) === total1 + 1);
+check("…and still nothing doubled", (await LeadCall.countDocuments()) === leadCalls1 + 1);
 section("Case 5 — Test connection, as in CS Portal");
 // Half an hour ago: Sam rings Lina, answered, recorded — and 250 calls to nobody's numbers before it, more than the test reads.
 for (let k = 0; k < 250; k++) ROWS.push(row(now - 20 * H + k * 60_000, { SourceDn: "101", DestinationDn: "10002", DestinationCallerId: `+97155${String(1000000 + k)}`, Answered: true, TalkingDuration: "PT1S" }));
@@ -579,7 +600,7 @@ check("the first run copied the counts kept before 3CX's aside first — only th
   copies.length === 1 && String(copies[0]?._id) === String(L0._id) && copies[0]?.callCount === 6 && copies[0]?.callNotConnected === 2 && copies[0]?.savedAt instanceof Date, copies);
 const c0 = await counts(L0._id);
 check("…then 3CX's replaced them: Hand Counted 0 / 0 / 0", c0.total === 0 && c0.connected === 0 && c0.notConnected === 0, c0);
-s = await sync.syncCalls("check");
+s = await syncLeadCalls("check");
 let c1 = await counts(L1._id);
 check("Lina: 4 calls (A, C, J and Case 5's call), 3 connected, 1 not connected (C missed)", s.ok && c1.total === 4 && c1.connected === 3 && c1.notConnected === 1, { s, c1 });
 let c3 = await counts(L3._id);
@@ -592,7 +613,7 @@ const L6 = lead("Hana Hand", "0547777777", ids.Tia!, alpha, new Date(now - 3 * D
 await db.collection("leads").insertOne({ ...L6, callConnected: 3 });   // only callConnected typed
 await db.collection("leads").updateOne({ _id: L3._id }, { $set: { callCount: 99, callConnected: 99, callNotConnected: 99 } });
 await db.collection("app_settings").updateOne({ _id: "threecx_calls" as any }, { $set: { countsVersion: 0 } });
-s = await sync.syncCalls("check");
+s = await syncLeadCalls("check");
 c3 = await counts(L3._id);
 check("the first run after deploy counts every lead with 3CX calls again (Rami's hand-kept 99s → 2 / 1 / 1)", c3.total === 2 && c3.connected === 1 && c3.notConnected === 1 && (s.leadsRecounted ?? 0) >= 1, { c3, s });
 check("…and marks it done (countsVersion 2)", (await sync.getCallSettings()).countsVersion === 2);
@@ -619,22 +640,22 @@ check("…one with only callConnected typed: 0 too", c6.total === 0 && c6.connec
 const c5 = await counts(L5._id);
 check("…a lead already at 0 is left alone", c5.total === 0 && c5.updatedAt?.getTime() === (L5.updatedAt as Date).getTime());
 await db.collection("leads").updateOne({ _id: L4._id }, { $set: { callCount: 5 } });
-await sync.syncCalls("check");
+await syncLeadCalls("check");
 check("…once only: after it, a run counts just the leads it touched (a later hand-typed 5 on a lead without calls stays)", (await counts(L4._id)).total === 5);
 await db.collection("leads").updateOne({ _id: L4._id }, { $set: { callCount: 0 } });
 const ramiUpdated = c3.updatedAt?.getTime();
 ROWS.push(row(now - 10 * 60_000, { call: "NEWR", SourceDn: "101", SourceDisplayName: "Sam S", DestinationDn: "10002", DestinationCallerId: "+971567778888", RingingDuration: "PT30S" }));
-s = await sync.syncCalls("check");
+s = await syncLeadCalls("check");
 c3 = await counts(L3._id);
 check("a new call with Rami (not answered): counted on the next run — 3 calls, 1 connected, 2 not connected", s.inserted === 1 && c3.total === 3 && c3.connected === 1 && c3.notConnected === 2, { s, c3 });
 check("…without touching the lead's updatedAt", c3.updatedAt?.getTime() === ramiUpdated);
-check("…and a run with nothing new changes no lead's counts", (await sync.syncCalls("check")).leadsRecounted === 0);
+check("…and a run with nothing new changes no lead's counts", (await syncLeadCalls("check")).leadsRecounted === 0);
 // A call read again can move to another lead with that number: both leads are counted again.
 const dupBefore = { old: await counts(DUP_OLD._id), nw: await counts(DUP_NEW._id) };
 check("before: Dup Old has G (connected), Dup New has H (not answered)", dupBefore.old.total === 1 && dupBefore.old.connected === 1 && dupBefore.nw.total === 1 && dupBefore.nw.notConnected === 1, dupBefore);
 await db.collection("leads").updateOne({ _id: DUP_OLD._id }, { $set: { assignedTo: ids.Sam } });
 await db.collection("app_settings").updateOne({ _id: "threecx_calls" as any }, { $set: { syncedTo: new Date(now - 5 * D) } });
-s = await sync.syncCalls("check");
+s = await syncLeadCalls("check");
 const dupAfter = { old: await counts(DUP_OLD._id), nw: await counts(DUP_NEW._id) };
 check("Dup Old handed to Sam, the calls read again: H moves to Dup Old, G to Dup New — both counted again",
   dupAfter.old.total === 1 && dupAfter.old.notConnected === 1 && dupAfter.old.connected === 0 && dupAfter.nw.total === 1 && dupAfter.nw.connected === 1 && dupAfter.nw.notConnected === 0, dupAfter);
@@ -861,6 +882,52 @@ check("by default still revenue, then closings, follow-ups, calls (nobody earned
 check("rankBy=bogus: 400", (await call("GET", "/leaderboard?rankBy=bogus", "Admin")).status === 400);
 lb = (await call("GET", "/leaderboard", "Admin")).body.data;
 check("no month: this month on the Dubai calendar", lb?.month === dubaiToday().slice(0, 7));
+
+/* ── Case 10 ─────────────────────────────────────────────────────────────── */
+
+section("Case 10 — every call of a person, not only the ones with leads (2026-11-20)");
+ROWS.push(
+  // P: Sam (101) rings a number no lead has, answered.
+  row(now - 5 * 60_000, { call: "P", SourceDn: "101", SourceDisplayName: "Sam S", DestinationDn: "10002", DestinationCallerId: "+971551230000", Answered: true, TalkingDuration: "PT40S" }),
+  // Q: Sam to Tia's extension — internal, never kept.
+  row(now - 4 * 60_000, { call: "Q", SourceDn: "101", DestinationDn: "102", Answered: true, TalkingDuration: "PT20S" }),
+  // S: ext 424 (somebody of the Sales CRM's, nobody here) rings a number no lead has — not this CRM's to keep.
+  row(now - 2 * 60_000, { call: "S", SourceDn: "424", SourceDisplayName: "Vandhana", DestinationDn: "10002", DestinationCallerId: "+971551239999", Answered: true, TalkingDuration: "PT15S" }),
+  // R: Sam to the voice agent — no number at either end, never kept.
+  row(now - 3 * 60_000, { call: "R", SourceDn: "101", DestinationDn: "EndCall", DestinationDisplayName: "Voice Agent" }),
+);
+s = await sync.syncCalls("check");
+const P = await byKey("P");
+check("P: Sam's call to a number no lead has — kept, his, out, 40s, no lead", s.ok && !!P && P.lead === null && String(P.user) === String(ids.Sam) && P.direction === "out" && P.talkSeconds === 40, P && { lead: P.lead, user: P.user });
+check("Q (extension to extension) and R (the voice agent): not kept", !(await byKey("Q")) && !(await byKey("R")));
+check("S (ext 424 — nobody in this CRM — to a number no lead has): not kept", !(await byKey("S")));
+r = await list("Admin", "&lead=without");
+const pRow = r.body.data?.calls?.find((c: any) => c.id === String(P?._id));
+check("the Calls page, without a lead: P there with its number, no lead — every row without one", r.status === 200 && !!pRow && pRow.leadId === "" && pRow.number === "+971551230000" && r.body.data.calls.every((c: any) => c.leadId === ""), r.body.data?.calls?.slice(0, 2));
+r = await list("Admin", "&lead=with");
+check("…with a lead: P not among them", r.status === 200 && !r.body.data.calls.some((c: any) => c.id === String(P?._id)));
+r = await list("Sam", "&lead=without");
+check("Sam sees his own call without a lead", r.body.data.calls.some((c: any) => c.id === String(P?._id)));
+r = await list("Tom", "&lead=without");
+check("…so does Tom, his team leader", r.body.data.calls.some((c: any) => c.id === String(P?._id)));
+r = await list("Tia", "&lead=without");
+check("…Tia (same team, not his leader) does not", !r.body.data.calls.some((c: any) => c.id === String(P?._id)));
+r = await list("Admin", `&person=u:${ids.Sam}`);
+const samCalls = await LeadCall.countDocuments({ user: ids.Sam, startedAt: { $gte: new Date(dubaiDayStart(dubaiToday())!.getTime() - 29 * D) } });
+check("Sam's totals count it — every call he made or took", r.body.data?.stats?.total === samCalls && samCalls > 5, { got: r.body.data?.stats?.total, samCalls });
+// A lead with P's number is added: P is linked to it, and the lead counts it.
+const L10 = lead("Pia Seven", "055 123 0000", ids.Sam!, alpha, new Date(now - 60_000));
+await db.collection("leads").insertOne(L10);
+s = await sync.syncCalls("check");
+const P2 = await byKey("P");
+const l10 = await db.collection("leads").findOne({ _id: L10._id });
+check("…P linked to Pia, and her count is 1 (1 connected)", s.ok && String(P2?.lead) === String(L10._id) && P2?.leadName === "Pia Seven" && l10?.callCount === 1 && l10?.callConnected === 1, { lead: P2?.lead, c: l10?.callCount });
+// Test connection says what the sync keeps, and names the extensions whose calls it doesn't (no one's here).
+r = await call("POST", "/calls/log/test", "Admin");
+const logStep = (r.body.data?.steps ?? []).find((x: { name: string }) => x.name === "Call log")?.detail ?? "";
+check("Test connection: calls kept, with leads and without, counted apart", /\d+ kept \(\d+ with leads, \d+ by this CRM's people without a lead; \d+ recorded\)/.test(logStep), logStep);
+check("…and S's extension named as not kept — 424 Vandhana ×1", /not kept — extensions that are no one's here: .*424 Vandhana ×1/.test(logStep), logStep);
+check("…the calls it lists are the kept ones (S not among them)", !(r.body.data?.parsed ?? []).some((c: { extension: string }) => c.extension === "424"));
 
 check("the stand-in 3CX was asked nothing it doesn't serve", seen.other.length === 0, seen.other);
 

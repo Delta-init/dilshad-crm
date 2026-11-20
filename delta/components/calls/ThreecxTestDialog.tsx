@@ -67,7 +67,7 @@ export function ThreecxTestDialog({ open, onClose }: { open: boolean; onClose: (
             </ol>
             {!!result.parsed?.length && (
               <details>
-                <summary className="cursor-pointer text-sm font-medium text-foreground">Calls with leads, as read ({result.parsed.length})</summary>
+                <summary className="cursor-pointer text-sm font-medium text-foreground">Calls kept, as read ({result.parsed.length})</summary>
                 <pre className={pre}>{JSON.stringify(result.parsed, null, 2)}</pre>
               </details>
             )}

@@ -63,7 +63,8 @@ export async function callsForPortal(query: Record<string, unknown>) {
           id: c.id, startedAt: c.startedAt, direction: c.direction, status: c.status, talkSeconds: c.talkSeconds,
           ringSeconds: c.ringSeconds, number: c.number, extension: c.extension, agentName: c.agentName, userId: c.userId,
           userName: c.userName, userEmail: emailOf.get(c.userId) ?? "", person: c.person, contact: c.leadName,
-          contactKind: "lead", recordings: c.recordings,
+          // A number no lead has (kept since 2026-11-20): no contact to name.
+          contactKind: c.leadId || c.leadName ? "lead" : "", recordings: c.recordings,
         }))
       : [],
     total: r.pagination.total,

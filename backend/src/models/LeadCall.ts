@@ -5,8 +5,11 @@ import mongoose, { Schema, type Types } from "mongoose";
  * (services/callSyncService.ts) — the only calls the Calls page lists.
  *
  * One document per 3CX call (`key`: its call history id), written again when
- * the sync reads it a second time, so nothing is stored twice. Calls with
- * numbers no lead has are not kept. Recordings stay on 3CX: `recordingIds`
+ * the sync reads it a second time, so nothing is stored twice. Since
+ * 2026-11-20 every call with an outside number made or taken by one of this
+ * CRM's people is kept, as in the Sales and Draw CRMs (the Calls page showed
+ * none of their calls to numbers no lead has): `lead` is null for a number no
+ * lead has; calls between extensions are not kept. Recordings stay on 3CX: `recordingIds`
  * are played through the backend on a short-lived signed link.
  *
  * Who took it: `user` is the CRM user whose `extension` is `extension`;
@@ -36,7 +39,8 @@ export interface ILeadCall {
   recordingUrl: string;
   reason: string;
   rows: number;
-  lead: Types.ObjectId;
+  /** The lead with that number; null when no lead has it. */
+  lead: Types.ObjectId | null;
   leadName: string;
   user: Types.ObjectId | null;
   userName: string;
@@ -86,7 +90,7 @@ const leadCallSchema = new Schema<ILeadCall>(
     recordingUrl: { type: String, default: "" },
     reason: { type: String, default: "" },
     rows: { type: Number, default: 1 },
-    lead: { type: Schema.Types.ObjectId, ref: "Lead", required: true },
+    lead: { type: Schema.Types.ObjectId, ref: "Lead", default: null },
     leadName: { type: String, default: "" },
     user: { type: Schema.Types.ObjectId, ref: "User", default: null },
     userName: { type: String, default: "" },
@@ -120,5 +124,7 @@ leadCallSchema.index({ user: 1, startedAt: -1 });
 leadCallSchema.index({ extension: 1, user: 1 });
 // The Training calls page (2026-11-03): marked calls, newest mark first.
 leadCallSchema.index({ "training.at": -1 }, { partialFilterExpression: { "training.at": { $exists: true } } });
+// Calls kept without a lead, by number — linked when a lead with that number appears (2026-11-20).
+leadCallSchema.index({ lead: 1, numberKey: 1 });
 
 export const LeadCall = mongoose.model<ILeadCall>("LeadCall", leadCallSchema);

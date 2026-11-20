@@ -11,11 +11,16 @@ import { threecxConfigured, threecxJson, threecxSettings } from "../lib/threecx.
    (backend/src/students/calls.ts there), for leads.
 
    Every minute the 3CX call log (the report behind 3CX's own Call History) is
-   read for the last few hours, and every call between a lead's number and the
-   phone system is kept in `lead_calls`: when, in / out, answered or missed,
-   who took it (3CX extension), ringing and talking time, and its recordings.
-   Calls with numbers no lead has are ignored. The first run reaches 90 days
-   back.
+   read for the last few hours, and every call between an outside number and
+   the phone system is kept in `lead_calls`: when, in / out, answered or
+   missed, who took it (3CX extension), ringing and talking time, and its
+   recordings — on the lead with that number, when one has it. Since 2026-11-20
+   calls with numbers no lead has are kept too, without a lead, and linked as
+   soon as a lead with that number appears — only when taken or made on one of
+   this CRM's people's extensions (the 3CX is shared with the Sales and Draw
+   CRMs, whose staff's other calls are theirs to show) — as in the Draw CRM,
+   brought here 2026-11-20; calls between extensions are not.
+   The first run reaches 90 days back.
 
    Recordings are never copied: they play from 3CX through the backend on a
    short-lived signed link, so the 3CX key never reaches a browser.
@@ -42,7 +47,7 @@ const PAGE = 500;
 const TICK_MS = 60_000; // every minute, so a call shows on the Calls page soon after it ends
 /** How 3CX's rows are read into calls; when it changes, the next run reads the 90 days again (calls are keyed, so none
  *  is kept twice). 2 — a call is the rows sharing its call history id, its main row the lowest Indent (V20 sends 1). */
-const PARSER = 2;
+const PARSER = 3; // 3 — every call with an outside number, not only leads' (2026-11-20): the 90 days again
 export const LOCK_MS = 15 * 60_000;
 const EXTENSIONS_EVERY_MS = 6 * 3_600_000;
 /** When it changes, the next run counts every lead's calls again (1 — 2026-10-14, the counts from 3CX; 2 — the same
@@ -178,9 +183,15 @@ export interface ParsedCall {
   rows: number;
 }
 
+/** A person's extension (424), not a trunk (10001) — for a call with a phone number at both ends. */
+const isExtensionDn = (dn: string) => /^\d{2,4}$/.test(dn);
+
 /**
- * One call (its rows) → what we keep, when one end of it is a lead's number (`isLead`); null otherwise. The lead's
- * end is found by its number, not by 3CX's DN type codes: extensions and trunks have short numbers and never match.
+ * One call (its rows) → what we keep, when one end of it is an outside number; null for a call between extensions
+ * (or to the voice agent, voicemail …). The outside end is a lead's number when one is (`isLead` — found by its
+ * number, not by 3CX's DN type codes: extensions and trunks have short numbers and never match); else the end with a
+ * phone number — as 3CX logs them, a call in comes from the trunk with the caller's number, a call out goes to the
+ * trunk with the number dialled, and an extension's own end carries only its number.
  */
 export function parseCall(group: Row[], isLead: (numberKey: string) => boolean): ParsedCall | null {
   // The main row: the lowest Indent (V20: 1 on every row; older: 0), the earliest of those.
@@ -190,8 +201,14 @@ export function parseCall(group: Row[], isLead: (numberKey: string) => boolean):
   if (!main || !Number.isFinite(started)) return null;
   const src = sideOf(main, "Source");
   const dst = sideOf(main, "Destination");
-  const inbound = !!src.key && isLead(src.key);
-  if (!inbound && !(dst.key && isLead(dst.key))) return null;
+  // The outside end: a lead's number first; else the end with a phone number (both: the one that isn't an extension).
+  let inbound: boolean;
+  if (src.key && isLead(src.key)) inbound = true;
+  else if (dst.key && isLead(dst.key)) inbound = false;
+  else if (src.key && dst.key) inbound = !isExtensionDn(src.dn);
+  else if (src.key) inbound = true;
+  else if (dst.key) inbound = false;
+  else return null; // between extensions: never kept
   const lead = inbound ? src : dst;
 
   // Who took it: an extension on a row that talked (a queue call is answered on a row under the main one) —
@@ -282,7 +299,7 @@ export function pickLead(candidates: LeadMatch[] | undefined, userId: string): L
 
 interface UserByExt { _id: Types.ObjectId; name: string }
 
-async function usersByExtension(): Promise<Map<string, UserByExt>> {
+export async function usersByExtension(): Promise<Map<string, UserByExt>> {
   const users = await User.find({ extension: { $nin: [null, ""] } }).select("name extension").lean<{ _id: Types.ObjectId; name: string; extension: string }[]>();
   return new Map(users.map((u) => [String(u.extension).trim(), { _id: u._id, name: u.name }]));
 }
@@ -351,19 +368,22 @@ async function syncWindow(from: number, to: number, leads: Map<string, LeadMatch
   const parsed: { key: string; lead: string }[] = [];
   for (const group of groupRows(rows)) {
     const c = parseCall(group, (k) => leads.has(k));
-    if (!c) continue; // not a call with a lead
+    if (!c) continue; // between extensions
     const u = c.extension ? users.get(c.extension) : undefined;
+    // The lead with that number, or none — kept either way (2026-11-20), but without a lead only this CRM's own
+    // people's calls: the 3CX is shared with the Sales and Draw CRMs, whose staff's other calls are theirs to show.
     const lead = pickLead(leads.get(c.numberKey), u ? String(u._id) : "");
-    if (!lead) continue;
-    parsed.push({ key: c.key, lead: String(lead._id) });
+    if (!lead && !u) continue;
+    if (lead) parsed.push({ key: c.key, lead: String(lead._id) });
+    else parsed.push({ key: c.key, lead: "" });
     ops.push({
       updateOne: {
         filter: { key: c.key },
         update: {
           $set: {
             ...c,
-            lead: lead._id,
-            leadName: lead.name,
+            lead: lead?._id ?? null,
+            leadName: lead?.name ?? "",
             // Who took it, when that extension is someone's now; a call read again keeps the person it already has.
             ...(u ? { user: u._id, userName: u.name } : {}),
             syncedAt: now,
@@ -382,13 +402,32 @@ async function syncWindow(from: number, to: number, leads: Map<string, LeadMatch
     // lead with that number): both are counted again.
     const keys = parsed.map((p) => p.key);
     const before = await LeadCall.find({ key: { $in: keys } }).select("lead").lean<{ lead: Types.ObjectId }[]>();
-    for (const b of before) touched.add(String(b.lead));
-    for (const p of parsed) touched.add(p.lead);
+    for (const b of before) if (b.lead) touched.add(String(b.lead));
+    for (const p of parsed) if (p.lead) touched.add(p.lead);
     const r = await LeadCall.bulkWrite(ops, { ordered: false });
     inserted = r.upsertedCount;
     updated = r.modifiedCount;
   }
   return { rows: rows.length, calls: ops.length, inserted, updated, touched };
+}
+
+/**
+ * Calls kept without a lead whose number a lead has now (one added since, or a number corrected) → linked to it (the
+ * one assigned to whoever took the call, else the newest). Returns those leads' ids, to count again.
+ */
+async function linkCallsToNewLeads(leads: Map<string, LeadMatch[]>): Promise<string[]> {
+  const keys = (await LeadCall.distinct("numberKey", { lead: null })).map(String).filter((k) => leads.has(k));
+  const linked = new Set<string>();
+  for (const k of keys) {
+    const calls = await LeadCall.find({ lead: null, numberKey: k }).select("_id user").lean<{ _id: Types.ObjectId; user: Types.ObjectId | null }[]>();
+    for (const c of calls) {
+      const lead = pickLead(leads.get(k), c.user ? String(c.user) : "");
+      if (!lead) continue;
+      await LeadCall.updateOne({ _id: c._id, lead: null }, { $set: { lead: lead._id, leadName: lead.name } });
+      linked.add(String(lead._id));
+    }
+  }
+  return [...linked];
 }
 
 /* ── a lead's call counts, from its 3CX calls ────────────────────────────── */
@@ -417,7 +456,8 @@ export async function recountLeadCalls(leadIds?: Iterable<string | Types.ObjectI
     },
   ]);
   const byLead = new Map(counted.map((c) => [String(c._id), c]));
-  const targets = ids ?? counted.map((c) => c._id);
+  // Calls without a lead group under null: no lead to count them on.
+  const targets = ids ?? counted.map((c) => c._id).filter(Boolean);
   let changed = 0;
   for (let i = 0; i < targets.length; i += 1000) {
     const ops = targets.slice(i, i + 1000).map((id) => {
@@ -434,7 +474,7 @@ export async function recountLeadCalls(leadIds?: Iterable<string | Types.ObjectI
   }
   if (!ids) {
     // Every lead with no 3CX calls: a count typed by hand before goes back to 0.
-    const withCalls = counted.map((c) => c._id);
+    const withCalls = counted.map((c) => c._id).filter(Boolean);
     const r = await Lead.collection.updateMany(
       { _id: { $nin: withCalls }, $or: [{ callCount: { $gt: 0 } }, { callConnected: { $gt: 0 } }, { callNotConnected: { $gt: 0 } }] },
       { $set: { callCount: 0, callConnected: 0, callNotConnected: 0 } },
@@ -494,6 +534,8 @@ export async function syncCalls(by = "Schedule"): Promise<SyncSummary> {
     }
     const [leads, users] = await Promise.all([leadsByPhone(), usersByExtension()]);
     await linkUnmatchedCalls(users);
+    // Calls kept without a lead, whose number a lead has now: linked to it, and that lead counted again.
+    const newlyLinked = await linkCallsToNewLeads(leads);
 
     // Rows read a new way since the last run: the 90 days again, from the start.
     if (s.parser !== PARSER) {
@@ -506,7 +548,7 @@ export async function syncCalls(by = "Schedule"): Promise<SyncSummary> {
       : to - BACKFILL_DAYS * DAY_MS;
     sum.from = new Date(from).toISOString();
     sum.to = new Date(to).toISOString();
-    const touched = new Set<string>();
+    const touched = new Set<string>(newlyLinked);
     for (let a = from; a < to; a += DAY_MS) {
       const b = Math.min(a + DAY_MS, to);
       // Every day after the first is read from a few hours before it starts: a call whose rows straddle the start of a
@@ -564,7 +606,7 @@ export function startCallSyncWorker(): void {
     try {
       const r = await syncCalls();
       if (r.error) console.error(`[calls] sync failed: ${r.error}`);
-      else if (r.inserted) console.log(`[calls] ${r.inserted} new call(s) with leads`);
+      else if (r.inserted) console.log(`[calls] ${r.inserted} new call(s)`);
     } catch (err) {
       console.error("[calls] sync failed", err);
     } finally {
