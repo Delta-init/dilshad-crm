@@ -35,6 +35,7 @@ import {
   WalletCards,
   HandCoins,
   Repeat2, MessageCircle, Send,
+  Gem, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMayMoveToCrm } from "@/hooks/useCrmLeadMoves";
@@ -103,6 +104,52 @@ export const navItems: { href: string; label: string; icon: React.ElementType; p
   { href: "/roles",     label: "Roles & Permissions",icon: Shield,          permModule: "roles"     },
   { href: "/settings",  label: "Settings",           icon: Settings,        permModule: null        },
 ];
+
+/**
+ * DGO Points (2026-11-21): staff rewards live in HRMS, so this is one link out
+ * of the CRM, opened in a new tab — HRMS asks for its own sign-in if needed.
+ * Kept out of `navItems` on purpose: the header, command palette and the
+ * permission redirect read that list as pages of this app.
+ */
+export const HRMS_DGO_POINTS_URL = `${(process.env.NEXT_PUBLIC_HRMS_URL || "https://hrms.deltainstitutions.com").replace(/\/+$/, "")}/dgo-points`;
+
+function DgoPointsLink({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+  const link = (
+    <a
+      href={HRMS_DGO_POINTS_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={() => onNavigate?.()}
+      className="relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-150 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+    >
+      <span className="relative z-10 shrink-0">
+        <Gem className="h-5 w-5" />
+      </span>
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.span
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -8 }}
+            transition={{ duration: 0.15 }}
+            className="relative z-10 flex flex-1 items-center justify-between whitespace-nowrap overflow-hidden"
+          >
+            DGO Points
+            <ExternalLink className="ml-auto h-3.5 w-3.5 opacity-60" aria-hidden="true" />
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </a>
+  );
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      {collapsed && (
+        <TooltipContent side="right">DGO Points (opens HRMS)</TooltipContent>
+      )}
+    </Tooltip>
+  );
+}
 
 interface NavLinksProps {
   collapsed?: boolean;
@@ -248,6 +295,7 @@ function NavLinks({ collapsed = false, onNavigate }: NavLinksProps) {
           </Tooltip>
         );
       })}
+      <DgoPointsLink collapsed={collapsed} onNavigate={onNavigate} />
     </nav>
   );
 }
