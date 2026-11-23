@@ -222,16 +222,27 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
   // A balance payment sent to finance counts once finance approves it (2026-10-26) — until then it is a request,
   // shown with its tag and kept out of the total; a rejected one never counts.
   const counts = (p: (typeof payments)[number]) => !p.finance?.externalId || p.finance.state === "approved";
-  const totalPaid = payments.filter(counts).reduce((s, p) => s + p.amount, 0);
   const waitingTotal = payments.filter((p) => p.finance?.externalId && p.finance.state !== "approved" && p.finance.state !== "rejected").reduce((s, p) => s + p.amount, 0);
 
+  /*
+   * Once the close is in finance (the user, 2026-11-23), the summary is finance's: the fee is the invoice's total,
+   * what is paid and left are finance's — never the course's catalogue price, which said "100% paid" for a close put
+   * on a cheaper course behind finance's back. Otherwise, as before: the lead's payments against its selling price,
+   * else its course's fee.
+   */
+  const fin = inFinance && link?.invoice && link.invoice.status !== "void" ? link.invoice : null;
+  const money = (n: number) => (fin ? fmtMinor(Math.round(n * 100), fin.currency) : fmt(n));
+  const totalPaid = fin ? fin.paidMinor / 100 : payments.filter(counts).reduce((s, p) => s + p.amount, 0);
+
   // sellingAmount takes priority over courseAmount for progress tracking
-  const targetAmount = sellingAmount ?? courseAmount;
+  const targetAmount = fin ? fin.totalMinor / 100 : sellingAmount ?? courseAmount;
   const hasTotal     = targetAmount != null && targetAmount > 0;
   const pct          = hasTotal ? Math.min(100, (totalPaid / targetAmount!) * 100) : null;
-  const remaining    = hasTotal ? targetAmount! - totalPaid : null;
+  const remaining    = fin ? fin.balanceMinor / 100 : hasTotal ? targetAmount! - totalPaid : null;
   const isOverpaid   = hasTotal && totalPaid > targetAmount!;
   const overpaidBy   = isOverpaid ? totalPaid - targetAmount! : 0;
+  // Each payment's share of the fee: the lead's payments are dirhams, so not of a rupee invoice.
+  const shareBase    = hasTotal && (!fin || fin.currency === "AED") ? targetAmount! : null;
 
   // bar color based on %
   const barColor =
@@ -281,7 +292,7 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
               >
                 <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />
                 <p className="text-xs font-medium text-red-400">
-                  Overpaid by {fmt(overpaidBy)} — exceeds the selling price
+                  Overpaid by {money(overpaidBy)} — exceeds {fin ? "the invoice total" : "the selling price"}
                 </p>
               </motion.div>
             )}
@@ -291,7 +302,7 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
                   <Wallet className="h-3 w-3" /> Total Paid
                 </p>
                 <p className={cn("text-base font-bold", isOverpaid ? "text-red-400" : "text-green-400")}>
-                  {fmt(totalPaid)}
+                  {money(totalPaid)}
                 </p>
                 {waitingTotal > 0 && (
                   <p className="text-[10px] text-blue-400">+ {fmt(waitingTotal)} waiting for finance — not counted yet</p>
@@ -307,13 +318,13 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
                       "text-base font-bold",
                       isOverpaid ? "text-red-400" : remaining === 0 ? "text-green-400" : "text-amber-400",
                     )}>
-                      {isOverpaid ? fmt(overpaidBy) : fmt(remaining!)}
+                      {isOverpaid ? money(overpaidBy) : money(remaining!)}
                     </p>
                   </div>
                   <div className="col-span-2 space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-muted-foreground">
-                        {sellingAmount != null ? "Selling price" : "Course fee"}: {fmt(targetAmount!)}
+                        {fin ? `Fee in finance${fin.number ? ` (${fin.number})` : ""}` : sellingAmount != null ? "Selling price" : "Course fee"}: {money(targetAmount!)}
                       </span>
                       <span className={cn(
                         "font-semibold",
@@ -431,9 +442,9 @@ export function PaymentPanel({ leadId, leadName, closed, payments, sellingAmount
                       <div className="flex-1 min-w-0 space-y-0.5">
                         <div className="flex items-center gap-2">
                           <span className="text-base font-bold text-green-400">{fmt(p.amount)}</span>
-                          {pct != null && targetAmount != null && (
+                          {shareBase != null && (
                             <span className="text-[10px] text-muted-foreground">
-                              ({((p.amount / targetAmount) * 100).toFixed(1)}%)
+                              ({((p.amount / shareBase) * 100).toFixed(1)}%)
                             </span>
                           )}
                         </div>

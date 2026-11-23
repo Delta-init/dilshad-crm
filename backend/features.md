@@ -944,3 +944,24 @@ clock set wrong doesn't matter: not kept over a newer one, and the answer says w
 **Models Used**: `User` (`currency`, `currencyAt`, new, default null).
 
 **Tests**: `scripts/preferences-check.sh` — 29 checks (scratch mongod).
+
+## Change course after finance approved it (2026-11-23, as in the Sales CRM)
+
+**What it does**: The course and fee of an enrolment finance has can no longer be edited here — not on the lead, not
+on the enrolment, not by reopening and closing the lead again. **Change course** asks finance instead (new course, fee,
+why); it waits in finance's Approvals as a "Course change". Approved: the enrolment moves to the new course and fee
+(left to pay and fee status follow), the lead too (course, selling amount, an activity entry) and the sale's commission
+is counted again. Rejected: finance's reason shows. Only once finance has approved the enrolment; sent back, Correct it
+is the way. Who: the closer their own (`enrolments:edit`), anyone with `students:edit` (or Super Admin) any. Money in
+the enrolment's own currency (rupees for Bangalore), to the organization it was billed in.
+
+**Routes**: `GET /api/v1/students/:id/course-change`; `POST /api/v1/students/:id/course-change`
+`{ courseId, fee, reason, key? }` → 201, pending.
+
+**Models Used**: `Student` (`courseChanges[]`, `courseChangeAskedAt`, new), `Lead`, `Course`, `FinanceHandover`,
+`CommissionSale` (`stepsDoneAt` cleared on approval).
+
+**Script**: `bun src/scripts/financeMismatch.ts` — read only; enrolments whose course or fee isn't finance's, and leads
+whose course isn't their enrolment's.
+
+**Tests**: `scripts/course-change-check.sh` — 89 checks (scratch mongod, stand-in finance).

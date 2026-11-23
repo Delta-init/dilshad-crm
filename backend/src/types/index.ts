@@ -840,8 +840,31 @@ export interface IStudent extends Document {
   financeInvoiceId?: string | null;
   financeInvoiceNumber?: string | null;
   financeSyncedAt?: Date | null;
+  /** Course changes asked of finance after it approved the enrolment (2026-11-23) — courseChangeService.ts. */
+  courseChanges?: ICourseChange[];
+  /** When a course change was last sent to finance — looked for in finance's answer until nothing is open. */
+  courseChangeAskedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** A course change asked of finance for an approved enrolment, and what finance made of it (2026-11-23). */
+export interface ICourseChange {
+  externalId: string;
+  /** Null for one taken from finance whose course isn't a course here. */
+  courseId: Types.ObjectId | null;
+  courseName: string;
+  /** The new fee, in the enrolment's currency. */
+  fee: number;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  requestedBy?: { id?: Types.ObjectId | null; name?: string };
+  requestedAt: Date;
+  decidedBy?: string;
+  decidedAt?: Date;
+  note?: string;
+  rejectReason?: string;
+  appliedAt?: Date;
 }
 
 export interface ParsedLead {

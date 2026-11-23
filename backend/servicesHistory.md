@@ -900,3 +900,18 @@ on the lead is marked done. `getUserLeadStats` also returns `meeting_done`.
   failure throws a sentence with statusCode 502 (503: not set up, or the plan not in Root yet).
 - While on: `resolveSale` (and so `trackSales`, `settlePendingSales`, `preview`) asks Root; `slabsFor` and `payRows`
   are Root's; `sweepCommission` copies Root's plan in every five minutes.
+
+## Change course after finance approved the enrolment (added 2026-11-23, from the Sales CRM)
+
+- `courseChangeService` (new) — `CourseChangeService.info(viewer, studentId)` (what the dialog starts from: can ask /
+  why not, course, fee, paid, finance's invoice, every change), `.request(viewer, studentId, { courseId, fee, reason,
+  key? })` (checked here, then sent to finance at once; finance's refusal → 409 with its words, finance away → 502);
+  `applyApprovedCourseChange`, `applyRejectedCourseChange`, `adoptCourseChange` (one finance kept while the answer was
+  lost), `syncCourseChanges()` (the read-back, every 2 min from `leadPaymentDecisions.tick`), `ADOPTED_REASON`.
+- `financeClient.sendCourseChange(payload, orgId)` (new; `source: "crm"`), `EnrolmentStatus.courseChanges`,
+  `FinanceCourseChange`.
+- `studentService.financeCourseOf(course, academy)` (new, taken out of `buildHandoverPayload`, whose payload is
+  unchanged) — the course as the close names it: item (Bangalore's for Bangalore), HSN/SAC, LMS courses.
+- `StudentService.updateStudent` (changed) — course or fee of an enrolment finance has and hasn't sent back → 409
+  (`heldByFinance`, new, private). `LeadService.updateLead` (changed) — another course on an enrolled lead → 409.
+- `scripts/financeMismatch.ts` (new, read only) — `financeMismatches()`, `printMismatches()`.

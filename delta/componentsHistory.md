@@ -1298,3 +1298,13 @@ A new close starts "Bonus given?" at yes with the course's bonus, marked "From t
   `components/shared/CurrencyRedraw.tsx`), which draws it again when the account's currency arrives as the app opens —
   not on a pick in Settings, nor while someone is typing.
 - `app/(dashboard)/settings/page.tsx` — its toasts go through `@/lib/toast` (the app's toaster; `sonner`'s never showed).
+
+### Change log — 2026-11-23 (change course after finance approval)
+- `components/students/CourseChangeDialog.tsx` (new) — `ChangeCourseDialog` (course picker with its price for the
+  academy, fee, reason, paid so far, left after), `CourseChangeBanner` (waiting / rejected with why),
+  `useMayChangeCourse(closerId)`.
+- `app/(dashboard)/leads/[leadId]/page.tsx` — an enrolled lead's course is read only with a Change course button; the
+  banner; `LeadDialog` gets `courseLocked`.
+- `app/(dashboard)/students/[studentId]/page.tsx` — Change course (once it has an invoice) and the banner.
+- `EditStudentModal` (course and fee locked once it has an invoice), `CreateStudentModal` (re-close: fee locked once in
+  finance), `PaymentPanel` (in finance: the fee, paid and left are finance's invoice's).

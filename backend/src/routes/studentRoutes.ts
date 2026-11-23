@@ -7,7 +7,7 @@ import {
   getStudentByLeadId, updateStudent, deleteStudent,
   getMyEnrolments,
   getEnrolment, requestInvoice, getCorrection, correctEnrolment, getDailyClosings, uploadPaymentReceipt,
-  getCloseOptions, addEnrolmentEmail, checkClientEmail,
+  getCloseOptions, addEnrolmentEmail, checkClientEmail, getCourseChange, requestCourseChange,
 } from "../controllers/studentController.js";
 
 const router = Router();
@@ -68,6 +68,10 @@ router.get("/:id/correction", authenticate, checkPermission("enrolments", "edit"
 router.put("/:id/correction", authenticate, checkPermission("enrolments", "edit"), correctEnrolment);
 // A close finance refused for want of the client's email: add it, and it goes again — gated as the correction is.
 router.post("/:id/enrolment/email", authenticate, checkPermission("enrolments", "edit"), addEnrolmentEmail);
+// Change the course of an enrolment finance approved (2026-11-23) — asked here, decided in finance. As Correct it: the
+// closer their own (enrolments:edit), anyone who may edit students any; the service tells them apart.
+router.get("/:id/course-change", authenticate, checkAnyPermission(["enrolments", "edit"], ["students", "edit"]), getCourseChange);
+router.post("/:id/course-change", authenticate, checkAnyPermission(["enrolments", "edit"], ["students", "edit"]), requestCourseChange);
 
 router.get("/",    authenticate, checkPermission("students", "view"),   getStudents);
 router.post("/",   authenticate, checkPermission("students", "create"), createStudent);

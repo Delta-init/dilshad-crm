@@ -945,3 +945,12 @@ back) and the added email.
   three openings — since on a shared computer it may be someone else's; a choice the device holds for another person
   goes back to USD. A pick that can't reach the account is kept on the device, for you, and sent next time: the newest
   pick wins, by when it was picked. Not while viewing as someone (picks are refused then).
+
+## Change course after finance approved it (2026-11-23)
+
+- On an enrolled lead the course is read only; **Change course** (lead page, enrolment page) asks finance for the new
+  course and fee, with a reason, showing what is paid and what would be left. A banner says it is waiting for finance,
+  or rejected and why; once approved the lead's activity says so and the course and fee follow. Closer for their own
+  close, whoever edits students for any.
+- The lead's Payments card, once the close is in finance, shows finance's invoice total, paid and balance — not the
+  course's catalogue price.

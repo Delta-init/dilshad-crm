@@ -1548,3 +1548,9 @@ Removed: `useUpdateCallNotConnected`, `useUpdateCallCount` (the counts come from
 - Used by the API client and its token refresh (`lib/axios.ts`), the sign-out record (`useLogout`), the open
   leaderboard (`usePublicLeaderboard`) and telling the server View as ended (`lib/impersonation.ts`) — nothing calls
   the site's own `/api/v1` any more. Its own module, as axios and impersonation import each other.
+
+### Change course (2026-11-23)
+- `hooks/useCourseChange.ts` (new) — `useCourseChangeInfo(studentId, enabled?)` → `GET /students/:id/course-change`
+  (key `["students", id, "course-change"]`, 15 s stale, no retry); `useRequestCourseChange(studentId)` →
+  `POST /students/:id/course-change { courseId, fee, reason, key }` (one UUID per dialog), invalidates `["students"]`.
+- `Student` type (`types/student.ts`): `financeInvoiceNumber`, `courseChanges` (`CourseChange`).

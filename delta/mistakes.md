@@ -487,3 +487,12 @@ route's; show a refused form's first reason (`errText`).
   origin since 1e6e7ca.
 
 > A website on Vercel calls its API by the API's own address, not through a Vercel rewrite.
+
+## [2026-11-23] The Payments card said "100% paid" against the course's catalogue price
+
+- **What happened** (Sales CRM, same code here): a close put on a cheaper course behind finance's back was measured
+  against the new course's price and showed "100% paid", while finance's invoice still had money owed.
+- **Fix**: once the close is in finance the card takes the fee, paid and balance from finance's invoice; the course and
+  fee of an enrolled lead are read only, changed with Change course.
+
+> Money a finance invoice holds is shown as finance has it.

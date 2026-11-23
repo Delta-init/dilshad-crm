@@ -3,6 +3,7 @@ import { Student } from "../models/Student.js";
 import { FinanceHandover } from "../models/FinanceHandover.js";
 import { type FinanceBalancePayment } from "./financeClient.js";
 import { statusesFor } from "./leadFinancePaymentService.js";
+import { syncCourseChanges } from "./courseChangeService.js";
 
 /*
  * Finance's decision on each balance payment sent from a lead (the user, 2026-10-26: "it needs to show as a request,
@@ -123,6 +124,9 @@ async function tick() {
     if (n) console.log(`[leadPayments] ${n} balance payment decision(s) from finance kept on their leads`);
     const a = await applyApprovedBalances();
     if (a) console.log(`[leadPayments] ${a} approved balance payment(s) added to their enrolments`);
+    // Course changes asked of finance (2026-11-23) come back with the same status, and are applied here too.
+    const c = await syncCourseChanges();
+    if (c) console.log(`[leadPayments] ${c} course change decision(s) from finance applied`);
   } catch (err) {
     console.error("[leadPayments] tick error:", err);
   } finally {
@@ -131,7 +135,7 @@ async function tick() {
 }
 
 export function startLeadPaymentDecisionScheduler() {
-  console.log("⏰ Balance payment decisions from finance — every 2 min");
+  console.log("⏰ Balance payment and course change decisions from finance — every 2 min");
   void tick();
   setInterval(tick, INTERVAL_MS);
 }

@@ -279,6 +279,51 @@ export interface EnrolmentCorrection {
   academy?: string;
 }
 
+/** What of a course finance is told: its name and mapping (the course form's fields). */
+export interface FinanceCourseSource {
+  name?: string | null;
+  financeItemId?: string | null;
+  hsnSac?: string | null;
+  lmsCourseSlug?: string | null;
+  lmsCourseSlugs?: string[] | null;
+  bangalore?: { financeItemId?: string | null; lmsCourseSlugs?: string[] | null } | null;
+}
+
+/**
+ * The course as finance is sent it — at the close, and for a course change after finance approved the enrolment
+ * (2026-11-23), which must name it exactly as the close would — less its amount.
+ */
+export function financeCourseOf(course: FinanceCourseSource | null | undefined, academy: Academy): {
+  name: string; itemId?: string; hsnSac?: string; lmsCourseSlug?: string; lmsCourseSlugs?: string[];
+} {
+  // Every LMS course it opens — the list where it was mapped as one (two for a
+  // bundle), the single slug from before otherwise.
+  const listed = (course?.lmsCourseSlugs ?? []).map((s) => s.trim()).filter(Boolean);
+  const dubaiLms = listed.length ? listed : course?.lmsCourseSlug?.trim() ? [course.lmsCourseSlug.trim()] : [];
+
+  /*
+   * The academy it was closed for (2026-10-10). Bangalore bills in its own
+   * finance organization, in INR: the course's Bangalore item — the Dubai
+   * one is in another catalogue — and its Bangalore LMS courses, Dubai's
+   * where none were set (the Forex courses are shared). The fee and the
+   * payments are already in INR on the student; ×100 makes them paise.
+   */
+  const bangalore = academy === "bangalore" ? course?.bangalore ?? null : null;
+  const bangaloreLms = (bangalore?.lmsCourseSlugs ?? []).map((s) => s.trim()).filter(Boolean);
+  const lms = academy === "bangalore" && bangaloreLms.length ? bangaloreLms : dubaiLms;
+  const itemId = academy === "bangalore" ? bangalore?.financeItemId : course?.financeItemId;
+  return {
+    name: course?.name ?? "Course",
+    ...(itemId ? { itemId } : {}),
+    // The code this course is billed under, where somebody has set one.
+    ...(course?.hsnSac?.trim() ? { hsnSac: course.hsnSac.trim() } : {}),
+    // Which course(s) this is in the LMS, for finance to fall back on when
+    // the item it bills against has no LMS courses of its own — a bundle
+    // with no product opens all of them.
+    ...(lms.length ? { lmsCourseSlug: lms[0], lmsCourseSlugs: lms } : {}),
+  };
+}
+
 // Auto-generate enrollment number: STU-0001, STU-0002, ...
 async function nextEnrollmentNumber(): Promise<string> {
   const last = await Student.findOne().sort({ createdAt: -1 }).select("enrollmentNumber").lean();
@@ -593,24 +638,9 @@ export class StudentService {
 
     const course = student.course ? await Course.findById(student.course).lean() : null;
     const rep = student.assignedTo ? await User.findById(student.assignedTo).select("name email").lean() : null;
-    // Every LMS course it opens — the list where it was mapped as one (two for a
-    // bundle), the single slug from before otherwise.
-    const listed = (course?.lmsCourseSlugs ?? []).map((s) => s.trim()).filter(Boolean);
-    const dubaiLms = listed.length ? listed : course?.lmsCourseSlug?.trim() ? [course.lmsCourseSlug.trim()] : [];
-
-    /*
-     * The academy it was closed for (2026-10-10). Bangalore bills in its own
-     * finance organization, in INR: the course's Bangalore item — the Dubai
-     * one is in another catalogue — and its Bangalore LMS courses, Dubai's
-     * where none were set (the Forex courses are shared). The fee and the
-     * payments are already in INR on the student; ×100 makes them paise.
-     */
+    // The academy it was closed for (2026-10-10): its course item and LMS courses (financeCourseOf), its currency.
     const academy = academyOf(student);
     const base = ACADEMY_CURRENCY[academy];
-    const bangalore = academy === "bangalore" ? course?.bangalore ?? null : null;
-    const bangaloreLms = (bangalore?.lmsCourseSlugs ?? []).map((s) => s.trim()).filter(Boolean);
-    const lms = academy === "bangalore" && bangaloreLms.length ? bangaloreLms : dubaiLms;
-    const itemId = academy === "bangalore" ? bangalore?.financeItemId : course?.financeItemId;
 
     return {
       externalId: String(student._id),
@@ -630,14 +660,7 @@ export class StudentService {
         phone: student.phone ?? "",
       },
       course: {
-        name: course?.name ?? "Course",
-        ...(itemId ? { itemId } : {}),
-        // The code this course is billed under, where somebody has set one.
-        ...(course?.hsnSac?.trim() ? { hsnSac: course.hsnSac.trim() } : {}),
-        // Which course(s) this is in the LMS, for finance to fall back on when
-        // the item it bills against has no LMS courses of its own — a bundle
-        // with no product opens all of them.
-        ...(lms.length ? { lmsCourseSlug: lms[0], lmsCourseSlugs: lms } : {}),
+        ...financeCourseOf(course, academy),
         // Minor units: finance counts in fils and paise, the CRM in whole
         // currency. Getting this wrong bills a client a hundredfold.
         amountMinor: Math.round((student.totalFee ?? 0) * 100),
@@ -861,6 +884,17 @@ export class StudentService {
   async updateStudent(id: string, data: Partial<IStudent & { course?: string; team?: string; assignedTo?: string }>) {
     const student = await Student.findById(id);
     if (!student) throw createError("Student not found", 404);
+
+    /*
+     * The course and fee of an enrolment finance has (the user, 2026-11-23): changed only with Change course, which
+     * finance approves — an edit here, or reopening and closing the lead again, left the invoice on the old course
+     * and price. Before finance has it, as before; sent back, as before (the correction is for that).
+     */
+    const courseMoves = data.course !== undefined && String(data.course ?? "") !== String(student.course ?? "");
+    const feeMoves = data.totalFee !== undefined && minor(Number(data.totalFee)) !== minor(student.totalFee ?? 0);
+    if ((courseMoves || feeMoves) && (await this.heldByFinance(id))) {
+      throw createError("This enrolment is in finance — change its course or fee with Change course; finance approves it.", 409);
+    }
 
     const allowed: Array<keyof typeof data> = [
       "name", "phone", "email", "course", "team", "assignedTo",
@@ -1491,6 +1525,17 @@ export class StudentService {
     // Of the organization it went to — Bangalore's for a Bangalore close.
     const [st] = await fetchEnrolmentStatuses([studentId], orgOfHandover(h));
     return st?.approval === "returned" ? { sentBack: true, reason: st.returnedReason ?? "" } : { sentBack: false, reason: "" };
+  }
+
+  /**
+   * Whether finance has this enrolment and hasn't sent it back (2026-11-23): then its course and fee change only with
+   * Change course. Finance unreachable counts as not sent back — the safe answer.
+   */
+  private async heldByFinance(studentId: string): Promise<boolean> {
+    const { FinanceHandover } = await import("../models/FinanceHandover.js");
+    const h = await FinanceHandover.findOne({ studentId }).select("status approvalState returnedReason academy financeOrgId").lean();
+    if (h?.status !== "sent") return false;
+    return !(await this.sendBackOf(studentId, h)).sentBack;
   }
 
   /**

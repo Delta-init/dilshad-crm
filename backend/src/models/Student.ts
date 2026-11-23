@@ -168,6 +168,51 @@ const studentSchema = new Schema<IStudent>(
     financeInvoiceId: { type: String },
     financeInvoiceNumber: { type: String },
     financeSyncedAt: { type: Date },
+
+    /*
+     * Course changes asked of finance once it approved the enrolment (the user, 2026-11-23: a closed lead was reopened,
+     * put on a cheaper course and closed again — finance never heard, and the invoice kept the old course and price).
+     * The course and fee of an enrolment in finance change only through one of these: asked here, decided in finance's
+     * Approvals, and applied here once approved (courseChangeService.ts). Oldest first; one pending at a time.
+     */
+    courseChanges: {
+      type: [
+        new Schema(
+          {
+            /** This CRM's id for the request, which finance keeps it under — a retry is the same request. */
+            externalId: { type: String, required: true },
+            /** Null for one taken from finance whose course isn't a course here (its record here was lost). */
+            courseId: { type: Schema.Types.ObjectId, ref: "Course", default: null },
+            courseName: { type: String, required: true },
+            /** The new fee, in the enrolment's own currency (INR for Bangalore). */
+            fee: { type: Number, required: true, min: 0.01 },
+            reason: { type: String, required: true },
+            status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+            requestedBy: {
+              id: { type: Schema.Types.ObjectId, ref: "User" },
+              name: { type: String },
+            },
+            requestedAt: { type: Date, required: true },
+            /** Who decided in finance, and when — as finance says. */
+            decidedBy: { type: String },
+            decidedAt: { type: Date },
+            /** The approver's note, if any. */
+            note: { type: String },
+            rejectReason: { type: String },
+            /** When the approved change was made here — the student, the lead and the commission. Once. */
+            appliedAt: { type: Date },
+          },
+          { _id: false },
+        ),
+      ],
+      default: undefined,
+    },
+    /*
+     * When a course change was last sent to finance from here — set before it goes, so a request finance kept while
+     * this CRM never heard back (a timeout) is still looked for and taken from finance's answer. Cleared once nothing
+     * is open (courseChangeService.syncCourseChanges).
+     */
+    courseChangeAskedAt: { type: Date },
   },
   {
     timestamps: true,

@@ -197,6 +197,24 @@ export interface EnrolmentStatus {
      */
     bonus?: { state: string; amount?: number; currency?: string; at?: string; by?: string; reason?: string };
   } | null;
+  /** Each course change this CRM asked for, oldest first (2026-11-23); absent from a finance before it. */
+  courseChanges?: FinanceCourseChange[];
+}
+
+/** A course change this CRM asked for, as finance answers for it (2026-11-23). */
+export interface FinanceCourseChange {
+  externalId: string;
+  status: "pending" | "approved" | "rejected";
+  /** The new course's name. */
+  course: string;
+  priceMinor: number;
+  currency: string;
+  /** Why it was rejected. */
+  reason?: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  /** The approver's note. */
+  note?: string;
 }
 
 /**
@@ -327,6 +345,57 @@ export async function sendBalancePayment(payload: {
       signal: controller.signal,
     });
     const body = (await res.json().catch(() => ({}))) as { data?: FinanceBalancePayment & { id: string }; error?: { message?: string } };
+    if (!res.ok || !body.data) throw new FinanceRefusal(body.error?.message ?? `Finance returned ${res.status}`, res.status);
+    return body.data;
+  } catch (err) {
+    if (err instanceof FinanceRefusal) throw err;
+    throw new FinanceRefusal("Finance could not be reached — try again in a minute", 0);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Ask finance to move an approved enrolment to another course at another fee (the user, 2026-11-23): it waits in
+ * finance's Approvals as a "Course change"; approved there, the invoice's line and price change and the LMS opens the
+ * new course. `course` is the course exactly as the close sends it, less its amount. Idempotent on `externalId`, so a
+ * retry after a timeout is the same request. Throws FinanceRefusal with finance's own reason ("AED 2,250.00 is already
+ * paid — the new fee can't be less", "another course change is still pending") for the screen to show.
+ */
+export async function sendCourseChange(payload: {
+  enrolmentExternalId: string;
+  externalId: string;
+  course: { name: string; itemId?: string; hsnSac?: string; lmsCourseSlug?: string; lmsCourseSlugs?: string[] };
+  priceMinor: number;
+  reason: string;
+  requestedBy: { name: string; email: string };
+}, orgId: string): Promise<Partial<FinanceCourseChange> & { id?: string }> {
+  if (!financeConfigured() || !orgId) throw new FinanceRefusal("The finance connection is not set up", 503);
+
+  const path = "/api/v1/integrations/enrolments/course-changes";
+  // "crm", as the close sends it: this CRM's enrolments are finance's under that source (its `crm` tag is "remote").
+  const raw = JSON.stringify({ source: "crm", ...payload });
+  const timestamp = String(Date.now());
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const signature = signRequest(env.FINANCE_INTEGRATION_SECRET, "POST", path, timestamp, nonce, raw);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${baseUrl()}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-delta-client": env.FINANCE_CLIENT_ID,
+        "x-delta-timestamp": timestamp,
+        "x-delta-nonce": nonce,
+        "x-delta-signature": signature,
+        "x-delta-org": orgId,
+      },
+      body: raw,
+      signal: controller.signal,
+    });
+    const body = (await res.json().catch(() => ({}))) as { data?: Partial<FinanceCourseChange> & { id?: string }; error?: { message?: string } };
     if (!res.ok || !body.data) throw new FinanceRefusal(body.error?.message ?? `Finance returned ${res.status}`, res.status);
     return body.data;
   } catch (err) {

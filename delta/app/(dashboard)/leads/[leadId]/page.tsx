@@ -65,6 +65,7 @@ import { fmtFull } from "@/lib/currency";
 import { INITIAL_RESPONSE_CONFIG, PRIMARY_CONCERN_CONFIG, FOLLOWUP_STRATEGY_CONFIG } from "@/lib/leadConfig";
 import { LEAD_STATUSES, STATUS_META } from "@/lib/statusConfig";
 import { CreateStudentModal } from "@/components/students/CreateStudentModal";
+import { ChangeCourseDialog, CourseChangeBanner, useMayChangeCourse } from "@/components/students/CourseChangeDialog";
 import { useStudentByLeadId } from "@/hooks/useStudents";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -498,6 +499,17 @@ export default function LeadDetailPage() {
   const updateStatus = useUpdateLeadStatus();
   const updateLead = useUpdateLead();
   const { data: existingStudent } = useStudentByLeadId(lead?._id ?? "");
+  /*
+   * Enrolled (2026-11-23): the lead's course is read only — it changes with Change course, which finance approves
+   * (the server refuses an edit). The closer may ask for their own close, whoever edits students for any.
+   */
+  const enrolled = !!existingStudent;
+  const mayChangeCourse = useMayChangeCourse(
+    existingStudent?.assignedTo && typeof existingStudent.assignedTo === "object"
+      ? (existingStudent.assignedTo as User)._id
+      : (existingStudent?.assignedTo as string | null | undefined),
+  );
+  const [courseChangeOpen, setCourseChangeOpen] = useState(false);
   const [showStudentModal,  setShowStudentModal]  = useState(false);
   const [lostModalOpen,     setLostModalOpen]     = useState(false);
   const [followupModalOpen, setFollowupModalOpen] = useState(false);
@@ -704,6 +716,8 @@ export default function LeadDetailPage() {
                     </div>
                   </div>
                 )}
+                {/* A course change asked of finance: waiting, or rejected with why (approved shows in the activity). */}
+                {enrolled && <CourseChangeBanner changes={existingStudent?.courseChanges} academy={existingStudent?.academy} />}
 
                 {/* Selling Amount */}
                 {lead.sellingAmount != null && (
@@ -922,7 +936,28 @@ export default function LeadDetailPage() {
                       </Select>
                     </div>
 
-                    {/* Course change */}
+                    {/* Course change — enrolled, it goes to finance instead (2026-11-23). */}
+                    {enrolled ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
+                        <BookOpen className="h-3 w-3" />
+                        Course
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-8 min-w-0 flex-1 items-center rounded-md border border-border/50 bg-muted/30 px-2 text-xs">
+                          <span className="truncate">
+                            {typeof lead.course === "object" && lead.course ? (lead.course as Course).name : "No course"}
+                          </span>
+                        </div>
+                        {mayChangeCourse && (
+                          <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs shrink-0" onClick={() => setCourseChangeOpen(true)}>
+                            <ArrowRightLeft className="h-3 w-3" /> Change course
+                          </Button>
+                        )}
+                      </div>
+                      <p className="mt-1 text-[10px] text-muted-foreground">Enrolled — a course change goes to finance for approval.</p>
+                    </div>
+                    ) : (
                     <div>
                       <p className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
                         <BookOpen className="h-3 w-3" />
@@ -967,6 +1002,7 @@ export default function LeadDetailPage() {
                         </SelectContent>
                       </Select>
                     </div>
+                    )}
 
                     {/* Selling Amount */}
                     <div>
@@ -1382,7 +1418,13 @@ export default function LeadDetailPage() {
         onOpenChange={setEditOpen}
         lead={lead}
         mode="edit"
+        courseLocked={enrolled}
       />
+
+      {/* Change course on an enrolled lead (2026-11-23): asked of finance, applied once approved. */}
+      {courseChangeOpen && existingStudent && (
+        <ChangeCourseDialog studentId={existingStudent._id} name={lead.name} onClose={() => setCourseChangeOpen(false)} />
+      )}
 
       {/* Create Student Modal — fires when status → closed. Shown for a lead
           that is already enrolled too: closing one a second time, after it went

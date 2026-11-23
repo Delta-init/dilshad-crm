@@ -68,6 +68,9 @@ export function EditStudentModal({ open, student, onClose }: Props) {
   const courseId     = student.course     && typeof student.course     === "object" ? (student.course as Course)._id     : (student.course     as string | undefined);
   const teamId       = student.team       && typeof student.team       === "object" ? (student.team   as Team)._id       : (student.team       as string | undefined);
   const assignedToId = student.assignedTo && typeof student.assignedTo === "object" ? (student.assignedTo as User)._id  : (student.assignedTo as string | undefined);
+  // In finance (2026-11-23): its course and fee change with Change course, which finance approves — the server
+  // refuses them here (sent back, Correct it is the way).
+  const inFinance = Boolean(student.financeInvoiceNumber);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -174,6 +177,7 @@ export function EditStudentModal({ open, student, onClose }: Props) {
             <Select
               value={form.watch("course") ?? ""}
               onValueChange={(v) => form.setValue("course", v === "none" ? "" : v)}
+              disabled={inFinance}
             >
               <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
               <SelectContent>
@@ -183,6 +187,9 @@ export function EditStudentModal({ open, student, onClose }: Props) {
                 ))}
               </SelectContent>
             </Select>
+            {inFinance && (
+              <p className="text-[11px] text-muted-foreground">In finance — the course and fee change with Change course, which finance approves.</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -225,7 +232,7 @@ export function EditStudentModal({ open, student, onClose }: Props) {
             {/* Total fee */}
             <div className="space-y-1.5">
               <Label htmlFor="totalFee">Total Fee (₹)</Label>
-              <Input id="totalFee" type="number" min={0} {...form.register("totalFee")} />
+              <Input id="totalFee" type="number" min={0} {...form.register("totalFee")} disabled={inFinance} />
             </div>
             {/* Paid amount */}
             <div className="space-y-1.5">

@@ -655,3 +655,9 @@ too: no token check (that is the main namespace's), one screen per connection, a
 | Method | Route | Chain |
 |--------|-------|-------|
 | GET / PUT | `/api/v1/auth/preferences` | `authenticate` (a View-as pass can read, not write) → `getPreferences` / `updatePreferences` (zod, strict) |
+
+### Change course (2026-11-23)
+
+| Method | Route | Chain |
+|--------|-------|-------|
+| GET / POST | `/api/v1/students/:id/course-change` | `authenticate` → `checkAnyPermission(["enrolments","edit"], ["students","edit"])` → `getCourseChange` / `requestCourseChange` (the service allows `enrolments:edit` on one's own close, `students:edit` or Super Admin on any — 403 otherwise) |

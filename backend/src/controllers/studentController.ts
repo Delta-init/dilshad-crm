@@ -1,9 +1,11 @@
 import type { Request, Response, NextFunction } from "express";
 import type { AuthenticatedRequest } from "../types/index.js";
 import { StudentService } from "../services/studentService.js";
+import { CourseChangeService } from "../services/courseChangeService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 
 const svc = new StudentService();
+const courseChanges = new CourseChangeService();
 
 export const createStudent = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
@@ -205,6 +207,34 @@ export const correctEnrolment = async (req: AuthenticatedRequest, res: Response,
     if (!userId) return sendError(res, "Not authenticated", 401);
     const result = await svc.correctEnrolment(req.params.id, req.body ?? {}, { userId, role: req.user?.role });
     sendSuccess(res, result.message, result.student);
+  } catch (err) { next(err); }
+};
+
+/**
+ * What the Change course dialog starts from (2026-11-23): whether a change can be asked now and why not, the course,
+ * fee and paid amount, the invoice as finance has it, and every change asked for so far.
+ *
+ * GET /api/v1/students/:id/course-change
+ */
+export const getCourseChange = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return sendError(res, "Not authenticated", 401);
+    sendSuccess(res, "Course change fetched", await courseChanges.info({ userId, role: req.user?.role }, req.params.id));
+  } catch (err) { next(err); }
+};
+
+/**
+ * Ask finance to change the course of an enrolment it approved (2026-11-23) — it waits in finance's Approvals.
+ *
+ * POST /api/v1/students/:id/course-change  { courseId, fee, reason, key? }  →  the request, pending
+ */
+export const requestCourseChange = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return sendError(res, "Not authenticated", 401);
+    const change = await courseChanges.request({ userId, role: req.user?.role }, req.params.id, req.body ?? {});
+    sendSuccess(res, "Sent to finance — it changes once finance approves it", change, 201);
   } catch (err) { next(err); }
 };
 

@@ -643,12 +643,14 @@ export function CreateStudentModal({ open, lead, existingStudent, progress, onCl
                         type="number" min="0" step="0.01" value={feeInput}
                         onChange={(e) => setFeeInput(e.target.value)}
                         placeholder="0" className="h-8 text-xs"
+                        // In finance (2026-11-23): the fee changes with Change course, which finance approves.
+                        disabled={editing && inFinance}
                       />
                     </div>
                     {/* A new close takes its payments one by one, below. */}
                     {editing && inFinance && (
                       <p className="self-end text-[11px] text-muted-foreground">
-                        In finance{alreadyOnEnrolment > 0 ? ` · ${fmt(alreadyOnEnrolment)} paid` : ""} — a further payment is added in the lead&apos;s Payments panel, with its receipt, and goes to finance.
+                        In finance{alreadyOnEnrolment > 0 ? ` · ${fmt(alreadyOnEnrolment)} paid` : ""} — a further payment is added in the lead&apos;s Payments panel, with its receipt, and goes to finance. The course and fee change with Change course.
                       </p>
                     )}
                     {editing && !inFinance && (

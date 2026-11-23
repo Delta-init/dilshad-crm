@@ -395,3 +395,14 @@ looser route keeps the old route's permission: the contact stamp on `POST /calls
 - **A pick time taken from the device's clock** let a slow clock's fresh picks lose and a fast clock's late pick win.
   **Fix**: a save sent at once is "now" by this server; a late one sends how long ago it was made (`pickedAgoMs`, on
   the device's own clock) and is placed at server time minus that.
+
+## [2026-11-23] A finance-approved close re-closed on another course — finance never heard
+
+- **What happened** (Sales CRM; this CRM had the same hole): a closed lead, approved in finance, was reopened, put on a
+  cheaper course and closed again. Only this CRM changed — the invoice kept the old course and price and still showed
+  money owed.
+- **Fix**: once finance has an enrolment (and hasn't sent it back), its course and fee change only with Change course,
+  which finance approves; `updateLead` and `updateStudent` refuse them with a 409. `financeMismatch.ts` lists any
+  enrolment that already differs from finance.
+
+> Anything finance has billed changes through finance, never by editing it here.

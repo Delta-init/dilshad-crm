@@ -43,9 +43,11 @@ interface LeadDialogProps {
   onOpenChange: (open: boolean) => void;
   lead?: Lead | null;
   mode?: "create" | "edit";
+  /** Enrolled (2026-11-23): the course changes with Change course, which finance approves — not here. */
+  courseLocked?: boolean;
 }
 
-export function LeadDialog({ open, onOpenChange, lead, mode }: LeadDialogProps) {
+export function LeadDialog({ open, onOpenChange, lead, mode, courseLocked }: LeadDialogProps) {
   const isEditing = mode === "edit" || !!lead;
 
   const { mutate: createLead, isPending: creating } = useCreateLead();
@@ -347,7 +349,7 @@ export function LeadDialog({ open, onOpenChange, lead, mode }: LeadDialogProps) 
                 name="course"
                 control={control}
                 render={({ field }) => (
-                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                  <Select value={field.value ?? ""} onValueChange={field.onChange} disabled={courseLocked}>
                     <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
                     <SelectContent>
                       {allCourses.map((c) => (
@@ -357,6 +359,9 @@ export function LeadDialog({ open, onOpenChange, lead, mode }: LeadDialogProps) 
                   </Select>
                 )}
               />
+              {courseLocked && (
+                <p className="text-[11px] text-muted-foreground">Enrolled — change the course with Change course on the lead; finance approves it.</p>
+              )}
             </div>
 
             {/* Selling Amount */}
