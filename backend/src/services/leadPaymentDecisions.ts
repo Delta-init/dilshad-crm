@@ -4,6 +4,7 @@ import { FinanceHandover } from "../models/FinanceHandover.js";
 import { type FinanceBalancePayment } from "./financeClient.js";
 import { statusesFor } from "./leadFinancePaymentService.js";
 import { syncCourseChanges } from "./courseChangeService.js";
+import { syncFinanceOnlyPayments } from "./financeOnlyPayments.js";
 
 /*
  * Finance's decision on each balance payment sent from a lead (the user, 2026-10-26: "it needs to show as a request,
@@ -124,6 +125,13 @@ async function tick() {
     if (n) console.log(`[leadPayments] ${n} balance payment decision(s) from finance kept on their leads`);
     const a = await applyApprovedBalances();
     if (a) console.log(`[leadPayments] ${a} approved balance payment(s) added to their enrolments`);
+    // Money accounts record straight in finance (2026-11-25), from FINANCE_ONLY_PAYMENTS_FROM on — put on the lead as
+    // approved and added to the enrolment as an approved balance payment is; paid in full in finance, paid in full here.
+    const f = await syncFinanceOnlyPayments();
+    if (f.added || f.paidInFull) {
+      const fa = await applyApprovedBalances();
+      console.log(`[leadPayments] ${f.added} payment(s) recorded in finance put on their leads, ${fa} added to their enrolments; ${f.paidInFull} enrolment(s) paid in full as finance has them`);
+    }
     // Course changes asked of finance (2026-11-23) come back with the same status, and are applied here too.
     const c = await syncCourseChanges();
     if (c) console.log(`[leadPayments] ${c} course change decision(s) from finance applied`);

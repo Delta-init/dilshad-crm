@@ -280,7 +280,8 @@ export async function fetchEnrolmentStatuses(studentIds: string[], orgId: string
 export interface BalanceFields {
   course?: string;
   nextDueOn?: string;
-  payments?: { amountMinor: number; paidOn: string; method: string; receiptNumber?: string }[];
+  /** `id` and `taxInvoiceNumber` (2026-11-25): finance's own id for the payment and its TI-…, absent from a finance before. */
+  payments?: { id?: string; amountMinor: number; paidOn: string; method: string; receiptNumber?: string; taxInvoiceNumber?: string }[];
   balancePayments?: FinanceBalancePayment[];
 }
 

@@ -81,6 +81,12 @@ const envSchema = z.object({
    * Bangalore close is refused rather than billed in the Dubai organization.
    */
   FINANCE_ORG_ID_BANGALORE:   z.string().default(""),
+  /**
+   * Payments accounts record straight in finance are brought into the CRM from this day on (YYYY-MM-DD, finance's
+   * payment date) — services/financeOnlyPayments.ts. The user, 2026-11-25: "only from November … October not
+   * needed for now". An earlier day takes earlier payments in too; nothing before it is touched.
+   */
+  FINANCE_ONLY_PAYMENTS_FROM: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "FINANCE_ONLY_PAYMENTS_FROM is YYYY-MM-DD").default("2026-11-01"),
 
   /*
    * The Delta LMS, where mentors keep their availability and their classes.

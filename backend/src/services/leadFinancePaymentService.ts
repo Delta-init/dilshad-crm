@@ -58,7 +58,7 @@ export interface LeadFinanceLink {
  * answer (`status` undefined) nothing is "covered".
  */
 export function paymentStatesOf(
-  payments: { _id: unknown; amount: number; note?: string | null; paidAt: Date; createdAt?: Date; finance?: { externalId?: string } | null }[],
+  payments: { _id: unknown; amount: number; note?: string | null; paidAt: Date; createdAt?: Date; finance?: { externalId?: string; state?: string } | null }[],
   handover: { status?: string | null; sentAt?: Date | null; resentAt?: Date | null } | null | undefined,
   status: EnrolmentStatus | undefined,
 ): LeadFinanceLink["payments"] {
@@ -76,6 +76,9 @@ export function paymentStatesOf(
     const id = String(p._id);
     if (p.finance?.externalId) {
       const b = byId.get(p.finance.externalId);
+      // A payment accounts recorded straight in finance (financeOnlyPayments.ts) is no balance payment of finance's:
+      // it is on the lead as approved, and says so.
+      if (!b && p.finance.state === "approved") return { id, state: "sent" as const, financeStatus: "approved" as const };
       return { id, state: "sent" as const, ...(b ? { financeStatus: b.status, ...(b.reason ? { reason: b.reason } : {}), ...(b.receiptNumber ? { receiptNumber: b.receiptNumber } : {}) } : {}) };
     }
     const at = new Date(p.createdAt ?? p.paidAt).getTime();
