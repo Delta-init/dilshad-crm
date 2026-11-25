@@ -145,6 +145,22 @@ export const getRevenueOverview = async (
 };
 
 /**
+ * GET /api/reports/old-books?dateFrom=&dateTo= — finance's old books counted here in the range (2026-11-25).
+ */
+export const getOldBooks = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { dateFrom, dateTo } = getDateParams(req.query as Record<string, string>);
+    sendSuccess(res, "Old books fetched successfully", await svc.getOldBooks(dateFrom, dateTo));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * GET /api/reports/revenue/timeline
  * ?period=daily|weekly|monthly|yearly&dateFrom=&dateTo=
  */

@@ -190,6 +190,8 @@ export interface CommissionSale {
   monthShare?: number;
   /** When the client finished paying — the commission is earned then; null while they owe (2026-10-31). */
   paidInFullAt?: string | null;
+  /** From finance's old books (2026-11-25): an old invoice, no enrolment here. */
+  oldBooks?: boolean;
   /** The share of what the client paid that came in rupees, 0–1 (2026-11-13). */
   rupeeShare?: number;
   /** Only the lines the viewer may see. */

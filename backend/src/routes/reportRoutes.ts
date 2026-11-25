@@ -10,6 +10,7 @@ import {
   getRevenueOverview,
   getRevenueTimeline,
   getRevenueTeams,
+  getOldBooks,
   getSourceAnalytics,
   getSourceCampaigns,
   getResponseTimeReport,
@@ -44,6 +45,8 @@ router.get("/sources/:source/campaigns",  getSourceCampaigns);
 router.get("/revenue/overview",  getRevenueOverview);
 router.get("/revenue/timeline",  getRevenueTimeline);
 router.get("/revenue/teams",     getRevenueTeams);
+// Finance's old books counted here (2026-11-25) — the "Old books collected" card
+router.get("/old-books",         getOldBooks);
 
 // Response time SLA
 router.get("/response-time",  getResponseTimeReport);

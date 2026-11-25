@@ -115,6 +115,8 @@ const commissionSaleSchema = new Schema<ICommissionSale>(
     },
     countedAt: { type: Date },
     reversedAt: { type: Date },
+    /** A sale from finance's old books (2026-11-25, services/oldBooks.ts): `student` is finance's invoice id, not a student. */
+    oldBooks: { type: Boolean },
   },
   { timestamps: true, versionKey: false, collection: "commissionsales" },
 );

@@ -14,7 +14,7 @@ import {
   GitFork, DollarSign, Trophy, ChevronDown, ChevronUp,
   Loader2, Tag, X, AlertTriangle, Timer, CalendarCheck, Filter, ArrowUpRight,
   Sparkles, TrendingDown, Star, Bell, Shield, GitMerge, Clock, CheckCircle2,
-  XCircle, PhoneCall, UserCheck, AlertOctagon,
+  XCircle, PhoneCall, UserCheck, AlertOctagon, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +35,7 @@ import {
   useReportTeamRankings,
   useReportTeamSplit,
   useRevenueOverview,
+  useOldBooks,
   useRevenueTimeline,
   useRevenueTeams,
   useSourceAnalytics,
@@ -1377,6 +1378,7 @@ function RevenueTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) 
   const overview = useRevenueOverview(dateFrom, dateTo);
   const timeline = useRevenueTimeline(revPeriod, dateFrom, dateTo);
   const teamsQ   = useRevenueTeams(dateFrom, dateTo);
+  const oldBooks = useOldBooks(dateFrom, dateTo);
 
   const ovData     = overview.data;
   const tlData     = timeline.data;
@@ -1455,6 +1457,38 @@ function RevenueTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) 
           loading={overview.isLoading}
         />
       </div>
+
+      {/* ── Old books collected (2026-11-25): finance's old invoices, counted for their salesperson ── */}
+      {(oldBooks.data?.count ?? 0) > 0 && (
+        <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.2 }}>
+          <Card className="border-border/50 bg-card/80 backdrop-blur-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <BookOpen className="h-4 w-4 text-primary" /> Old books collected
+                </CardTitle>
+                <div className="text-right">
+                  <p className="text-lg font-bold tabular-nums text-emerald-500">{fmtUSD(oldBooks.data!.total)}</p>
+                  <p className="text-xs text-muted-foreground">{oldBooks.data!.count} instalment{oldBooks.data!.count === 1 ? "" : "s"} · in the totals above</p>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="divide-y divide-border/40">
+                {oldBooks.data!.rows.map((r) => (
+                  <div key={`${r.invoiceNumber}-${r.paidAt}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{r.name} · {r.invoiceNumber}</p>
+                      <p className="text-xs text-muted-foreground truncate">{r.course}{r.customerName ? ` · ${r.customerName}` : ""} · {new Date(r.paidAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Dubai" })}</p>
+                    </div>
+                    <span className="font-semibold tabular-nums text-emerald-500 shrink-0">{fmtUSD(r.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
 
       {/* ── Revenue Timeline Chart ─────────────────────────────────────────── */}
       <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.24 }}>

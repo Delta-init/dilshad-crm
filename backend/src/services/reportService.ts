@@ -4,6 +4,7 @@ import { Team } from "../models/Team.js";
 import { User } from "../models/User.js";
 import { COUNTED_PAYMENT, COUNTED_TOTAL } from "../utils/countedPayments.js";
 import { bangaloreLeadsUnion, withBangaloreMoney } from "../utils/bangaloreRevenue.js";
+import { OldBooksSale } from "../models/OldBooksSale.js";
 
 const ALL_STATUSES = [
   "new", "assigned", "pending_response", "followup", "meeting_scheduled", "meeting_done", "closed", "lost",
@@ -433,6 +434,31 @@ export class ReportService {
   }
 
   // ── 6. Revenue overview ───────────────────────────────────────────────────────
+
+  /**
+   * Finance's old books in the range (2026-11-25, services/oldBooks.ts): each payment counted for its salesperson
+   * here, with the invoice, the client and the course — the Reports page's "Old books collected" card. Already inside
+   * every revenue figure (bangaloreLeadsUnion); this only lists them. `notHere`: those whose salesperson isn't a user
+   * here are left out.
+   */
+  async getOldBooks(dateFrom?: string, dateTo?: string) {
+    const paymentMatch = this.buildPaymentDateFilter(dateFrom, dateTo);
+    const rows = await OldBooksSale.aggregate<{ invoiceNumber: string; customerName: string; course: string; userId: unknown; name?: string; amount: number; paidAt: Date; paidInFull: boolean }>([
+      { $match: { assignedTo: { $ne: null }, "payments.0": { $exists: true } } },
+      { $unwind: "$payments" },
+      { $match: paymentMatch },
+      { $lookup: { from: "users", localField: "assignedTo", foreignField: "_id", as: "u", pipeline: [{ $project: { name: 1 } }] } },
+      {
+        $project: {
+          _id: 0, invoiceNumber: 1, customerName: 1, course: 1, userId: "$assignedTo", name: { $first: "$u.name" },
+          amount: "$payments.amount", paidAt: "$payments.paidAt", paidInFull: { $ne: ["$paidInFullAt", null] },
+        },
+      },
+      { $sort: { paidAt: -1 } },
+    ]);
+    const total = Math.round(rows.reduce((s, r) => s + (r.amount ?? 0), 0) * 100) / 100;
+    return { total, count: rows.length, rows: rows.map((r) => ({ ...r, userId: String(r.userId), name: r.name ?? "Unknown user" })) };
+  }
 
   async getRevenueOverview(dateFrom?: string, dateTo?: string) {
     // A Bangalore enrolment's rupees too, in AED (utils/bangaloreRevenue.ts)

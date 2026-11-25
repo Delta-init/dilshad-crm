@@ -87,6 +87,12 @@ const envSchema = z.object({
    * needed for now". An earlier day takes earlier payments in too; nothing before it is touched.
    */
   FINANCE_ONLY_PAYMENTS_FROM: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "FINANCE_ONLY_PAYMENTS_FROM is YYYY-MM-DD").default("2026-11-01"),
+  /**
+   * The old books (invoices imported from the previous system, finance's external.source "old_books") count for their
+   * salesperson from this day on (YYYY-MM-DD, finance's payment date) — services/oldBooks.ts. The user, 2026-11-25:
+   * "November onwards".
+   */
+  OLD_BOOKS_FROM: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "OLD_BOOKS_FROM is YYYY-MM-DD").default("2026-11-01"),
 
   /*
    * The Delta LMS, where mentors keep their availability and their classes.

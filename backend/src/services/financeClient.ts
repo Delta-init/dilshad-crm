@@ -506,3 +506,53 @@ export async function fetchCommissionPayouts(month: string): Promise<CommissionP
   }
 }
 
+
+/** One of the old books' invoices (finance's GET /integrations/old-books/payments, 2026-11-25). */
+export interface OldBooksInvoice {
+  invoiceId: string;
+  invoiceNumber: string;
+  organizationId: string;
+  customerName: string;
+  salespersonName: string;
+  /** The salesperson's email in finance, lower-case; "" when none. */
+  salespersonEmail: string;
+  course: string;
+  currency: string;
+  issueDate: string;
+  totalMinor: number;
+  balanceMinor: number;
+  status: string;
+  /** Every payment on it, oldest first. */
+  payments: { id: string; paidOn: string; amountMinor: number; method: string }[];
+}
+
+/**
+ * The old books' invoices with money paid on or after `from` (YYYY-MM-DD) — every CRM's own and the others'; each CRM
+ * keeps the ones whose salesperson is one of its users. Throws when finance can't be asked (the caller keeps what it
+ * has).
+ */
+export async function fetchOldBooksPayments(from: string): Promise<OldBooksInvoice[]> {
+  if (!financeConfigured()) throw new Error("Finance is not configured");
+  const path = `/api/v1/integrations/old-books/payments?from=${encodeURIComponent(from)}`;
+  const timestamp = String(Date.now());
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const signature = signRequest(env.FINANCE_INTEGRATION_SECRET, "GET", path, timestamp, nonce, "");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${baseUrl()}${path}`, {
+      headers: {
+        "x-delta-client": env.FINANCE_CLIENT_ID,
+        "x-delta-timestamp": timestamp,
+        "x-delta-nonce": nonce,
+        "x-delta-signature": signature,
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Finance returned ${res.status}`);
+    const body = (await res.json()) as { data?: OldBooksInvoice[] };
+    return Array.isArray(body.data) ? body.data : [];
+  } finally {
+    clearTimeout(timer);
+  }
+}

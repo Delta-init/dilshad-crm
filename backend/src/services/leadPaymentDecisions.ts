@@ -5,6 +5,7 @@ import { type FinanceBalancePayment } from "./financeClient.js";
 import { statusesFor } from "./leadFinancePaymentService.js";
 import { syncCourseChanges } from "./courseChangeService.js";
 import { syncFinanceOnlyPayments } from "./financeOnlyPayments.js";
+import { oldBooksTick } from "./oldBooks.js";
 
 /*
  * Finance's decision on each balance payment sent from a lead (the user, 2026-10-26: "it needs to show as a request,
@@ -132,6 +133,8 @@ async function tick() {
       const fa = await applyApprovedBalances();
       console.log(`[leadPayments] ${f.added} payment(s) recorded in finance put on their leads, ${fa} added to their enrolments; ${f.paidInFull} enrolment(s) paid in full as finance has them`);
     }
+    // Finance's old books (2026-11-25): counted for their salesperson here — every ten minutes.
+    await oldBooksTick();
     // Course changes asked of finance (2026-11-23) come back with the same status, and are applied here too.
     const c = await syncCourseChanges();
     if (c) console.log(`[leadPayments] ${c} course change decision(s) from finance applied`);

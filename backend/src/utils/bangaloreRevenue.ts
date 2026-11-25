@@ -97,6 +97,8 @@ const BANGALORE_ENROLMENT = { academy: "bangalore", status: { $ne: "dropped" } }
  * in AED; and (2026-10-31: the AI Academy's students, paid in rupees) one copy of every other lead with rupee
  * payments, carrying only those, in AED. The lead's AED payments still come from the lead itself, and its rupee ones
  * are left out there, so nothing is counted twice; a count of leads must not use this.
+ * Also each of finance's old books kept for a user here (services/oldBooks.ts), as a lead of theirs carrying only
+ * the payments that count — a separate $unionWith, last.
  */
 export async function bangaloreLeadsUnion(): Promise<PipelineStage[]> {
   const rate = await inrPerAed();
@@ -124,6 +126,18 @@ export async function bangaloreLeadsUnion(): Promise<PipelineStage[]> {
           { $match: { _bangalore: { $size: 0 } } },
           { $project: { activityLogs: 0, _bangalore: 0 } },
           { $set: { payments: rupeesInAed("$payments", rate, "Rupee payment") } },
+        ],
+      },
+    },
+    // Finance's old books (2026-11-25, services/oldBooks.ts): each one kept for a user here, as a lead of theirs
+    // carrying only the payments that count (from OLD_BOOKS_FROM on) — the revenue figures take them as they take a
+    // lead's. Nothing is on a real lead, so nothing is counted twice.
+    {
+      $unionWith: {
+        coll: "oldbookssales",
+        pipeline: [
+          { $match: { assignedTo: { $ne: null }, "payments.0": { $exists: true } } },
+          { $project: { _id: "$financeInvoiceId", assignedTo: 1, team: 1, name: "$customerName", payments: 1, oldBooks: { $literal: true } } },
         ],
       },
     },

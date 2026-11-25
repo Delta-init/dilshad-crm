@@ -379,6 +379,8 @@ export interface ICommissionSale extends Document {
   meeting?: ISaleMeeting | null;
   /** The mentor's fee on it once counted (2026-11-18); null: none. */
   mentor?: ISaleMentor | null;
+  /** From finance's old books (2026-11-25): `student` is finance's invoice id. */
+  oldBooks?: boolean;
   countedAt?: Date;
   reversedAt?: Date;
   createdAt: Date;

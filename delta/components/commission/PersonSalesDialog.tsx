@@ -83,6 +83,7 @@ export function PersonSalesDialog({ person, role, month, sales, roles, onRole, o
                     <div className="min-w-0 space-y-1">
                       <p className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-foreground">{s.studentName}</span>
+                        {s.oldBooks && <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400" title="From finance's old books — no enrolment in this CRM">Old books</span>}
                         {s.enrollmentNumber && <span className="text-[10px] text-muted-foreground">{s.enrollmentNumber}</span>}
                         <span className="inline-flex items-center gap-1 rounded-full border border-green-500/20 bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
                           <CheckCircle2 className="h-2.5 w-2.5" /> {s.paidInFullAt ? "Paid in full" : "Client still paying"}
