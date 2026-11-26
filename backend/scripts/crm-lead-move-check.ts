@@ -6,7 +6,7 @@
  *             Root says the other CRM took it — kept whole in crm_moved_leads; one it didn't take stays
  *   Undo      24 hours; the other CRM gives it back first (refused there → stays moved); back exactly; not twice
  *   Taking in the sheet key; to one person (in that team, active), split across a team (fewest open first, evenly),
- *             or the CRM's own split; a number already here → the repeat rule; what it brings (notes, history)
+ *             or the CRM's own split; a number already here → the repeat rule (stays with its owner); what it brings (notes, history)
  *   Give back a lead made by the move goes (kept in crm_moved_leads); one closed here can't; a repeat stays
  *
  * Run by crm-lead-move-check.sh. Scratch database only.
@@ -288,7 +288,7 @@ try {
   const rp = await sheet({ from: "draw", mode: "person", teamId: String(team.Beta), userId: String(ids.Wes), leads: [incoming(8, { phone: `00${knownPhone.replace(/\D/g, "")}` }), incoming(9, { phone: "" })] });
   const kn = await Lead.collection.findOne({ _id: known });
   check("a number already here: the repeat rule, not a second lead", rp.body.data?.results?.[0]?.status === "repeat" && rp.body.data.results[0].leadId === String(known), rp.body);
-  check("…held by its team leader (Tina), counted, with the move's note", String(kn?.assignedTo) === String(ids.Tina) && kn?.repeatCount === 1 && kn?.notes?.some((x: { content: string }) => /Moved in from Draw CRM/.test(x.content)), kn);
+  check("…stays with Ann (since 2026-11-26), counted, with the move's note", String(kn?.assignedTo) === String(ids.Ann) && kn?.repeatCount === 1 && kn?.notes?.some((x: { content: string }) => /Moved in from Draw CRM/.test(x.content)), kn);
   check("no phone → that one invalid", rp.body.data?.results?.[1]?.status === "invalid", rp.body.data?.results?.[1]);
 
   section("Giving one back");

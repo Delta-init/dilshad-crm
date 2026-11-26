@@ -156,6 +156,8 @@ function repeatRowOf(row: SheetRow) {
     platform: row.platform?.trim() || null,
     campaign: row.campaign_name?.trim() || null,
     note: buildNote(row),
+    // When the enquiry was made: an old row sent late is not a repeat (2026-11-26).
+    madeAt: row.created_time ? new Date(row.created_time) : null,
   };
 }
 
@@ -211,11 +213,11 @@ export const syncSheetLead = async (
     if (existing) {
       const outcome = await holdRepeatLead(existing._id.toString(), repeatRowOf(row), superAdmin._id.toString());
       if (outcome.kind === "split") await leadService.autoAssignLeads([outcome.leadId]).catch(() => null);
-      else void announceRepeats([outcome]);
-      sendSuccess(res, "Lead already exists — came in again, with its team leader to verify", {
+      else if (outcome.kind === "held") void announceRepeats([outcome]);
+      sendSuccess(res, outcome.kind === "old" ? "Lead already exists — the same enquiry" : "Lead already exists — came in again", {
         leadId: existing._id.toString(),
         duplicate: true,
-        repeat: true,
+        repeat: outcome.kind !== "old",
         phone,
       });
       return;
@@ -384,7 +386,7 @@ export const syncSheetLeadsBatch = async (
         try {
           const outcome = await holdRepeatLead(exists._id.toString(), repeatRowOf(row), reporterId);
           if (outcome.kind === "split") repeatsToSplit.push(outcome.leadId);
-          else held.push(outcome);
+          else if (outcome.kind === "held") held.push(outcome);
         } catch (repeatErr) {
           console.error("[sheets] repeat not held:", repeatErr instanceof Error ? repeatErr.message : repeatErr);
         }

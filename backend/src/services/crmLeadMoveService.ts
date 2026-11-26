@@ -256,7 +256,7 @@ export async function receiveLeads(input: Incoming) {
       if (existing) {
         const outcome = await holdRepeatLead(existing._id.toString(), { name: l.name, source: l.source, platform: l.platform, campaign: l.campaign, note: header }, String(reporter._id));
         if (outcome.kind === "split") toSplit.push(outcome.leadId);
-        else held.push(outcome);
+        else if (outcome.kind === "held") held.push(outcome);
         const now = await Lead.findById(existing._id).populate("assignedTo", "name").select("assignedTo").lean();
         results.push({ index, status: "repeat", leadId: existing._id.toString(), holder: nameOf(now?.assignedTo) });
         continue;

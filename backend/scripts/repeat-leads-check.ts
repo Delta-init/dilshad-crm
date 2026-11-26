@@ -1,14 +1,12 @@
 /**
- * Checks repeat leads (the user, 2026-10-23), on a scratch database: a number the CRM already has, coming in again
- * from the sheet / Root sync, goes to its team leader first, who verifies it and gives it to the same person or
- * another in the same team (services/repeatLeadService.ts):
+ * Checks repeat leads, on a scratch database (services/repeatLeadService.ts). Since 2026-11-26 a number the CRM already
+ * has, coming in again, stays with whoever has it (the user: "remove" the team leader taking it to verify):
  *
- *   - no new lead; the old one counted, noted, held by its team's leader (a lost one Assigned again), they are told;
- *   - again while it waits: counted again, still one decision;
- *   - only that team's leaders (and Super Admins / the Sales Manager) see and give it — to someone in the team;
- *   - given out: theirs as a new lead, they are told; decided once;
- *   - already a client: stays with its owner, only verified; a team with no leader: a Super Admin holds it;
- *   - no owner and no team: through the split, not held; the batch sync the same.
+ *   - no new lead; the old one counted and noted, its owner, status and dates as they were (a lost one open again);
+ *     its owner is told;
+ *   - an old sheet row sent late (made before the CRM first had the lead): nothing at all;
+ *   - already a client: stays a client, its owner told; its owner has left, or nobody has it: through the split;
+ *   - one still waiting for its team leader from before: as it was (the Repeat leads page, given out once).
  *
  * Run by repeat-leads-check.sh. Scratch database only.
  */
@@ -118,85 +116,105 @@ const get = async (id: Types.ObjectId) => (await Lead.findById(id).lean()) as Re
 const notices = async (who: string, type: string) => db.collection("notifications").countDocuments({ user: ids[who], type });
 const settle = () => new Promise((r) => setTimeout(r, 300));
 
-section("A number already with Ann (Alpha) comes in again");
+section("A number already with Ann (Alpha) comes in again — it stays hers");
 const l1 = await lead("Ann", "Alpha");
 const leadsBefore = await Lead.countDocuments();
-let r = await api<Record<string, unknown>>("POST", "/sheets/sync", null, row("+971501000001"));
+const NOW = () => new Date().toISOString();
+let r = await api<Record<string, unknown>>("POST", "/sheets/sync", null, row("+971501000001", { created_time: NOW() }));
 await settle();
 let d = await get(l1);
 check("answered as a duplicate and a repeat; no new lead", r.status === 200 && r.body.data?.duplicate === true && r.body.data?.repeat === true && (await Lead.countDocuments()) === leadsBefore, r.body);
-check("now with Tina, its team leader, Assigned, waiting — Ann noted as who had it", String(d.assignedTo) === String(ids.Tina) && d.status === "assigned" && d.repeat?.waiting === true && String(d.repeat?.previousOwner) === String(ids.Ann) && d.repeat?.previousStatus === "followup", d.repeat);
-check("counted once, a note of the campaign, the activity logged", d.repeatCount === 1 && /Came in again \(meta · fb · Oct Forex\)/.test(d.notes.at(-1)?.content ?? "") && d.activityLogs.some((a: any) => a.action === "repeat_enquiry"), { count: d.repeatCount, note: d.notes.at(-1)?.content });
-check("Tina told to verify it; Ann isn't", (await notices("Tina", "repeat_lead")) === 1 && (await notices("Ann", "repeat_lead")) === 0);
-check("a fresh lead for Tina: its created date is now, the first one kept", new Date(d.createdAt).getTime() > OLD.getTime() && new Date(d.originalCreatedAt).getTime() === OLD.getTime());
-
-r = await api("POST", "/sheets/sync", null, row("+971501000001", { campaign_name: "Nov Forex" }));
+check("still Ann's, still follow-up, its dates as they were — no team leader in between", String(d.assignedTo) === String(ids.Ann) && d.status === "followup" && new Date(d.createdAt).getTime() === OLD.getTime() && d.repeat?.waiting === false && String(d.repeat?.holder) === String(ids.Ann), { assignedTo: d.assignedTo, status: d.status, createdAt: d.createdAt, repeat: d.repeat });
+check("counted once, a note of the campaign, the activity says it stays with Ann", d.repeatCount === 1 && /Came in again \(meta · fb · Oct Forex\)/.test(d.notes.at(-1)?.content ?? "") && d.activityLogs.some((a: any) => a.action === "repeat_enquiry" && /stays with Ann/.test(a.description)), { count: d.repeatCount, note: d.notes.at(-1)?.content, log: d.activityLogs.at(-1) });
+check("Ann told her lead came in again; Tina isn't", (await notices("Ann", "repeat_lead")) === 1 && (await notices("Tina", "repeat_lead")) === 0);
+check("…pointing at the lead", (await db.collection("notifications").findOne({ user: ids.Ann, type: "repeat_lead" }))?.url === `/leads/${l1}`);
+check("not on anyone's Repeat leads list", !(await api<List>("GET", "/leads/repeats", "Tina")).body.data.leads.some((x) => x.id === String(l1)));
+r = await api("POST", "/sheets/sync", null, row("+971501000001", { campaign_name: "Nov Forex", created_time: NOW() }));
 await settle();
 d = await get(l1);
-check("in again while it waits: counted twice, still Tina's, still Ann as the one before", d.repeatCount === 2 && String(d.assignedTo) === String(ids.Tina) && d.repeat?.waiting === true && String(d.repeat?.previousOwner) === String(ids.Ann) && d.repeat?.campaign === "Nov Forex", d.repeat);
+check("in again: counted twice, still Ann's", d.repeatCount === 2 && String(d.assignedTo) === String(ids.Ann) && d.repeat?.campaign === "Nov Forex", d.repeat);
 
-section("Who sees it");
-type List = { scope: string; teams: Array<{ name: string; people: Array<{ id: string; name: string }> }>; leads: Array<{ id: string; repeatCount: number; repeat: { previousOwner: { name: string } | null; alreadyClient: boolean } }> };
-let list = await api<List>("GET", "/leads/repeats", "Tina");
-check("Tina: hers to verify, Ann as who had it, her team's people to give it to", list.status === 200 && list.body.data.leads.some((x) => x.id === String(l1) && x.repeat.previousOwner?.name === "Ann" && x.repeatCount === 2) && list.body.data.teams.find((t) => t.name === "Alpha")?.people.map((p) => p.name).join() === "Ann,Ben,Tina", list.body.data);
-check("Ann (not a leader): not hers to see", (await api("GET", "/leads/repeats", "Ann")).status === 403);
-check("Vic (leads another team): sees none of Alpha's", (await api<List>("GET", "/leads/repeats", "Vic")).body.data?.leads.length === 0);
-check("the counts: Tina 1, Ann none (no menu item)", (await api<{ count: number | null }>("GET", "/leads/repeats/count", "Tina")).body.data?.count === 1 && (await api<{ count: number | null }>("GET", "/leads/repeats/count", "Ann")).body.data?.count === null);
-
-section("Tina verifies and gives it out");
-check("not to someone in another team", (await api("POST", `/leads/${l1}/repeat/give`, "Tina", { userId: String(ids.Wes) })).status === 400);
-check("Ann can't give it out", (await api("POST", `/leads/${l1}/repeat/give`, "Ann", { userId: String(ids.Ann) })).status === 403);
-check("Vic can't either", (await api("POST", `/leads/${l1}/repeat/give`, "Vic", { userId: String(ids.Ben) })).status === 403);
-r = await api("POST", `/leads/${l1}/repeat/give`, "Tina", { userId: String(ids.Ben) });
+section("An old row sent late (2026-11-26) — the same enquiry, not a repeat");
+const l7 = await lead("Ann", "Alpha", { status: "not_connected" });
+r = await api<Record<string, unknown>>("POST", "/sheets/sync", null, row("+971501000002", { created_time: new Date(OLD.getTime() - 86_400_000).toISOString() }));
 await settle();
-d = await get(l1);
-check("given to Ben (same team): his, Assigned, decided by Tina", r.status === 200 && String(d.assignedTo) === String(ids.Ben) && d.status === "assigned" && d.repeat?.waiting === false && String(d.repeat?.decidedBy) === String(ids.Tina) && String(d.repeat?.givenTo) === String(ids.Ben), { status: r.status, body: r.body, repeat: d.repeat });
-check("…logged, and Ben told it's his", d.activityLogs.some((a: any) => a.action === "repeat_verified" && /given to Ben/.test(a.description)) && (await notices("Ben", "lead_assigned")) === 1);
-check("decided once only", (await api("POST", `/leads/${l1}/repeat/give`, "Tina", { userId: String(ids.Ann) })).status === 409);
-check("no longer waiting in Tina's list", !(await api<List>("GET", "/leads/repeats", "Tina")).body.data.leads.some((x) => x.id === String(l1)) && (await api<List>("GET", "/leads/repeats?state=done", "Tina")).body.data.leads.some((x) => x.id === String(l1)));
+d = await get(l7);
+check("answered as a duplicate, not a repeat", r.body.data?.duplicate === true && r.body.data?.repeat === false, r.body);
+check("nothing changed: Ann's, not connected, not counted, no note, nobody told", String(d.assignedTo) === String(ids.Ann) && d.status === "not_connected" && !d.repeatCount && !d.notes.length && !d.repeat && (await notices("Ann", "repeat_lead")) === 2, d);
+const l8 = await lead("Ann", "Alpha", { createdAt: new Date("2026-10-20T08:00:00Z"), originalCreatedAt: OLD });
+r = await api<{ results: { status: string }[] }>("POST", "/sheets/sync/batch", null, { rows: [row("+971501000003", { created_time: "2026-09-15T08:00:00Z" })] });
+await settle();
+d = await get(l8);
+check("handed over since (created date moved) — but made after it was first here: a repeat", d.repeatCount === 1 && String(d.assignedTo) === String(ids.Ann), d.repeat);
+const l9 = await lead("Ann", "Alpha");
+await api("POST", "/sheets/sync/batch", null, { rows: [row("+971501000004", { created_time: "2026-08-01T08:00:00Z" })] });
+d = await get(l9);
+check("…through the batch, an older one: nothing", !d.repeatCount && !d.repeat, d.repeat);
+const l10 = await lead("Ann", "Alpha");
+await api("POST", "/sheets/sync", null, row("+971501000005"));
+d = await get(l10);
+check("no time on the row: a repeat, as before", d.repeatCount === 1, d.repeat);
 
-section("A lost one, through the batch sync, given back to the same person");
+section("A lost one through the batch sync");
 const l2 = await lead("Ben", "Alpha", { status: "lost", lostReason: "not_interested" });
-r = await api<{ summary: { duplicate: number; created: number } }>("POST", "/sheets/sync/batch", null, { rows: [row("+971501000002"), row("+971509999999", { full_name: "Brand New" })] });
+r = await api<{ summary: { duplicate: number; created: number } }>("POST", "/sheets/sync/batch", null, { rows: [row("+971501000006", { created_time: NOW() }), row("+971509999999", { full_name: "Brand New" })] });
 await settle();
 d = await get(l2);
 check("the batch: one new lead, one repeat", r.body.data?.summary?.duplicate === 1 && r.body.data?.summary?.created === 1, r.body.data?.summary);
-check("the lost lead is Assigned again, with Tina to verify", d.status === "assigned" && String(d.assignedTo) === String(ids.Tina) && d.repeat?.waiting === true && d.repeat?.previousStatus === "lost", { status: d.status, repeat: d.repeat });
-r = await api("POST", `/leads/${l2}/repeat/give`, "Tina", { userId: String(ids.Ben) });
-d = await get(l2);
-check("given back to Ben — the same person", r.status === 200 && String(d.assignedTo) === String(ids.Ben) && d.activityLogs.some((a: any) => /given back to Ben/.test(a.description ?? "")), d.activityLogs.map((a: any) => a.description));
+check("still Ben's, open again (Assigned), Ben told", d.status === "assigned" && String(d.assignedTo) === String(ids.Ben) && d.repeat?.waiting === false && d.repeat?.previousStatus === "lost" && (await notices("Ben", "repeat_lead")) === 1, { status: d.status, repeat: d.repeat });
 
 section("Already a client");
 const l3 = await lead("Ann", "Alpha", { status: "closed" });
-await api("POST", "/sheets/sync", null, row("+971501000003"));
+await api("POST", "/sheets/sync", null, row("+971501000007", { created_time: NOW() }));
+await settle();
 d = await get(l3);
-check("stays Ann's and closed, waiting for Tina to verify", String(d.assignedTo) === String(ids.Ann) && d.status === "closed" && d.repeat?.waiting === true && d.repeat?.alreadyClient === true, { status: d.status, repeat: d.repeat });
-check("can't be given to someone else", (await api("POST", `/leads/${l3}/repeat/give`, "Tina", { userId: String(ids.Ben) })).status === 400);
-r = await api("POST", `/leads/${l3}/repeat/give`, "Tina", { userId: String(ids.Ann) });
-d = await get(l3);
-check("verified with Ann: still hers, still closed", r.status === 200 && String(d.assignedTo) === String(ids.Ann) && d.status === "closed" && d.repeat?.waiting === false);
+check("stays Ann's and closed; Ann told her client came in again", String(d.assignedTo) === String(ids.Ann) && d.status === "closed" && d.repeat?.waiting === false && d.repeat?.alreadyClient === true && (await db.collection("notifications").findOne({ user: ids.Ann, type: "repeat_lead", title: "Your client came in again" })) !== null, { status: d.status, repeat: d.repeat });
 
-section("A team with no leader, and a leader's own lead");
+section("A leader's own lead, a team with no leader, someone who has left");
+const l5 = await lead("Tina", "Alpha");
+await api("POST", "/sheets/sync", null, row("+971501000008", { created_time: NOW() }));
+d = await get(l5);
+check("Tina's own lead stays hers", String(d.assignedTo) === String(ids.Tina) && d.repeat?.waiting === false);
 const l4 = await lead("Wes", "Beta");
-await api("POST", "/sheets/sync", null, row("+971501000004"));
+await api("POST", "/sheets/sync", null, row("+971501000009", { created_time: NOW() }));
 await settle();
 d = await get(l4);
-check("Beta has no leader: a Super Admin holds it and is told", String(d.assignedTo) === String(ids.Admin) && d.repeat?.waiting === true && (await notices("Admin", "repeat_lead")) >= 1, d.repeat);
-check("Tina doesn't see it", !(await api<List>("GET", "/leads/repeats", "Tina")).body.data.leads.some((x) => x.id === String(l4)));
-r = await api("POST", `/leads/${l4}/repeat/give`, "Sam", { userId: String(ids.Wes) });
-d = await get(l4);
-check("the Sales Manager gives it back to Wes", r.status === 200 && String(d.assignedTo) === String(ids.Wes) && d.repeat?.waiting === false, r.body);
-const l5 = await lead("Tina", "Alpha");
-await api("POST", "/sheets/sync", null, row("+971501000005"));
-d = await get(l5);
-check("Tina's own lead stays with her, waiting for her to verify", String(d.assignedTo) === String(ids.Tina) && d.repeat?.waiting === true && String(d.repeat?.previousOwner) === String(ids.Tina));
+check("Beta has no leader: still Wes's, Wes told", String(d.assignedTo) === String(ids.Wes) && (await notices("Wes", "repeat_lead")) === 1, d.repeat);
+const l11 = await lead("Wes", "Beta");
+await db.collection("users").updateOne({ _id: ids.Wes }, { $set: { status: "inactive" } });
+await api("POST", "/sheets/sync", null, row("+971501000010", { created_time: NOW() }));
+await settle();
+d = await get(l11);
+check("its owner has left: through the split, not held", d.repeatCount === 1 && d.activityLogs.some((a: any) => /nobody active has it/.test(a.description ?? "")) && d.repeat == null, d.activityLogs.map((a: any) => a.description));
+await db.collection("users").updateOne({ _id: ids.Wes }, { $set: { status: "active" } });
 
 section("No owner and no team");
 const l6 = await lead(null, null, { status: "new" });
-r = await api("POST", "/sheets/sync", null, row("+971501000006"));
+r = await api("POST", "/sheets/sync", null, row("+971501000011", { created_time: NOW() }));
 await settle();
 d = await get(l6);
-check("not held — counted, and it goes through the split like a new lead", r.body.data && (d.repeat == null || d.repeat.waiting !== true) && d.repeatCount === 1 && d.activityLogs.some((a: any) => /goes through the split/.test(a.description ?? "")), { repeat: d.repeat, team: d.team, assignedTo: d.assignedTo });
+check("not held — counted, and it goes through the split like a new lead", r.body.data && (d.repeat == null || d.repeat.waiting !== true) && d.repeatCount === 1 && d.activityLogs.some((a: any) => /split/.test(a.description ?? "")), { repeat: d.repeat, team: d.team, assignedTo: d.assignedTo });
+
+section("Added by hand: told who has it");
+const l12 = await lead("Ben", "Alpha");
+r = await api("POST", "/leads", "Admin", { name: "Typed Again", phone: "+971501000012", source: "walk_in" });
+check("refused (409), saying it stays with Ben", r.status === 409 && /stays with Ben/.test(r.body.message ?? ""), r.body);
+
+section("One still waiting for its team leader from before (the Repeat leads page)");
+const lw = await lead("Tina", "Alpha", { status: "assigned", repeatCount: 1, repeat: { waiting: true, at: new Date(), team: team.Alpha, previousOwner: ids.Ann, previousStatus: "followup", alreadyClient: false, holder: ids.Tina, source: "meta", campaign: "Oct Forex", decidedBy: null, decidedAt: null, givenTo: null } });
+const tinaBefore = await notices("Tina", "repeat_lead");
+await api("POST", "/sheets/sync", null, row("+971501000013", { created_time: NOW() }));
+await settle();
+d = await get(lw);
+check("in again while it waits: counted, still Tina's, still waiting, Tina told", d.repeatCount === 2 && String(d.assignedTo) === String(ids.Tina) && d.repeat?.waiting === true && (await notices("Tina", "repeat_lead")) === tinaBefore + 1, { count: d.repeatCount, to: d.assignedTo, tina: await notices("Tina", "repeat_lead") });
+type List = { scope: string; teams: Array<{ name: string; people: Array<{ id: string; name: string }> }>; leads: Array<{ id: string; repeatCount: number; repeat: { previousOwner: { name: string } | null; alreadyClient: boolean } }> };
+const list = await api<List>("GET", "/leads/repeats", "Tina");
+check("Tina: hers to verify, Ann as who had it", list.status === 200 && list.body.data.leads.some((x) => x.id === String(lw) && x.repeat.previousOwner?.name === "Ann"), list.body.data);
+check("Ann (not a leader): not hers to see", (await api("GET", "/leads/repeats", "Ann")).status === 403);
+check("not to someone in another team", (await api("POST", `/leads/${lw}/repeat/give`, "Tina", { userId: String(ids.Wes) })).status === 400);
+r = await api("POST", `/leads/${lw}/repeat/give`, "Tina", { userId: String(ids.Ann) });
+d = await get(lw);
+check("given back to Ann: hers, decided by Tina, once", r.status === 200 && String(d.assignedTo) === String(ids.Ann) && d.repeat?.waiting === false && (await api("POST", `/leads/${lw}/repeat/give`, "Tina", { userId: String(ids.Ben) })).status === 409, r.body);
 
 server.close();
 await mongoose.disconnect();

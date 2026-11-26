@@ -195,7 +195,7 @@ export const uploadLeads = async (
     for (const r of repeatsFound) {
       try {
         const out = await holdRepeatLead(r.leadId, { name: r.name, source: r.source ?? null, note: `In an upload (row ${r.row})` }, reporterId);
-        if (out.kind === "held") heldInUpload.push(out); else repeatsToSplit.push(out.leadId);
+        if (out.kind === "held") heldInUpload.push(out); else if (out.kind === "split") repeatsToSplit.push(out.leadId);
         repeatDetails.push({ row: r.row, phone: r.phone, leadId: r.leadId, outcome: out.kind, message: repeatMessage(out) });
       } catch (err) {
         console.error("[upload] repeat not held:", err instanceof Error ? err.message : err);
@@ -752,7 +752,7 @@ export const createLead = async (
     if (existing) {
       const out = await holdRepeatLead(String(existing._id), { name: data.name, source: data.source ?? null, note: "Added again by hand" }, req.user!.userId);
       if (out.kind === "held") void announceRepeats([out]);
-      else await leadService.autoAssignLeads([out.leadId]).catch(() => null);
+      else if (out.kind === "split") await leadService.autoAssignLeads([out.leadId]).catch(() => null);
       sendError(res, repeatMessage(out), 409, { leadId: [out.leadId], outcome: [out.kind] });
       return;
     }

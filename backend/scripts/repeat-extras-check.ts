@@ -1,11 +1,11 @@
 /**
  * Repeat leads, the rest of the doors (the user, 2026-10-23: "2" — keep the team leader's Repeat leads, and add):
  *   Case 1  happy path   the sheet matches a number on its last 9 digits ("+971 50 …", "0501…", "00971…" are one
- *                        person): held for the team leader, never a second lead; Root's batch the same
- *   Case 2  edge         an Excel upload: a known number held for its team leader (not refused), a new one created;
+ *                        person): stays with its owner (since 2026-11-26), never a second lead; Root's batch the same
+ *   Case 2  edge         an Excel upload: a known number stays with its owner (not refused), a new one created;
  *                        a known number with no owner or team split again; a short number matches only itself; two
  *                        copies of a number — the one marked "repeated" is the last choice
- *   Case 3  errors       adding a known number by hand: 409 saying it went to the team leader, no second lead
+ *   Case 3  errors       adding a known number by hand: 409 saying who has it, no second lead
  *   Case 4  permission   the sheet without its key: 401
  *
  * Run by repeat-extras-check.sh. Scratch database only.
@@ -73,7 +73,8 @@ async function lead(o: Record<string, unknown> = {}) {
 }
 const read = async (id: Types.ObjectId) => (await Lead.collection.findOne({ _id: id }))!;
 const leadsWith = async (tail: string) => (await Lead.collection.find({}).toArray()).filter((l) => String(l.phone).replace(/\D/g, "").endsWith(tail));
-const heldByTara = async (id: Types.ObjectId) => { const l = await read(id); return String(l.assignedTo) === String(tara) && l.repeat?.waiting === true && (l.repeatCount ?? 0) >= 1; };
+// Since 2026-11-26 a known number stays with whoever has it (no team leader in between), counted and noted.
+const keptByOwner = async (id: Types.ObjectId, owner: unknown) => { const l = await read(id); return String(l.assignedTo) === String(owner) && l.repeat?.waiting === false && (l.repeatCount ?? 0) >= 1; };
 
 const app = express();
 app.use(express.json());
@@ -99,7 +100,7 @@ section("Case 1 — the sheet: the same number typed another way");
   const id = await lead({ phone: "+971 50 123 4567" });
   const r = await sheet({ full_name: "Asha again", phone_number: "p:0501234567", platform: "ig" });
   check("answered as a duplicate with the existing lead's id (Root's counts hold)", r.status === 200 && r.body.data?.duplicate === true && r.body.data?.leadId === String(id), r.body);
-  check("…held for the team leader (Tara), counted", await heldByTara(id), await read(id));
+  check("…stays with Ann, counted", await keptByOwner(id, ann), await read(id));
   check("…no second lead for that number", (await leadsWith("501234567")).length === 1);
 }
 {
@@ -111,7 +112,7 @@ section("Case 1 — the sheet: the same number typed another way");
   const res = r.body.data?.results ?? [];
   check("Root's batch: the known number (00971…) a duplicate of its lead, the new one created", r.status === 201
     && res[0]?.status === "duplicate" && res[0]?.leadId === String(id) && res[1]?.status === "created", res);
-  check("…and held for Tara", await heldByTara(id));
+  check("…and stays with Ben", await keptByOwner(id, ben));
 }
 
 section("Case 2 — an upload, short numbers, copies");
@@ -125,8 +126,8 @@ section("Case 2 — an upload, short numbers, copies");
   const d = r.body.data ?? {};
   const det = (d.repeatDetails ?? []) as Json[];
   check("the new row created; the two known ones came in again — not refused as invalid", r.status === 201 && d.created === 1 && d.cameAgain === 2 && d.invalid === 0, d);
-  check("…the known one held for Tara, the upload says so", await heldByTara(known)
-    && /sent to the team leader to verify/.test(det.find((x) => x.leadId === String(known))?.message ?? ""), det);
+  check("…the known one stays with Ann, the upload says so", await keptByOwner(known, ann)
+    && /stays with Ann/.test(det.find((x) => x.leadId === String(known))?.message ?? ""), det);
   check("…the one nobody held: split again, the upload says so", det.find((x) => x.leadId === String(orphan))?.outcome === "split"
     && /split again/.test(det.find((x) => x.leadId === String(orphan))?.message ?? ""), det);
   check("…no second lead for either", (await leadsWith("502220006")).length === 1 && (await leadsWith("502220016")).length === 1);
@@ -148,8 +149,8 @@ section("Case 3 — adding a known number by hand");
 {
   const known = await lead({ phone: "+971502220007" });
   const r = await call("POST", "/leads", { name: "Typed again", phone: "050 222 0007", source: "WALK-IN" }, { authorization: `Bearer ${BEN}` });
-  check("409, saying it went to the team leader", r.status === 409 && /team leader/.test(r.body.message ?? ""), r);
-  check("…no second lead; held for Tara", (await leadsWith("502220007")).length === 1 && await heldByTara(known));
+  check("409, saying who has it", r.status === 409 && /stays with Ann/.test(r.body.message ?? ""), r);
+  check("…no second lead; still Ann's", (await leadsWith("502220007")).length === 1 && await keptByOwner(known, ann));
   const fresh = await call("POST", "/leads", { name: "Brand new by hand", phone: "+971509990003", source: "WALK-IN" }, { authorization: `Bearer ${BEN}` });
   check("a new number by hand: created as before", fresh.status === 201, fresh.status);
 }

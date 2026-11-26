@@ -34,11 +34,29 @@ export interface RepeatRow {
   campaign?: string | null;
   /** What came with it (the sheet's columns), kept as a note on the lead. */
   note?: string;
+  /**
+   * When the enquiry itself was made (a sheet row's created time). Made before this CRM first had the lead, it is that
+   * same enquiry arriving late — not a repeat (2026-11-26: a sheet sent 3-day-old rows; they were taken from their
+   * owners). Unknown (uploads, by hand): a repeat.
+   */
+  madeAt?: Date | string | null;
 }
 
 export type RepeatOutcome =
-  | { kind: "held"; leadId: string; leadName: string; tell: string[]; alreadyClient: boolean; previousOwnerName: string }
-  | { kind: "split"; leadId: string };
+  /** Noted on the lead, which stays where it is; `tell` are told (its owner — or, for one still waiting from before
+   *  2026-11-26, its team leaders). */
+  | { kind: "held"; leadId: string; leadName: string; tell: string[]; alreadyClient: boolean; previousOwnerName: string; stays: boolean }
+  /** Nobody active has it: through the split. */
+  | { kind: "split"; leadId: string }
+  /** The same enquiry, arriving late: nothing changed. */
+  | { kind: "old"; leadId: string };
+
+/** When this CRM first had the lead: its first created date (a hand-over moves createdAt), or its first line. */
+function firstSeen(lead: { createdAt?: Date; originalCreatedAt?: Date | null; activityLogs?: { createdAt?: Date }[] }): number {
+  const times = [lead.originalCreatedAt, lead.createdAt, lead.activityLogs?.[0]?.createdAt]
+    .map((d) => (d ? new Date(d).getTime() : NaN)).filter((n) => Number.isFinite(n));
+  return times.length ? Math.min(...times) : NaN;
+}
 
 const oid = (v: string) => new Types.ObjectId(v);
 
@@ -74,67 +92,64 @@ async function teamOfLead(lead: { team?: unknown; assignedTo?: unknown }) {
 export async function holdRepeatLead(leadId: string, row: RepeatRow, reporterId: string): Promise<RepeatOutcome> {
   const lead = await Lead.findById(leadId);
   if (!lead) throw Object.assign(new Error("Lead not found"), { statusCode: 404 });
+  const doc = lead as unknown as Record<string, any>;
+  // The same enquiry, only arriving now (a sheet sending old rows): nothing to do.
+  const made = row.madeAt ? new Date(row.madeAt).getTime() : NaN;
+  const first = firstSeen(doc);
+  if (Number.isFinite(made) && Number.isFinite(first) && made <= first) return { kind: "old", leadId };
+
   const now = new Date();
   const where = [row.source, row.platform, row.campaign].filter(Boolean).join(" · ");
-  const doc = lead as unknown as Record<string, any>;
   doc.repeatCount = (Number(doc.repeatCount) || 0) + 1;
   lead.notes.push({ content: `Came in again${where ? ` (${where})` : ""} — ${now.toISOString().slice(0, 10)}${row.note ? `\n${row.note}` : ""}`.slice(0, 2000), author: oid(reporterId), createdAt: now, updatedAt: now } as never);
 
   const ownerId = idOf(lead.assignedTo);
+  const owner = Types.ObjectId.isValid(ownerId)
+    ? await User.findOne({ _id: oid(ownerId), status: { $ne: "inactive" } }).select("name").lean<{ _id: Types.ObjectId; name?: string }>()
+    : null;
   const team = await teamOfLead(lead);
-  if (!Types.ObjectId.isValid(ownerId) && !team) {
-    lead.activityLogs.push({ action: "repeat_enquiry", description: `Came in again${where ? ` (${where})` : ""} — no owner or team, so it goes through the split`, performedBy: oid(reporterId), createdAt: now } as never);
-    await lead.save();
-    return { kind: "split", leadId };
-  }
-
-  const leaders = await activeLeaders(team);
-  const tell = leaders.length ? leaders : await superAdminIds();
-  const alreadyWaiting = doc.repeat?.waiting === true;
   const alreadyClient = lead.status === "closed" || !!(await Student.exists({ leadId: lead._id }));
-  const previousOwner = alreadyWaiting ? idOf(doc.repeat.previousOwner) : ownerId;
-  const previousOwnerName = Types.ObjectId.isValid(previousOwner)
-    ? String((await User.findById(previousOwner).select("name").lean<{ name?: string }>())?.name ?? "")
-    : "";
 
-  if (alreadyWaiting) {
+  // Still waiting for its team leader from before 2026-11-26: as it was — noted, the leaders told again.
+  if (doc.repeat?.waiting === true) {
     doc.repeat.at = now;
     doc.repeat.source = row.source ?? row.platform ?? null;
     doc.repeat.campaign = row.campaign ?? null;
     lead.markModified("repeat");
     lead.activityLogs.push({ action: "repeat_enquiry", description: `Came in again${where ? ` (${where})` : ""} — still waiting for the team leader`, performedBy: oid(reporterId), createdAt: now } as never);
-  } else {
-    // A leader holds it — the previous owner themselves when they lead the team; else the team's first leader.
-    const holder = alreadyClient ? ownerId : leaders.includes(ownerId) ? ownerId : (leaders[0] ?? tell[0] ?? null);
-    doc.repeat = {
-      waiting: true, at: now, team: team?._id ?? null,
-      previousOwner: Types.ObjectId.isValid(previousOwner) ? oid(previousOwner) : null, previousStatus: lead.status,
-      alreadyClient, holder: holder && Types.ObjectId.isValid(holder) ? oid(holder) : null,
-      source: row.source ?? row.platform ?? null, campaign: row.campaign ?? null,
-      decidedBy: null, decidedAt: null, givenTo: null,
-    };
-    if (!alreadyClient && holder && holder !== ownerId) {
-      // A fresh enquiry: Assigned again (a lost lead too), with the leader until they verify it.
-      lead.status = "assigned";
-      doc.assignedTo = oid(holder);
-      doc.assignedAt = now;
-    } else if (!alreadyClient && lead.status !== "assigned") {
-      lead.status = "assigned";
-    }
-    if (team && !idOf(lead.team)) doc.team = team._id;
-    const holderName = holder && holder !== ownerId ? String((await User.findById(holder).select("name").lean<{ name?: string }>())?.name ?? "the team leader") : "";
-    lead.activityLogs.push({
-      action: "repeat_enquiry",
-      description: (alreadyClient
-        ? `Came in again${where ? ` (${where})` : ""} — already a client; waiting for the team leader to verify`
-        : `Came in again${where ? ` (${where})` : ""} — ${holderName ? `with ${holderName} (team leader)` : "with the team leader"} to verify${previousOwnerName ? `; was with ${previousOwnerName}` : ""}`).slice(0, 500),
-      performedBy: oid(reporterId),
-      changes: { assignedTo: { from: ownerId || null, to: idOf(lead.assignedTo) || null } },
-      createdAt: now,
-    } as never);
+    await lead.save();
+    const leaders = await activeLeaders(team);
+    const prev = idOf(doc.repeat.previousOwner);
+    const prevName = Types.ObjectId.isValid(prev) ? String((await User.findById(prev).select("name").lean<{ name?: string }>())?.name ?? "") : "";
+    return { kind: "held", leadId, leadName: lead.name, tell: leaders.length ? leaders : await superAdminIds(), alreadyClient, previousOwnerName: prevName, stays: false };
   }
+
+  // Nobody active has it (no owner, or they've left): through the split, as a lead nobody has.
+  if (!owner) {
+    lead.activityLogs.push({ action: "repeat_enquiry", description: `Came in again${where ? ` (${where})` : ""} — nobody active has it, so it goes through the split`, performedBy: oid(reporterId), createdAt: now } as never);
+    await lead.save();
+    return { kind: "split", leadId };
+  }
+
+  // It stays with whoever has it, as it is (the user, 2026-11-26: "remove" the team leader taking it to verify) — they
+  // are told it came in again. A lost lead is open again (Assigned); a client stays a client.
+  const previousStatus = lead.status;
+  doc.repeat = {
+    waiting: false, at: now, team: team?._id ?? null,
+    previousOwner: owner._id, previousStatus, alreadyClient, holder: owner._id,
+    source: row.source ?? row.platform ?? null, campaign: row.campaign ?? null,
+    decidedBy: null, decidedAt: now, givenTo: owner._id,
+  };
+  if (lead.status === "lost") lead.status = "assigned";
+  if (team && !idOf(lead.team)) doc.team = team._id;
+  lead.activityLogs.push({
+    action: "repeat_enquiry",
+    description: `Came in again${where ? ` (${where})` : ""} — stays with ${owner.name ?? "its owner"}${alreadyClient ? " (already a client)" : previousStatus === "lost" ? " (was lost: open again)" : ""}`.slice(0, 500),
+    performedBy: oid(reporterId),
+    createdAt: now,
+  } as never);
   await lead.save();
-  return { kind: "held", leadId, leadName: lead.name, tell, alreadyClient, previousOwnerName };
+  return { kind: "held", leadId, leadName: lead.name, tell: [String(owner._id)], alreadyClient, previousOwnerName: owner.name ?? "", stays: true };
 }
 
 /** Tells the leaders about the repeats just held — one notice per person, however many. */
@@ -148,9 +163,11 @@ export async function announceRepeats(held: Array<Extract<RepeatOutcome, { kind:
         await notify({
           userIds: [userId],
           type: "repeat_lead",
-          title: h.alreadyClient ? "Repeat lead — already a client" : "Repeat lead to verify",
-          body: `${h.leadName || "A lead"} came in again${h.previousOwnerName ? ` — was with ${h.previousOwnerName}` : ""}. Verify it and give it out.`,
-          url: "/repeat-leads",
+          title: h.stays ? (h.alreadyClient ? "Your client came in again" : "Your lead came in again") : h.alreadyClient ? "Repeat lead — already a client" : "Repeat lead to verify",
+          body: h.stays
+            ? `${h.leadName || "A lead"} enquired again — it's still yours. Get back to them.`
+            : `${h.leadName || "A lead"} came in again${h.previousOwnerName ? ` — was with ${h.previousOwnerName}` : ""}. Verify it and give it out.`,
+          url: h.stays ? `/leads/${h.leadId}` : "/repeat-leads",
           tag: `repeat-lead-${h.leadId}`,
           data: { leadId: h.leadId },
         });
@@ -159,9 +176,9 @@ export async function announceRepeats(held: Array<Extract<RepeatOutcome, { kind:
       await notify({
         userIds: [userId],
         type: "repeat_lead",
-        title: `${list.length} repeat leads to verify`,
+        title: list.every((h) => h.stays) ? `${list.length} of your leads came in again` : `${list.length} repeat leads to verify`,
         body: list.slice(0, 3).map((h) => h.leadName || "A lead").join(", ") + (list.length > 3 ? ` and ${list.length - 3} more` : "") + " came in again.",
-        url: "/repeat-leads",
+        url: list.every((h) => h.stays) ? "/leads" : "/repeat-leads",
         tag: `repeat-leads-${userId}-${list[0].leadId}`,
         data: { count: list.length },
       });
@@ -351,6 +368,11 @@ export async function findLeadByPhone(raw: unknown): Promise<FoundLead | null> {
 /** A sentence for whoever brought a known number in by hand or in an upload. */
 export function repeatMessage(outcome: RepeatOutcome): string {
   if (outcome.kind === "split") return "Already in the CRM with nobody on it — split again as a new lead";
+  if (outcome.kind === "old") return "Already in the CRM — the same enquiry, nothing changed";
+  if (outcome.stays) {
+    const who = outcome.previousOwnerName || "its owner";
+    return outcome.alreadyClient ? `Already a client (with ${who}) — ${who} is told, not added twice` : `Already in the CRM (with ${who}) — stays with ${who}, who is told; not added twice`;
+  }
   const was = outcome.previousOwnerName ? ` (with ${outcome.previousOwnerName})` : "";
   return outcome.alreadyClient
     ? `Already a client${was} — their team leader is asked to verify it`
