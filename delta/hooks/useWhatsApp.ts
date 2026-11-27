@@ -61,7 +61,8 @@ export interface WATeamSettings {
   /** False: never set — everything off, the steps shown are the suggested ones. */
   saved: boolean;
   enabled: boolean; startedAt: string | null; dailyLimit: number; steps: WAFollowupStep[];
-  firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[] };
+  /** `skipWords`: a first message with one of these words or phrases gets no first reply (absent from an older server). */
+  firstReply: { enabled: boolean; startedAt: string | null; items: WAFirstReplyItem[]; skipWords?: string[] };
   /** The team's saved messages, in groups — sent by hand from a chat. */
   savedGroups: WASavedGroup[];
   /** Keyword replies (2026-11-08): a message with one of a rule's words gets its saved message a minute on. */
@@ -276,7 +277,7 @@ export function useTeamWhatsApp(teamId: string) {
 export function useSaveTeamWhatsApp() {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: async (v: { teamId: string; enabled: boolean; dailyLimit: number; steps: WAFollowupStep[]; firstReply: { enabled: boolean; items: WAFirstReplyItem[] }; savedGroups: WASavedGroup[];
+    mutationFn: async (v: { teamId: string; enabled: boolean; dailyLimit: number; steps: WAFollowupStep[]; firstReply: { enabled: boolean; items: WAFirstReplyItem[]; skipWords?: string[] }; savedGroups: WASavedGroup[];
       keywordReplies: { enabled: boolean; rules: WAKeywordRule[] } }) =>
       data<WATeamSettings>(await api.put(`/whatsapp/followups/team/${v.teamId}`, {
         enabled: v.enabled, dailyLimit: v.dailyLimit, steps: v.steps, firstReply: v.firstReply, savedGroups: v.savedGroups, keywordReplies: v.keywordReplies,

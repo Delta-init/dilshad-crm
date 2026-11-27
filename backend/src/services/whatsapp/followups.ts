@@ -80,7 +80,7 @@ export type SavedGroup = { id: string; name: string; items: SavedItem[] };
 export type KeywordRule = { id: string; keywords: string[]; reply: string; onceDays: number };
 const NOTHING = (team: string): TeamWa => ({
   team, enabled: false, startedAt: null, dailyLimit: DEFAULT_DAILY_LIMIT, steps: DEFAULT_STEPS,
-  firstReply: { enabled: false, startedAt: null, items: [] }, savedGroups: [], keywordReplies: { enabled: false, startedAt: null, rules: [] },
+  firstReply: { enabled: false, startedAt: null, items: [], skipWords: [] }, savedGroups: [], keywordReplies: { enabled: false, startedAt: null, rules: [] },
   updatedByName: "", updatedAt: null, saved: false,
 });
 
@@ -114,6 +114,7 @@ export async function allTeamWa(fresh = false): Promise<Map<string, TeamWa>> {
       enabled: d.firstReply?.enabled ?? false,
       startedAt: d.firstReply?.startedAt ?? null,
       items: (d.firstReply?.items ?? []).map((i) => ({ text: i.text ?? "", file: realFile(i.file ?? null), voice: i.voice === true })),
+      skipWords: d.firstReply?.skipWords ?? [],
     },
     savedGroups: (d.savedGroups ?? []).map((g) => ({
       id: String(g._id), name: g.name,
@@ -182,7 +183,35 @@ function parseFirstReply(fr: Record<string, unknown>, before: FirstReply): First
   });
   const on = fr.enabled === true;
   if (on && !items.length) throw new FollowupError("Add what the first reply sends, or switch it off");
-  return { enabled: on, items, startedAt: on && !before.enabled ? new Date() : on ? before.startedAt : null };
+  return { enabled: on, items, startedAt: on && !before.enabled ? new Date() : on ? before.startedAt : null, skipWords: parseSkipWords(fr.skipWords, before.skipWords ?? []) };
+}
+
+/**
+ * The words that stop the first reply, checked (2026-11-27: "if they sent a message with a specific message it will
+ * never send our initial message"): up to 50 words or phrases of 2 to 60 characters, lower-cased, each once. Not sent
+ * at all — a screen from before there were any — keeps the ones there are.
+ */
+function parseSkipWords(raw: unknown, before: string[]): string[] {
+  if (raw === undefined) return before;
+  const words = [...new Set((Array.isArray(raw) ? raw : []).map((k) => String(k ?? "").trim().toLowerCase().replace(/\s+/g, " ")).filter(Boolean))];
+  if (words.length > 50) throw new FollowupError("At most 50 words or phrases stop the first reply");
+  const off = words.find((k) => k.length < 2 || k.length > 60);
+  if (off) throw new FollowupError(`"${off}" — a word or phrase that stops the first reply is 2 to 60 characters`);
+  return words;
+}
+
+/**
+ * Whether what somebody wrote has one of a team's skip words in it — a whole word or phrase, anywhere, case and
+ * punctuation aside, as a keyword reply is matched. The word found, or null.
+ */
+export function skipWordIn(texts: string[], words: string[] | undefined): string | null {
+  if (!words?.length) return null;
+  const rule = [{ id: "skip", keywords: words, reply: "", onceDays: 1 }];
+  for (const text of texts) {
+    const hit = text ? matchKeyword(text, rule) : null;
+    if (hit) return hit.keyword;
+  }
+  return null;
 }
 
 /**
@@ -549,6 +578,13 @@ export async function runFirstReplies(now = new Date(), gapMs = () => 3000 + Mat
       // Answered — not counting the phone's own instant automatic answer.
       const answered = await WhatsAppMessage.countDocuments({ owner: d.owner, key: d.key, direction: "out", at: { $gte: d.at }, ...notInstantPhone(d.at) });
       if (answered) { await close("answered"); return; }
+      // One of the team's skip words in what they have written so far (2026-11-27): no first reply for this chat, ever —
+      // closed like the others, so it is not looked at again, with the word that stopped it.
+      if (fr.skipWords?.length) {
+        const wrote = await WhatsAppMessage.find({ owner: d.owner, key: d.key, direction: "in", at: { $gte: d.at } }).sort({ at: 1 }).limit(20).select("body").lean<{ body?: string }[]>();
+        const word = skipWordIn(wrote.map((m) => m.body ?? ""), fr.skipWords);
+        if (word) { await col.updateOne({ _id: d._id as never }, { $set: { status: "skip_word", skipWord: word, decidedAt: now } }); skipped++; return; }
+      }
       // Not to a student, nor to a lead already closed, lost or a repeat (2026-10-30).
       if (await isStudentKey(d.key)) { await close("student"); return; }
       const leadNow = (await leadsByKey()).get(d.key);

@@ -37,8 +37,12 @@ export interface IWhatsAppFollowupSettings {
   teams: Types.ObjectId[];
   dailyLimit: number;
   steps: IFollowupStep[];
-  /** The automatic first reply (2026-10-28): to someone's first message ever, a minute on unless a person answered. */
-  firstReply: { enabled: boolean; startedAt: Date | null; items: IFirstReplyItem[] };
+  /**
+   * The automatic first reply (2026-10-28): to someone's first message ever, a minute on unless a person answered.
+   * `skipWords` (2026-11-27, a team's only): words or phrases that stop it — a first message with one of them gets no
+   * first reply at all.
+   */
+  firstReply: { enabled: boolean; startedAt: Date | null; items: IFirstReplyItem[]; skipWords?: string[] };
   /**
    * A team's own messages (2026-11-03: "different ads per team"): its own follow-up steps and first reply, with the first
    * reply's own switch. A team not here uses the ones above (the "Default").

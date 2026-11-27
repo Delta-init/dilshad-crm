@@ -41,23 +41,26 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
   const [steps, setSteps] = useState<WAFollowupStep[]>([]);
   const [frOn, setFrOn] = useState(false);
   const [frItems, setFrItems] = useState<WAFirstReplyItem[]>([]);
+  // Words that stop the first reply, as typed: one to a line, or with commas between.
+  const [frSkip, setFrSkip] = useState("");
   const [groups, setGroups] = useState<WASavedGroup[]>([]);
   const [kwOn, setKwOn] = useState(false);
   const [rules, setRules] = useState<WAKeywordRule[]>([]);
   const load = () => {
     if (!data) return;
     setEnabled(data.enabled); setLimit(data.dailyLimit); setSteps(data.steps);
-    setFrOn(data.firstReply.enabled); setFrItems(data.firstReply.items); setGroups(data.savedGroups ?? []);
+    setFrOn(data.firstReply.enabled); setFrItems(data.firstReply.items); setFrSkip((data.firstReply.skipWords ?? []).join("\n")); setGroups(data.savedGroups ?? []);
     setKwOn(data.keywordReplies?.enabled ?? false); setRules(data.keywordReplies?.rules ?? []);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [data]);
 
   // Changed since it was loaded: the save bar shows.
-  const dirty = useMemo(() => !!data && JSON.stringify({ enabled, limit, steps, frOn, frItems, groups, kwOn, rules })
-    !== JSON.stringify({ enabled: data.enabled, limit: data.dailyLimit, steps: data.steps, frOn: data.firstReply.enabled, frItems: data.firstReply.items, groups: data.savedGroups ?? [],
+  const skipWords = useMemo(() => Array.from(new Set(frSkip.split(/[\n,]/).map((w) => w.trim().toLowerCase().replace(/\s+/g, " ")).filter(Boolean))), [frSkip]);
+  const dirty = useMemo(() => !!data && JSON.stringify({ enabled, limit, steps, frOn, frItems, skipWords, groups, kwOn, rules })
+    !== JSON.stringify({ enabled: data.enabled, limit: data.dailyLimit, steps: data.steps, frOn: data.firstReply.enabled, frItems: data.firstReply.items, skipWords: data.firstReply.skipWords ?? [], groups: data.savedGroups ?? [],
       kwOn: data.keywordReplies?.enabled ?? false, rules: data.keywordReplies?.rules ?? [] }),
-  [data, enabled, limit, steps, frOn, frItems, groups, kwOn, rules]);
+  [data, enabled, limit, steps, frOn, frItems, skipWords, groups, kwOn, rules]);
 
   if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (isError || !data) return <p className="py-16 text-center text-sm text-muted-foreground">{errMsg(error, "Couldn't load this team's WhatsApp settings")}</p>;
@@ -65,10 +68,13 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
 
   const submit = async () => {
     if (frOn && !frItems.length) { toast.error("Add what the first reply sends, or switch it off"); return; }
+    const off = skipWords.find((w) => w.length < 2 || w.length > 60);
+    if (off) { toast.error(`"${off}" — a word that stops the first reply is 2 to 60 characters`); return; }
+    if (skipWords.length > 50) { toast.error("At most 50 words or phrases stop the first reply"); return; }
     try {
       if (groups.some((g) => !g.name.trim())) { toast.error("Give every saved-messages group a name"); return; }
       if (rules.some((x) => !x.keywords.length || !x.reply)) { toast.error("Each keyword reply needs a word and a saved message"); return; }
-      const r = await save.mutateAsync({ teamId, enabled, dailyLimit: limit, steps, firstReply: { enabled: frOn, items: frItems }, savedGroups: groups, keywordReplies: { enabled: kwOn, rules } });
+      const r = await save.mutateAsync({ teamId, enabled, dailyLimit: limit, steps, firstReply: { enabled: frOn, items: frItems, skipWords }, savedGroups: groups, keywordReplies: { enabled: kwOn, rules } });
       toast.success(`Saved — follow-ups ${r.enabled ? "on" : "off"}, first reply ${r.firstReply.enabled ? "on" : "off"} for ${data.team.name}`);
     } catch (e) { toast.error(errMsg(e, "Not saved")); }
   };
@@ -134,6 +140,33 @@ export function TeamWhatsAppTab({ teamId }: { teamId: string }) {
         <motion.div variants={listItemVariants} initial="hidden" animate="visible">
           <FirstReplyEditor id={`wa-fr-${teamId}`} on={frOn} setOn={setFrOn} items={frItems} setItems={setFrItems}
             help={`When someone messages the WhatsApp of someone in ${data.team.name} for the first time ever, these go out a minute later, in order — unless someone answered them first.`} />
+        </motion.div>
+        {/* Words that stop the first reply (2026-11-27) */}
+        <motion.div variants={listItemVariants} initial="hidden" animate="visible">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Don&apos;t send the first reply when they write</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Label htmlFor={`wa-fr-skip-${teamId}`} className="text-sm text-muted-foreground">
+                A first message with one of these words or phrases gets no first reply. One to a line, or with commas between.
+              </Label>
+              <textarea
+                id={`wa-fr-skip-${teamId}`}
+                value={frSkip}
+                onChange={(e) => setFrSkip(e.target.value)}
+                disabled={!data.canEdit}
+                rows={4}
+                placeholder={"job vacancy\nsupplier"}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                {skipWords.length
+                  ? `${skipWords.length} ${skipWords.length === 1 ? "word or phrase" : "words or phrases"}. Whole words only, capitals and punctuation aside: "job" stops "Any job?" but not "jobs".`
+                  : "None yet: the first reply goes to everyone who writes for the first time."}
+              </p>
+            </CardContent>
+          </Card>
         </motion.div>
         {/* Saved messages, in groups */}
         <motion.div variants={listItemVariants} initial="hidden" animate="visible">

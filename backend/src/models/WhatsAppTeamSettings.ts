@@ -22,7 +22,8 @@ export interface IWhatsAppTeamSettings {
   startedAt: Date | null;
   dailyLimit: number;
   steps: IFollowupStep[];
-  firstReply: { enabled: boolean; startedAt: Date | null; items: IFirstReplyItem[] };
+  /** `skipWords` (2026-11-27): a first message with one of these words or phrases gets no first reply. */
+  firstReply: { enabled: boolean; startedAt: Date | null; items: IFirstReplyItem[]; skipWords?: string[] };
   /**
    * The team's saved messages, in groups (2026-11-08: "message can save also here … group as like"): anyone in the team
    * sends one — or a whole group, in order — from a chat at any time. Each a title, words and/or a file.
@@ -69,6 +70,7 @@ const settingsSchema = new Schema<IWhatsAppTeamSettings>(
         }, { _id: false })],
         default: [],
       },
+      skipWords: { type: [String], default: [] },
     },
     savedGroups: {
       type: [new Schema<ISavedGroup>({
